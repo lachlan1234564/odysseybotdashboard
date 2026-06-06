@@ -1,0 +1,962 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rapid Bot Control</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" type="module"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <div class="brand-mark">R</div>
+          <div><strong>Rapid Bot</strong><span id="guild-name">Connecting...</span></div>
+        </div>
+        <div class="nav-label">Workspace</div>
+        <nav id="nav">
+          <button class="nav-item active" data-page="overview"><span>01</span>Overview</button>
+          <button class="nav-item" data-page="custom"><span>02</span>Command Studio</button>
+          <button class="nav-item" data-page="tickets"><span>03</span>Ticket Studio</button>
+          <button class="nav-item" data-page="announcements"><span>04</span>Announcements</button>
+          <button class="nav-item" data-page="moderation"><span>05</span>Moderation</button>
+        </nav>
+        <div class="nav-label">Configuration</div>
+        <nav>
+          <button class="nav-item" data-page="settings"><span>06</span>Server Settings</button>
+          <button class="nav-item" data-page="branding"><span>07</span>Appearance</button>
+          <button class="nav-item" data-page="welcome"><span>08</span>Welcome Messages</button>
+          <button class="nav-item" data-page="security"><span>09</span>Security</button>
+        </nav>
+        <div class="nav-label">Help</div>
+        <nav>
+          <button class="nav-item" data-page="docs"><span>10</span>Documentation</button>
+        </nav>
+        <div class="sidebar-footer">
+          <div class="connection-dot"></div>
+          <span>Local session</span>
+          <button id="logout" class="text-button">Log out</button>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div><p class="eyebrow">Bot administration</p><h1 id="page-title">Overview</h1><p id="page-subtitle" class="page-subtitle">A quick read on your server automation.</p></div>
+          <div class="topbar-actions"><span id="status" class="status"><i></i>Connected</span></div>
+        </header>
+
+        <section class="page active" id="page-overview">
+          <div id="overview-cards" class="stat-grid"></div>
+          <div class="overview-grid">
+            <article class="surface feature-card">
+              <div class="feature-copy">
+                <span class="badge">Command architecture</span>
+                <h2>Build rich actions without registering a new slash command every time.</h2>
+                <p>Commands execute through <code>/custom name</code> with optional text, reason, and target inputs. True top-level commands still require Discord registration and a deploy sync.</p>
+                <button class="secondary-button jump-button" data-jump="custom">Open Command Studio</button>
+              </div>
+              <div class="command-demo"><span>/custom</span><strong>server-info</strong><small>text: optional input</small></div>
+            </article>
+            <article class="surface checklist-card">
+              <div class="section-title"><div><p class="eyebrow">Launch checklist</p><h2>Production-shaped MVP</h2></div></div>
+              <div class="checklist">
+                <div><i>1</i><span><strong>Configure roles and channels</strong><small>Server Settings controls access and logging.</small></span></div>
+                <div><i>2</i><span><strong>Create ticket types</strong><small>Define permissions, welcome messages, and limits.</small></span></div>
+                <div><i>3</i><span><strong>Build a ticket panel</strong><small>Combine ticket types into dropdowns or buttons.</small></span></div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section class="page" id="page-custom">
+          <div class="page-intro">
+            <div><span class="badge">Stable slash entrypoint</span><h2>Command Studio</h2><p>Design a command action, scope who can run it, and see the Discord response before saving.</p></div>
+            <div class="topbar-actions"><button class="secondary-button jump-anchor" data-jump-docs="#docs-custom-commands">Custom Commands docs</button><button class="secondary-button new-editor" data-editor="custom">New command</button></div>
+          </div>
+          <div class="builder-layout">
+            <form id="custom-form" class="builder-stack">
+              <input type="hidden" name="id">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Command identity</h3><p>What people discover in autocomplete.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span>Enabled</label></div>
+                <div class="form-grid">
+                  <label class="field">Command name<input name="name" required maxlength="32" autocomplete="off" placeholder="server-info"><small>Lowercase letters, numbers, hyphens, and underscores only. Spaces are converted to hyphens.</small><span class="field-error" data-error-for="name"></span></label>
+                  <label class="field">Description<input name="description" maxlength="100" placeholder="Shows useful server information"><small>Shown in the dashboard and future command sync metadata.</small></label>
+                </div>
+              </section>
+
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">02</span><h3>Action</h3><p>Choose what happens when the command runs.</p></div></div>
+                <label class="field">Action type <small>Choose what this command does</small><select name="actionType">
+                  <optgroup label="Messages">
+                    <option value="reply_message">Reply with a plain message</option>
+                    <option value="reply_embed">Reply with an embed</option>
+                    <option value="send_channel">Send a message/embed to a channel</option>
+                    <option value="send_ephemeral">Send an ephemeral reply</option>
+                    <option value="send_dm">Send a DM to a user</option>
+                  </optgroup>
+                  <optgroup label="Roles">
+                    <option value="add_role">Give the user a role</option>
+                    <option value="remove_role">Remove a role from the user</option>
+                    <option value="add_roles">Give multiple roles to the user</option>
+                    <option value="remove_roles">Remove multiple roles from the user</option>
+                    <option value="toggle_role">Toggle a role on/off for the user</option>
+                  </optgroup>
+                  <optgroup label="Tickets">
+                    <option value="post_ticket_panel">Post a saved ticket panel</option>
+                    <option value="create_ticket">Create a ticket channel</option>
+                    <option value="request_close_ticket">Request to close the ticket</option>
+                  </optgroup>
+                  <optgroup label="Channel management">
+                    <option value="lock_channel">Lock the current channel</option>
+                    <option value="unlock_channel">Unlock the current channel</option>
+                    <option value="rename_channel">Rename the current channel</option>
+                    <option value="move_channel">Move channel to a category</option>
+                    <option value="add_user_to_channel">Add a user to the channel</option>
+                    <option value="remove_user_from_channel">Remove a user from the channel</option>
+                  </optgroup>
+                  <optgroup label="Moderation">
+                    <option value="timeout_user">Timeout a user</option>
+                    <option value="remove_timeout">Remove a user's timeout</option>
+                    <option value="kick_user">Kick a user</option>
+                    <option value="ban_user">Ban a user</option>
+                    <option value="unban_user">Unban a user</option>
+                    <option value="purge_messages">Purge recent messages</option>
+                  </optgroup>
+                  <optgroup label="Requirements &amp; logging">
+                    <option value="require_role">Require a role before running</option>
+                    <option value="require_permission">Require a permission before running</option>
+                    <option value="log_to_mod">Log action to moderation log</option>
+                  </optgroup>
+                  <optgroup label="Advanced">
+                    <option value="send_announcement">Send a saved announcement</option>
+                    <option value="action_sequence">Run multiple actions in sequence</option>
+                  </optgroup>
+                </select></label>
+
+                <div class="action-block" data-action-group="message">
+                  <label class="field">Message<textarea name="content" rows="5" maxlength="2000" placeholder="Hello {user}, welcome to {server}."></textarea><small>Variables: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{channel}</code> <code>{text}</code> <code>{reason}</code> <code>{target}</code></small><span class="field-error" data-error-for="actionConfig.content"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="channel">
+                  <label class="field">Destination channel<select name="targetChannelId" data-channel-select="text"></select><span class="field-error" data-error-for="actionConfig.targetChannelId"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="role">
+                  <label class="field">Role<select name="roleId" data-role-select></select><span class="field-error" data-error-for="actionConfig.roleId"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="roles">
+                  <label class="field">Roles<select name="roleIds" data-role-select multiple size="5"></select><span class="field-error" data-error-for="actionConfig.roleIds"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="panel">
+                  <label class="field">Ticket panel / type<select name="ticketPanelId" data-ticket-panel-select></select><span class="field-error" data-error-for="actionConfig.ticketPanelId"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="announcement">
+                  <div class="form-grid"><label class="field">Announcement template<select name="announcementTemplateId" data-announcement-select></select><span class="field-error" data-error-for="actionConfig.announcementTemplateId"></span></label><label class="field">Channel override<select name="announcementChannelId" data-channel-select="text"></select></label></div>
+                </div>
+                <div class="action-block hidden" data-action-group="target-user">
+                  <label class="field">Target user ID<input name="targetUserId" maxlength="32" placeholder="User ID for DMs, timeouts, kicks, bans, etc."><span class="field-error" data-error-for="actionConfig.targetUserId"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="duration">
+                  <label class="field">Duration (minutes)<input name="durationMinutes" type="number" min="1" max="40320" placeholder="60"><span class="field-error" data-error-for="actionConfig.durationMinutes"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="delete-days">
+                  <label class="field">Delete message days<input name="deleteMessageDays" type="number" min="0" max="7" value="0"><span class="field-error" data-error-for="actionConfig.deleteMessageDays"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="amount">
+                  <label class="field">Amount (messages to purge)<input name="amount" type="number" min="1" max="100" value="10"><span class="field-error" data-error-for="actionConfig.amount"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="new-name">
+                  <label class="field">New channel name<input name="newName" maxlength="100" placeholder="new-channel-name"><small>Supports variables like {user}, {username}, {server}</small><span class="field-error" data-error-for="actionConfig.newName"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="new-category">
+                  <label class="field">Target category<select name="newCategoryId" data-channel-select="category"></select><span class="field-error" data-error-for="actionConfig.newCategoryId"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="permission">
+                  <label class="field">Required permission<input name="content" maxlength="100" placeholder="ManageMessages"><small>Enter the Discord permission flag name, e.g. ManageMessages, KickMembers, BanMembers</small><span class="field-error" data-error-for="actionConfig.content"></span></label>
+                </div>
+                <div class="action-block hidden" data-action-group="embed">
+                  <div class="embed-builder">
+                    <div class="form-grid">
+                      <label class="field">Content above embed<textarea name="embedContent" rows="2" maxlength="2000"></textarea></label>
+                      <label class="field">Embed color<div class="color-control"><input name="embedColor" type="color" value="#5865f2"><input name="embedColorText" value="#5865F2" maxlength="7"></div></label>
+                      <label class="field">Title<input name="embedTitle" maxlength="256"></label>
+                      <label class="field">Title URL<input name="embedTitleUrl" type="url" placeholder="https://..."></label>
+                      <label class="field span-2">Description<textarea name="embedDescription" rows="6" maxlength="4096" placeholder="Use placeholders here too."></textarea></label>
+                    </div>
+                    <details>
+                      <summary>Author, media, footer, and timestamp <span>Advanced</span></summary>
+                      <div class="details-body form-grid">
+                        <label class="field">Author name<input name="embedAuthorName" maxlength="256"></label>
+                        <label class="field">Author URL<input name="embedAuthorUrl" type="url"></label>
+                        <label class="field">Author icon<div class="media-control"><input name="embedAuthorIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedAuthorIconUrl">Upload</button></div></label>
+                        <label class="field">Large image<div class="media-control"><input name="embedImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedImageUrl">Upload</button></div></label>
+                        <label class="field">Thumbnail<div class="media-control"><input name="embedThumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedThumbnailUrl">Upload</button></div></label>
+                        <label class="field">Footer text<input name="embedFooterText" maxlength="2048"></label>
+                        <label class="field">Footer icon<div class="media-control"><input name="embedFooterIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedFooterIconUrl">Upload</button></div></label>
+                        <label class="check-card"><input name="embedTimestamp" type="checkbox"><span><strong>Add timestamp</strong><small>Uses the time the command runs.</small></span></label>
+                      </div>
+                    </details>
+                    <div class="field-builder-header"><div><strong>Embed fields</strong><small>Up to 25 name/value rows.</small></div><button type="button" class="secondary-button compact" id="add-embed-field">Add field</button></div>
+                    <div id="embed-fields" class="field-builder"></div>
+                  </div>
+                </div>
+                <div class="action-block hidden" data-action-group="sequence">
+                  <div class="field-builder-header"><div><strong>Action sequence</strong><small>Run multiple actions in order. Up to 10 items.</small></div><button type="button" class="secondary-button compact" id="add-sequence-item">Add action</button></div>
+                  <div id="sequence-fields" class="field-builder sequence-builder"></div>
+                </div>
+              </section>
+
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">03</span><h3>Access and delivery</h3><p>Control where, when, and for whom this command works.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Who can use it?<select name="accessMode"><option value="everyone">Everyone</option><option value="admins">Bot admins only</option><option value="staff">Configured staff roles</option><option value="roles">Selected roles</option></select></label>
+                  <label class="field">Reply visibility<select name="replyVisibility"><option value="public">Public</option><option value="private">Private / ephemeral</option></select></label>
+                  <label class="field">Allowed roles<select name="allowedRoleIds" data-role-select multiple size="5"></select><small>Leave empty unless you want an allowlist.</small></label>
+                  <label class="field">Blocked roles<select name="blockedRoleIds" data-role-select multiple size="5"></select><small>Same ID in both lists will be blocked.</small></label>
+                  <label class="field">Allowed channels<select name="allowedChannelIds" data-channel-select="text" multiple size="5"></select><small>Leave empty to allow every channel.</small></label>
+                  <label class="field">Blocked channels<select name="blockedChannelIds" data-channel-select="text" multiple size="5"></select><small>Same ID in both lists will be blocked.</small></label>
+                  <label class="field">Cooldown scope<select name="cooldownType"><option value="none">No cooldown</option><option value="user">Per user</option><option value="server">Whole server</option></select></label>
+                  <label class="field">Cooldown seconds<input name="cooldownSeconds" type="number" min="0" max="86400" value="0"></label>
+                </div>
+                <label class="check-card muted-option"><input name="deleteUsage" type="checkbox"><span><strong>Clean command usage later</strong><small>Stored for future prefix/message command support. Slash commands cannot be deleted like messages.</small></span></label>
+              </section>
+
+              <div class="sticky-actions"><button type="submit">Save command</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
+            </form>
+
+            <aside class="preview-column">
+              <section class="surface preview-surface">
+                <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Discord response</h3></div><span class="live-pill">Live</span></div>
+                <div id="custom-preview" class="discord-stage"></div>
+                <div class="test-row"><select id="custom-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="custom-send-test">Send test</button></div>
+                <p class="microcopy">Test sends the current message/embed draft. Role and workflow actions must be tested through Discord.</p>
+              </section>
+              <section class="surface saved-surface"><div class="section-title"><div><p class="eyebrow">Library</p><h3>Saved commands</h3></div><span id="custom-count" class="count-pill">0</span></div><div id="custom-list" class="item-list"></div></section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="page-tickets">
+          <div class="page-intro">
+            <div><span class="badge">Ticket workflow</span><h2>Ticket Studio</h2><p>Define ticket types first, then compose them into reusable panels or multi-panel menus.</p></div>
+            <div class="topbar-actions"><button class="secondary-button jump-anchor" data-jump-docs="#docs-tickets">Tickets docs</button></div>
+          </div>
+          <div class="subpage-title">Ticket Studio</div>
+          <div class="segmented" id="ticket-tabs"><button class="active" data-ticket-view="panels">Panels</button><button data-ticket-view="types">Ticket types</button><button data-ticket-view="history">History</button></div>
+
+          <div class="ticket-view active" id="ticket-view-panels">
+            <div class="builder-layout">
+              <form id="panel-form" class="builder-stack">
+                <input type="hidden" name="id">
+                <section class="surface form-section">
+                  <div class="section-title"><div><span class="step">01</span><h3>Panel identity</h3><p>One server can have many distinct ticket entry points.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span>Active</label></div>
+                  <div class="form-grid">
+                    <label class="field">Internal name<input name="name" required maxlength="100" placeholder="Main support"></label>
+                    <label class="field">Target channel<select name="targetChannelId" data-channel-select="text"></select></label>
+                    <label class="field">Panel kind<select name="panelKind"><option value="standard">Ticket type panel</option><option value="multi">Multi-panel menu</option></select></label>
+                    <label class="field">Presentation<select name="displayMode"><option value="dropdown">Dropdown menu</option><option value="buttons">Buttons</option></select></label>
+                    <label class="field span-2" data-panel-types>Ticket types<select name="ticketTypeIds" data-ticket-type-select multiple size="7"></select><small>Choose the options displayed on this panel.</small><span class="field-error" data-error-for="ticketTypeIds"></span></label>
+                    <label class="field span-2 hidden" data-panel-children>Child panels<select name="childPanelIds" data-child-panel-select multiple size="7"></select><small>A multi-panel shows a menu of other standard panels.</small><span class="field-error" data-error-for="childPanelIds"></span></label>
+                  </div>
+                </section>
+                <section class="surface form-section">
+                  <div class="section-title"><div><span class="step">02</span><h3>Message design</h3><p>The message members see before opening a ticket.</p></div></div>
+                  <div class="form-grid">
+                    <label class="field">Title<input name="title" required maxlength="256" value="Support Tickets"></label>
+                    <label class="field">Color<div class="color-control"><input name="color" type="color" value="#5865f2"><input name="colorText" value="#5865F2" maxlength="7"></div></label>
+                    <label class="field span-2">Description<textarea name="description" required rows="5">Choose a ticket type below to contact the team.</textarea></label>
+                    <label class="field">Dropdown placeholder<input name="dropdownPlaceholder" maxlength="150" value="Choose a ticket type"></label>
+                    <label class="field">Footer text<input name="footerText" maxlength="200"></label>
+                    <label class="field">Banner image<div class="media-control"><input name="imageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="imageUrl">Upload</button></div></label>
+                    <label class="field">Thumbnail<div class="media-control"><input name="thumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="thumbnailUrl">Upload</button></div></label>
+                    <label class="field">Footer icon<div class="media-control"><input name="footerIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="footerIconUrl">Upload</button></div></label>
+                  </div>
+                </section>
+                <div class="sticky-actions"><button type="submit">Save ticket panel</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
+              </form>
+              <aside class="preview-column">
+                <section class="surface preview-surface">
+                  <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Ticket entry message</h3></div><span class="live-pill">Live</span></div>
+                  <div id="panel-preview" class="discord-stage"></div>
+                  <div class="test-row"><select id="panel-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="panel-send-test">Send saved panel</button></div>
+                </section>
+                <section class="surface saved-surface"><div class="section-title"><div><p class="eyebrow">Library</p><h3>Ticket panels</h3></div><span id="panel-count" class="count-pill">0</span></div><div id="panel-list" class="item-list"></div></section>
+              </aside>
+            </div>
+          </div>
+
+          <div class="ticket-view" id="ticket-view-types">
+            <div class="builder-layout">
+              <form id="ticket-form" class="builder-stack">
+                <input type="hidden" name="id">
+                <section class="surface form-section">
+                  <div class="section-title"><div><span class="step">01</span><h3>Type and routing</h3><p>Define where the ticket goes and who can support it.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span>Active</label></div>
+                  <div class="form-grid">
+                    <label class="field">Label<input name="label" required maxlength="100" placeholder="Billing support"></label>
+                    <label class="field">Emoji<input name="emoji" maxlength="64" placeholder="💳"></label>
+                    <label class="field span-2">Menu description<input name="description" maxlength="100"></label>
+                    <label class="field">Category<select name="categoryId" data-channel-select="category"></select></label>
+                    <label class="field">Transcript channel override<select name="transcriptChannelId" data-channel-select="text"></select></label>
+                    <label class="field">Staff roles<select name="staffRoleIds" data-role-select multiple size="5"></select></label>
+                    <label class="field">Ping roles on open<select name="pingRoleIds" data-role-select multiple size="5"></select></label>
+                  </div>
+                </section>
+                <section class="surface form-section">
+                  <div class="section-title"><div><span class="step">02</span><h3>Welcome message</h3><p>The first embed inside the private ticket channel.</p></div></div>
+                  <div class="form-grid">
+                    <label class="field span-2">Welcome message<textarea name="welcomeMessage" required rows="5">Thanks for contacting us. A staff member will be with you shortly.</textarea></label>
+                    <label class="field">Embed color<input name="color" type="color" value="#5865f2"></label>
+                    <label class="field">Footer text<input name="footerText" maxlength="200"></label>
+                    <label class="field">Large image<div class="media-control"><input name="imageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="imageUrl">Upload</button></div></label>
+                    <label class="field">Thumbnail<div class="media-control"><input name="thumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="thumbnailUrl">Upload</button></div></label>
+                    <label class="field">Footer icon<div class="media-control"><input name="footerIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="footerIconUrl">Upload</button></div></label>
+                  </div>
+                </section>
+                <section class="surface form-section">
+                  <div class="section-title"><div><span class="step">03</span><h3>Rules and lifecycle</h3><p>Limits, permissions, buttons, and automatic cleanup.</p></div></div>
+                  <div class="form-grid">
+                    <label class="field">Allowed roles<select name="allowedRoleIds" data-role-select multiple size="5"></select><small>Empty means everyone except blocked roles.</small></label>
+                    <label class="field">Blocked roles<select name="blockedRoleIds" data-role-select multiple size="5"></select></label>
+                    <label class="field">Max open per user<input name="maxOpenTickets" type="number" min="1" max="20" value="1"></label>
+                    <label class="field">Auto-close after inactivity<input name="autoCloseHours" type="number" min="0" max="8760" value="0"><small>Hours. Set 0 to disable.</small></label>
+                    <label class="field span-2">Channel naming format<input name="namingFormat" required value="ticket-{username}"><small>Available: <code>{username}</code> <code>{type}</code> <code>{userId}</code></small></label>
+                  </div>
+                  <div class="option-grid">
+                    <label class="check-card"><input name="claimButtonEnabled" type="checkbox" checked><span><strong>Claim button</strong><small>Staff can take ownership.</small></span></label>
+                    <label class="check-card"><input name="closeButtonEnabled" type="checkbox" checked><span><strong>Close button</strong><small>Creator and staff can close.</small></span></label>
+                    <label class="check-card"><input name="closeReasonRequired" type="checkbox"><span><strong>Require close reason</strong><small>Shows a modal before closing.</small></span></label>
+                    <label class="check-card"><input name="requestCloseEnabled" type="checkbox"><span><strong>Close requests</strong><small>Users request closure; staff approve/deny.</small></span></label>
+                    <label class="field span-2">Close request delay (seconds)<input name="closeRequestDelaySeconds" type="number" min="0" max="86400" value="0"><small>Delay before auto-closing after approval. 0 deletes immediately.</small></label>
+                  </div>
+                </section>
+                <input name="sortOrder" type="hidden" value="0">
+                <div class="sticky-actions"><button type="submit">Save ticket type</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
+              </form>
+              <aside class="preview-column">
+                <section class="surface preview-surface"><div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Ticket welcome</h3></div><span class="live-pill">Live</span></div><div id="ticket-preview" class="discord-stage"></div></section>
+                <section class="surface saved-surface"><div class="section-title"><div><p class="eyebrow">Library</p><h3>Ticket types</h3></div><span id="ticket-count" class="count-pill">0</span></div><div id="ticket-list" class="item-list"></div></section>
+              </aside>
+            </div>
+          </div>
+
+          <div class="ticket-view" id="ticket-view-history">
+            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Activity</p><h3>Recent tickets</h3></div></div><div id="ticket-history" class="table-wrap"></div></article>
+          </div>
+        </section>
+
+        <section class="page" id="page-announcements">
+          <div class="page-intro"><div><span class="badge">Reusable broadcasts</span><h2>Announcement templates</h2><p>Prepare a consistent embed, preview it, then confirm delivery from Discord.</p></div></div>
+          <div class="builder-layout">
+            <form id="announcement-form" class="builder-stack">
+              <input type="hidden" name="id">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Template</h3><p>Saved content for <code>/announce</code>.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Template name<input name="name" required maxlength="100"></label>
+                  <label class="field">Target channel<select name="targetChannelId" data-channel-select="text"></select></label>
+                  <label class="field">Title<input name="title" required maxlength="256"></label>
+                  <label class="field">Color<input name="color" type="color" value="#5865f2"></label>
+                  <label class="field span-2">Body<textarea name="body" required maxlength="4000" rows="7"></textarea></label>
+                  <label class="field">Image<div class="media-control"><input name="imageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="imageUrl">Upload</button></div></label>
+                  <label class="field">Thumbnail<div class="media-control"><input name="thumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="thumbnailUrl">Upload</button></div></label>
+                  <label class="field span-2">Footer<input name="footer" maxlength="200"></label>
+                </div>
+              </section>
+              <div class="sticky-actions"><button type="submit">Save announcement</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
+            </form>
+            <aside class="preview-column">
+              <section class="surface preview-surface"><div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Announcement</h3></div><span class="live-pill">Live</span></div><div id="announcement-preview" class="discord-stage"></div></section>
+              <section class="surface saved-surface"><div class="section-title"><div><p class="eyebrow">Library</p><h3>Templates</h3></div><span id="announcement-count" class="count-pill">0</span></div><div id="announcement-list" class="item-list"></div></section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="page-moderation">
+          <div class="page-intro"><div><span class="badge">Audit trail</span><h2>Moderation</h2><p>Warnings and actions recorded by the bot, kept compact and searchable by Discord ID.</p></div></div>
+          <div class="data-stack">
+            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Warnings</p><h3>Recent warnings</h3></div></div><div id="warnings-table" class="table-wrap"></div></article>
+            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Actions</p><h3>Moderation history</h3></div></div><div id="actions-table" class="table-wrap"></div></article>
+          </div>
+        </section>
+
+        <section class="page" id="page-settings">
+          <div class="page-intro">
+            <div><span class="badge">Discord resources</span><h2>Server settings</h2><p>Global channel and role defaults shared by commands and ticket workflows.</p></div>
+            <div class="topbar-actions"><button class="secondary-button jump-anchor" data-jump-docs="#docs-railway-hosting">Railway Hosting docs</button></div>
+          </div>
+          <form id="settings-form" class="settings-layout">
+            <section class="surface form-section"><div class="section-title"><div><span class="step">01</span><h3>Logging and routing</h3></div></div><div class="form-grid">
+              <label class="field">Mod log channel<select name="modLogChannelId" data-channel-select="text"></select></label>
+              <label class="field">Announcement channel<select name="announcementChannelId" data-channel-select="text"></select></label>
+              <label class="field">Default ticket category<select name="ticketCategoryId" data-channel-select="category"></select></label>
+              <label class="field">Default ticket log channel<select name="transcriptChannelId" data-channel-select="text"></select></label>
+            </div></section>
+            <section class="surface form-section"><div class="section-title"><div><span class="step">02</span><h3>Roles and access</h3></div></div><div class="form-grid">
+              <label class="field">Muted role<select name="mutedRoleId" data-role-select></select></label>
+              <label class="field">Staff roles<select name="staffRoleIds" data-role-select multiple size="7"></select></label>
+              <label class="field span-2">Bot admin roles<select name="adminRoleIds" data-role-select multiple size="7"></select></label>
+            </div></section>
+            <div class="sticky-actions"><button type="submit">Save server settings</button></div>
+          </form>
+        </section>
+
+        <section class="page" id="page-branding">
+          <div class="page-intro">
+            <div><span class="badge">Visual identity</span><h2>Appearance</h2><p>Set default branding, colors, images, and fallback embed settings.</p></div>
+            <div class="topbar-actions"><button class="secondary-button jump-anchor" data-jump-docs="#docs-appearance">Appearance docs</button></div>
+          </div>
+          <form id="branding-form" class="settings-layout">
+            <section class="surface form-section">
+              <div class="section-title"><div><span class="step">01</span><h3>Identity</h3></div></div>
+              <div class="form-grid">
+                <label class="field">Server / bot name<input name="serverName" maxlength="100" value="Rapid Bot"></label>
+                <label class="field">Footer text<input name="footerText" maxlength="200"></label>
+                <label class="field">Embed icon<div class="media-control"><input name="embedIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedIconUrl">Upload</button></div></label>
+              </div>
+            </section>
+            <section class="surface form-section">
+              <div class="section-title"><div><span class="step">02</span><h3>Default media and colors</h3></div></div>
+              <div class="form-grid">
+                <label class="field">Ticket panel title<input name="ticketPanelTitle" maxlength="256" value="Support Tickets"></label>
+                <label class="field">Ticket panel description<textarea name="ticketPanelDescription" rows="3">Choose a ticket type below to contact the team.</textarea></label>
+                <label class="field">Ticket panel color<div class="color-control"><input name="ticketPanelColor" type="color" value="#5865f2"><input name="ticketPanelColorText" value="#5865F2" maxlength="7"></div></label>
+                <label class="field">Ticket panel banner<div class="media-control"><input name="ticketPanelImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="ticketPanelImageUrl">Upload</button></div></label>
+                <label class="field">Announcement default color<div class="color-control"><input name="announcementDefaultColor" type="color" value="#5865f2"><input name="announcementDefaultColorText" value="#5865F2" maxlength="7"></div></label>
+                <label class="field">Announcement default image<div class="media-control"><input name="announcementDefaultImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="announcementDefaultImageUrl">Upload</button></div></label>
+                <label class="field">Announcement default thumbnail<div class="media-control"><input name="announcementDefaultThumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="announcementDefaultThumbnailUrl">Upload</button></div></label>
+              </div>
+            </section>
+            <div class="sticky-actions"><button type="submit">Save appearance</button></div>
+          </form>
+        </section>
+
+        <section class="page" id="page-welcome">
+          <div class="page-intro">
+            <div><span class="badge">New member experience</span><h2>Welcome Messages</h2><p>Greet new members with a custom message, embed, DM, and optional auto-role.</p></div>
+            <div class="topbar-actions"><button class="secondary-button jump-anchor" data-jump-docs="#docs-welcome">Welcome docs</button></div>
+          </div>
+          <div class="builder-layout">
+            <form id="welcome-form" class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Enable welcome</h3></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="form-grid">
+                  <label class="field">Welcome channel<select name="channelId" data-channel-select="text"></select><small>Where the public welcome message is posted.</small></label>
+                  <label class="field">Auto-roles<select name="autoRoleIds" data-role-select multiple size="5"></select><small>Roles automatically added when a member joins.</small></label>
+                </div>
+                <div class="option-grid">
+                  <label class="check-card"><input name="dmEnabled" type="checkbox"><span><strong>Send DM welcome</strong><small>Send a direct message to the new member.</small></span></label>
+                  <label class="check-card"><input name="dmEmbedEnabled" type="checkbox"><span><strong>DM as embed</strong><small>Wrap the DM in an embed using the same embed settings.</small></span></label>
+                </div>
+                <label class="field">DM content<textarea name="dmContent" rows="3" maxlength="2000" placeholder="Welcome to {server}, {user}!"></textarea><small>Only used if DM welcome is enabled.</small></label>
+              </section>
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">02</span><h3>Channel message</h3><p>Public welcome in the chosen channel.</p></div></div>
+                <label class="field">Message text<textarea name="content" rows="3" maxlength="2000" placeholder="Welcome {user} to {server}! You are member #{memberCount}."></textarea><small>Variables: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{memberCount}</code> <code>{createdAt}</code></small></label>
+              </section>
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">03</span><h3>Embed design</h3><p>Optional embed shown alongside the welcome text.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Embed title<input name="embedTitle" maxlength="256" placeholder="Welcome to {server}"></label>
+                  <label class="field">Embed color<div class="color-control"><input name="embedColor" type="color" value="#5865f2"><input name="embedColorText" value="#5865F2" maxlength="7"></div></label>
+                  <label class="field span-2">Embed description<textarea name="embedDescription" rows="5" maxlength="4096" placeholder="We're glad you're here, {user}!"></textarea></label>
+                  <label class="field">Large image<div class="media-control"><input name="embedImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedImageUrl">Upload</button></div></label>
+                  <label class="field">Thumbnail<div class="media-control"><input name="embedThumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedThumbnailUrl">Upload</button></div></label>
+                  <label class="field span-2">Footer text<input name="embedFooterText" maxlength="2048" placeholder="Member #{memberCount}"></label>
+                </div>
+              </section>
+              <div class="sticky-actions"><button type="submit">Save welcome settings</button></div>
+            </form>
+            <aside class="preview-column">
+              <section class="surface preview-surface">
+                <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Welcome message</h3></div><span class="live-pill">Live</span></div>
+                <div id="welcome-preview" class="discord-stage"></div>
+                <div class="test-row"><select id="welcome-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="welcome-test">Send test</button></div>
+                <p class="microcopy">Test sends a preview to the selected channel. Auto-roles are not applied in test mode.</p>
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <section class="page" id="page-security">
+          <div class="page-intro">
+            <div><span class="badge">Server defense</span><h2>Security</h2><p>Anti-raid and anti-nuke protection with configurable thresholds and safe defaults.</p></div>
+            <div class="topbar-actions"><button class="secondary-button jump-anchor" data-jump-docs="#docs-anti-raid">Anti-raid docs</button><button class="secondary-button jump-anchor" data-jump-docs="#docs-anti-nuke">Anti-nuke docs</button></div>
+          </div>
+          <div class="subpage-title">Security Center</div>
+          <div class="segmented" id="security-tabs"><button class="active" data-security-view="anti-raid">Anti-raid</button><button data-security-view="anti-nuke">Anti-nuke</button></div>
+          <div class="security-layout">
+            <div class="security-view active" id="security-view-anti-raid">
+            <form id="anti-raid-form" class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Anti-raid</h3><p>Detect and respond to suspicious join waves.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="form-grid">
+                  <label class="field">Join threshold<input name="joinThreshold" type="number" min="1" max="1000" value="10"><small>Number of joins within the time window to trigger.</small></label>
+                  <label class="field">Time window (seconds)<input name="timeWindowSeconds" type="number" min="1" max="3600" value="60"></label>
+                  <label class="field">Action<select name="action"><option value="alert">Alert staff only</option><option value="lockdown">Lockdown text channels</option><option value="timeout_new">Timeout suspicious new accounts</option><option value="kick_suspicious">Kick suspicious joins</option><option value="disable_invites">Disable server invites</option></select></label>
+                  <label class="field">Lockdown duration (seconds)<input name="lockdownDurationSeconds" type="number" min="1" max="3600" value="300"><small>How long to keep channels locked if lockdown is chosen.</small></label>
+                  <label class="field">Minimum account age (days)<input name="minAccountAgeDays" type="number" min="0" max="365" value="0"><small>0 disables age checks.</small></label>
+                  <label class="field">Alert channel<select name="alertChannelId" data-channel-select="text"></select></label>
+                  <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select></label>
+                </div>
+                <div class="option-grid">
+                  <label class="check-card"><input name="blockNoAvatar" type="checkbox"><span><strong>Block no-avatar accounts</strong><small>Flag joins without a profile picture.</small></span></label>
+                </div>
+                <label class="field">Bypass roles<select name="bypassRoleIds" data-role-select multiple size="5"></select></label>
+                <label class="field">Bypass user IDs (space-separated)<textarea name="bypassUserIds" rows="2" placeholder="123456789012345678 987654321098765432"></textarea></label>
+              </section>
+              <div class="sticky-actions"><button type="submit">Save anti-raid settings</button></div>
+            </form>
+            </div>
+            <div class="security-view" id="security-view-anti-nuke">
+            <form id="anti-nuke-form" class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">02</span><h3>Anti-nuke</h3><p>Monitor dangerous administrative actions and respond to abuse.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="form-grid">
+                  <label class="field">Channel delete threshold<input name="channelDeleteThreshold" type="number" min="1" max="100" value="5"></label>
+                  <label class="field">Channel create threshold<input name="channelCreateThreshold" type="number" min="1" max="100" value="5"></label>
+                  <label class="field">Role delete threshold<input name="roleDeleteThreshold" type="number" min="1" max="100" value="5"></label>
+                  <label class="field">Role create threshold<input name="roleCreateThreshold" type="number" min="1" max="100" value="5"></label>
+                  <label class="field">Ban threshold<input name="banThreshold" type="number" min="1" max="100" value="5"></label>
+                  <label class="field">Kick threshold<input name="kickThreshold" type="number" min="1" max="100" value="5"></label>
+                  <label class="field">Webhook threshold<input name="webhookThreshold" type="number" min="1" max="100" value="3"></label>
+                  <label class="field">Permission change threshold<input name="permissionThreshold" type="number" min="1" max="100" value="3"></label>
+                  <label class="field">Bot add threshold<input name="botAddThreshold" type="number" min="1" max="100" value="2"></label>
+                  <label class="field">Admin role change threshold<input name="adminRoleThreshold" type="number" min="1" max="100" value="2"></label>
+                  <label class="field">Time window (seconds)<input name="timeWindowSeconds" type="number" min="1" max="3600" value="10"></label>
+                  <label class="field">Action<select name="action"><option value="alert">Alert staff only</option><option value="remove_roles">Remove dangerous roles from executor</option><option value="timeout_executor">Timeout executor</option><option value="kick_executor">Kick executor</option><option value="ban_executor">Ban executor</option></select></label>
+                  <label class="field">Alert channel<select name="alertChannelId" data-channel-select="text"></select></label>
+                  <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select></label>
+                </div>
+                <p class="microcopy"><strong>Security note:</strong> Anti-nuke defaults to <strong>alert-only</strong>. Stronger actions require explicit selection. The server owner and trusted users/roles are never punished. The bot always checks its own role hierarchy before acting.</p>
+              </section>
+              <div class="sticky-actions"><button type="submit">Save anti-nuke settings</button></div>
+            </form>
+            </div>
+          </div>
+        </section>
+
+        <section class="page" id="page-docs">
+          <div class="page-intro">
+            <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run Rapid Bot, from first setup to troubleshooting.</p></div>
+            <div class="topbar-actions"><input type="search" id="docs-search" placeholder="Search docs..."></div>
+          </div>
+          <div class="docs-layout">
+            <aside class="docs-toc surface">
+              <div class="section-title"><div><p class="eyebrow">Contents</p><h3>On this page</h3></div></div>
+              <nav class="docs-toc-nav">
+                <a href="#docs-getting-started">Getting Started</a>
+                <a href="#docs-command-builder">Command Builder</a>
+                <a href="#docs-action-templates">Action Templates</a>
+                <a href="#docs-variables">Variables / Placeholders</a>
+                <a href="#docs-plain-replies">Plain Message Replies</a>
+                <a href="#docs-embed-replies">Embed Replies</a>
+                <a href="#docs-channel-sends">Sending to Channels</a>
+                <a href="#docs-role-actions">Role Actions</a>
+                <a href="#docs-ticket-panels">Ticket Panels</a>
+                <a href="#docs-ticket-close">Ticket Close Requests</a>
+                <a href="#docs-welcome">Welcome Messages</a>
+                <a href="#docs-anti-raid">Anti-raid Protection</a>
+                <a href="#docs-anti-nuke">Anti-nuke Protection</a>
+                <a href="#docs-security-logs">Security Logs</a>
+                <a href="#docs-permissions">Permissions &amp; Hierarchy</a>
+                <a href="#docs-troubleshooting">Troubleshooting</a>
+                <a href="#docs-examples">Examples &amp; Recipes</a>
+              </nav>
+            </aside>
+            <div class="docs-content">
+              <article class="surface docs-section" id="docs-getting-started">
+                <div class="section-title"><div><span class="step">01</span><h3>Getting Started</h3></div></div>
+                <div class="docs-body">
+                  <p>Rapid Bot is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.</p>
+                  <h4>Quick setup</h4>
+                  <ol>
+                    <li>Install dependencies: <code>pnpm install</code></li>
+                    <li>Set up the database: <code>pnpm db:setup</code></li>
+                    <li>Register slash commands: <code>pnpm deploy:commands</code></li>
+                    <li>Start the bot: <code>pnpm bot</code></li>
+                    <li>Start the dashboard: <code>pnpm dashboard</code></li>
+                    <li>Open <code>http://127.0.0.1:3210</code> and log in with your <code>DASHBOARD_PASSWORD</code></li>
+                  </ol>
+                  <h4>Required environment variables</h4>
+                  <ul>
+                    <li><code>DISCORD_TOKEN</code> — Bot token from Discord Developer Portal</li>
+                    <li><code>DISCORD_CLIENT_ID</code> — Application ID</li>
+                    <li><code>DISCORD_GUILD_ID</code> — Your server ID</li>
+                    <li><code>DASHBOARD_PASSWORD</code> — Dashboard login password (min 8 chars)</li>
+                    <li><code>DATABASE_URL</code> — <code>file:./data/bot.db</code> for SQLite</li>
+                  </ul>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-command-builder">
+                <div class="section-title"><div><span class="step">02</span><h3>Command Builder</h3></div></div>
+                <div class="docs-body">
+                  <p>The Command Studio lets you build custom actions that run through <code>/custom name</code>. You do not need to redeploy Discord commands every time you add a new one.</p>
+                  <h4>Builder sections</h4>
+                  <ul>
+                    <li><strong>Command identity</strong> — Name, description, and enabled status. The name must be lowercase letters, numbers, hyphens, and underscores only.</li>
+                    <li><strong>Action</strong> — Choose what the command does. See <a href="#docs-action-templates">Action Templates</a> for all options.</li>
+                    <li><strong>Access and delivery</strong> — Control who can use it, which channels it works in, cooldowns, and reply visibility.</li>
+                  </ul>
+                  <h4>Important</h4>
+                  <p>Custom commands run through <code>/custom name</code>. They do not become new top-level slash commands automatically. To add a top-level command, you must edit <code>src/bot/commands.ts</code> and run <code>pnpm deploy:commands</code>.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-action-templates">
+                <div class="section-title"><div><span class="step">03</span><h3>Action Templates</h3></div></div>
+                <div class="docs-body">
+                  <p>Every custom command picks one action type. Here is the full list:</p>
+                  <h4>Messages</h4>
+                  <ul>
+                    <li><strong>Reply with a plain message</strong> — Sends text back in the channel where the command ran.</li>
+                    <li><strong>Reply with an embed</strong> — Sends a rich embed with optional fields, images, and timestamps.</li>
+                    <li><strong>Send a message/embed to a channel</strong> — Posts to a different channel than where the command ran.</li>
+                    <li><strong>Send an ephemeral reply</strong> — Visible only to the command user. Good for sensitive info.</li>
+                    <li><strong>Send a DM to a user</strong> — Direct messages the configured target user.</li>
+                  </ul>
+                  <h4>Roles</h4>
+                  <ul>
+                    <li><strong>Give / Remove / Toggle a role</strong> — Works on the command user or a configured target user.</li>
+                    <li><strong>Give / Remove multiple roles</strong> — Batch role changes.</li>
+                  </ul>
+                  <h4>Tickets</h4>
+                  <ul>
+                    <li><strong>Post a saved ticket panel</strong> — Sends a ticket panel into the current channel.</li>
+                    <li><strong>Create a ticket channel</strong> — Creates a private ticket channel with permissions.</li>
+                    <li><strong>Request to close the ticket</strong> — Submits a close request for staff review.</li>
+                  </ul>
+                  <h4>Channel management</h4>
+                  <ul>
+                    <li><strong>Lock / Unlock channel</strong> — Toggles @everyone SendMessages permission.</li>
+                    <li><strong>Rename channel</strong> — Changes the current channel name. Supports variables.</li>
+                    <li><strong>Move channel</strong> — Moves the current channel to a different category.</li>
+                    <li><strong>Add / Remove user from channel</strong> — Grants or revokes ViewChannel for a specific user.</li>
+                  </ul>
+                  <h4>Moderation</h4>
+                  <ul>
+                    <li><strong>Timeout / Remove timeout</strong> — Times out a member or clears their timeout.</li>
+                    <li><strong>Kick / Ban / Unban user</strong> — Standard moderation actions with optional reason.</li>
+                    <li><strong>Purge messages</strong> — Bulk-deletes recent messages (max 100, 14 days).</li>
+                  </ul>
+                  <h4>Requirements &amp; Logging</h4>
+                  <ul>
+                    <li><strong>Require a role</strong> — Blocks the rest of the command unless the user has the role.</li>
+                    <li><strong>Require a permission</strong> — Blocks unless the user has the Discord permission flag.</li>
+                    <li><strong>Log to moderation log</strong> — Sends an embed to the configured log channel.</li>
+                  </ul>
+                  <h4>Advanced</h4>
+                  <ul>
+                    <li><strong>Send a saved announcement</strong> — Posts a pre-built announcement template.</li>
+                    <li><strong>Run multiple actions in sequence</strong> — Chains up to 10 actions in order.</li>
+                  </ul>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-variables">
+                <div class="section-title"><div><span class="step">04</span><h3>Variables / Placeholders</h3></div></div>
+                <div class="docs-body">
+                  <p>Use these placeholders in messages, embeds, channel names, and reasons:</p>
+                  <table>
+                    <thead><tr><th>Variable</th><th>Meaning</th></tr></thead>
+                    <tbody>
+                      <tr><td><code>{user}</code></td><td>Mention of the command caller</td></tr>
+                      <tr><td><code>{username}</code></td><td>The caller's Discord username</td></tr>
+                      <tr><td><code>{server}</code></td><td>Current server name</td></tr>
+                      <tr><td><code>{channel}</code></td><td>Mention of the current channel</td></tr>
+                      <tr><td><code>{text}</code></td><td>Optional <code>/custom</code> text input</td></tr>
+                      <tr><td><code>{reason}</code></td><td>Optional <code>/custom</code> reason input</td></tr>
+                      <tr><td><code>{target}</code></td><td>Optional <code>/custom</code> target member</td></tr>
+                      <tr><td><code>{memberCount}</code></td><td>Approximate server member count (welcome only)</td></tr>
+                      <tr><td><code>{createdAt}</code></td><td>Member account creation date (welcome only)</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-plain-replies">
+                <div class="section-title"><div><span class="step">05</span><h3>Plain Message Replies</h3></div></div>
+                <div class="docs-body">
+                  <p>The simplest action type. Type your message, include variables, and it replies in the channel.</p>
+                  <h4>When to use</h4>
+                  <p>Rules commands, FAQ responses, quick replies, and anything that doesn't need fancy formatting.</p>
+                  <h4>Limitations</h4>
+                  <ul>
+                    <li>Max 2000 characters</li>
+                    <li>Supports variables but not embeds</li>
+                    <li>Public or ephemeral visibility only</li>
+                  </ul>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-embed-replies">
+                <div class="section-title"><div><span class="step">06</span><h3>Embed Replies</h3></div></div>
+                <div class="docs-body">
+                  <p>Embeds are rich Discord messages with a color bar, title, description, images, fields, and a footer.</p>
+                  <h4>Every option</h4>
+                  <ul>
+                    <li><strong>Content above embed</strong> — Plain text shown before the embed.</li>
+                    <li><strong>Title</strong> — Bold heading at the top.</li>
+                    <li><strong>Title URL</strong> — Makes the title clickable.</li>
+                    <li><strong>Description</strong> — Main body text. Supports variables.</li>
+                    <li><strong>Color</strong> — Left border accent color.</li>
+                    <li><strong>Author</strong> — Name, URL, and icon for the author line.</li>
+                    <li><strong>Large image</strong> — Bottom image inside the embed.</li>
+                    <li><strong>Thumbnail</strong> — Small image in the top-right corner.</li>
+                    <li><strong>Footer</strong> — Bottom line text and optional icon.</li>
+                    <li><strong>Timestamp</strong> — Adds the current time to the footer.</li>
+                    <li><strong>Fields</strong> — Up to 25 name/value rows, optionally inline.</li>
+                  </ul>
+                  <h4>Required bot permissions</h4>
+                  <p>Send Messages, Embed Links.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-channel-sends">
+                <div class="section-title"><div><span class="step">07</span><h3>Sending Messages to Channels</h3></div></div>
+                <div class="docs-body">
+                  <p>Sends a message or embed to a channel other than where the command ran.</p>
+                  <h4>Setup</h4>
+                  <ol>
+                    <li>Choose <strong>Send a message/embed to a channel</strong>.</li>
+                    <li>Pick the destination channel.</li>
+                    <li>Fill in the message or embed the same way as a reply embed.</li>
+                  </ol>
+                  <h4>Required bot permissions</h4>
+                  <p>Send Messages, Embed Links in the target channel.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-role-actions">
+                <div class="section-title"><div><span class="step">08</span><h3>Role Actions</h3></div></div>
+                <div class="docs-body">
+                  <p>Grant, remove, or toggle roles on the command user or a configured target user.</p>
+                  <h4>Important: Role hierarchy</h4>
+                  <p>The bot's highest role must be <strong>above</strong> any role it manages. In Discord, go to <strong>Server Settings > Roles</strong> and drag the bot role above managed roles.</p>
+                  <h4>Required bot permissions</h4>
+                  <p>Manage Roles.</p>
+                  <h4>Common mistakes</h4>
+                  <ul>
+                    <li>Bot role is below the target role — move it up.</li>
+                    <li>Trying to manage an admin role — bots cannot manage roles above their own.</li>
+                    <li>Bot was not given Manage Roles — check the OAuth2 invite scopes.</li>
+                  </ul>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-ticket-panels">
+                <div class="section-title"><div><span class="step">09</span><h3>Ticket Panels</h3></div></div>
+                <div class="docs-body">
+                  <p>A ticket panel is the public entry point members see. It can be a dropdown menu, a set of buttons, or a multi-panel menu.</p>
+                  <h4>How to create one</h4>
+                  <ol>
+                    <li>Create at least one <strong>Ticket type</strong> first.</li>
+                    <li>Go to <strong>Ticket Studio > Panels</strong>.</li>
+                    <li>Fill in the title, description, and design.</li>
+                    <li>Choose <strong>Dropdown</strong> or <strong>Buttons</strong>.</li>
+                    <li>Select the ticket types to include.</li>
+                    <li>Save, then post it with <code>/ticket-panel</code> or the dashboard test button.</li>
+                  </ol>
+                  <h4>Multi-panel menus</h4>
+                  <p>Set <strong>Panel kind</strong> to <strong>Multi-panel menu</strong> and choose child panels. Members pick a child panel first, then see its ticket options.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-ticket-close">
+                <div class="section-title"><div><span class="step">10</span><h3>Ticket Close Requests</h3></div></div>
+                <div class="docs-body">
+                  <p>Instead of letting anyone close a ticket immediately, you can require a staff review.</p>
+                  <h4>How it works</h4>
+                  <ol>
+                    <li>In the ticket type, enable <strong>Close requests</strong>.</li>
+                    <li>When a user clicks the close button, they enter a reason in a modal.</li>
+                    <li>A close request is posted in the ticket channel with <strong>Approve</strong> and <strong>Deny</strong> buttons.</li>
+                    <li>Staff click to approve or deny. Approved requests close the ticket and schedule deletion.</li>
+                  </ol>
+                  <h4>Optional delay</h4>
+                  <p>Set a <strong>Close request delay</strong> (in seconds) to wait before deleting the channel after approval. 0 deletes immediately.</p>
+                  <h4>Permissions</h4>
+                  <p>Only staff (Manage Channels permission or configured staff roles) can approve or deny. The ticket creator can submit the request.</p>
+                  <h4>Transcripts</h4>
+                  <p>The bot does not currently generate full text transcripts. Ticket open/close events are logged to the configured transcript channel with basic metadata. If you need full transcripts, export the channel with a third-party tool or request it as a future feature.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-welcome">
+                <div class="section-title"><div><span class="step">11</span><h3>Welcome Messages</h3></div></div>
+                <div class="docs-body">
+                  <p>Welcome messages greet new members automatically when they join your server.</p>
+                  <h4>Setup</h4>
+                  <ol>
+                    <li>Go to <strong>Welcome Messages</strong> in the dashboard.</li>
+                    <li>Enable welcome messages.</li>
+                    <li>Choose a welcome channel.</li>
+                    <li>Write a message and/or design an embed.</li>
+                    <li>Optionally enable DM welcome and auto-roles.</li>
+                    <li>Save and test with the <strong>Send test</strong> button.</li>
+                  </ol>
+                  <h4>Variables</h4>
+                  <p><code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{memberCount}</code> <code>{createdAt}</code></p>
+                  <h4>Auto-roles</h4>
+                  <p>Select roles to automatically assign on join. The bot must have <strong>Manage Roles</strong> and its role must be above the auto-roles. Be careful with permissions — do not auto-assign moderation roles.</p>
+                  <h4>Required bot permissions</h4>
+                  <p>Send Messages, Embed Links, Manage Roles (for auto-roles).</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-anti-raid">
+                <div class="section-title"><div><span class="step">12</span><h3>Anti-raid Protection</h3></div></div>
+                <div class="docs-body">
+                  <p>Anti-raid detects suspicious join waves and responds automatically.</p>
+                  <h4>How it works</h4>
+                  <p>The bot tracks joins over a sliding time window. If the join threshold is exceeded, it triggers the configured action.</p>
+                  <h4>Settings</h4>
+                  <ul>
+                    <li><strong>Join threshold</strong> — Number of joins in the time window to trigger. Default: 10.</li>
+                    <li><strong>Time window</strong> — Seconds to look back. Default: 60.</li>
+                    <li><strong>Action</strong> — Alert, lockdown, timeout, kick, or disable invites.</li>
+                    <li><strong>Lockdown duration</strong> — How long channels stay locked. Default: 300s.</li>
+                    <li><strong>Minimum account age</strong> — Accounts younger than this are flagged. Default: 0 (disabled).</li>
+                    <li><strong>Block no-avatar</strong> — Flags accounts without a profile picture.</li>
+                    <li><strong>Bypass roles / users</strong> — Whitelisted members are ignored.</li>
+                  </ul>
+                  <h4>Security note</h4>
+                  <p>Defaults are conservative. Start with <strong>Alert only</strong> and tune thresholds before enabling stronger actions.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-anti-nuke">
+                <div class="section-title"><div><span class="step">13</span><h3>Anti-nuke Protection</h3></div></div>
+                <div class="docs-body">
+                  <p>Anti-nuke monitors dangerous administrative actions and responds to abuse.</p>
+                  <h4>Monitored events</h4>
+                  <ul>
+                    <li>Channel delete/create spam</li>
+                    <li>Role delete/create spam</li>
+                    <li>Mass bans/kicks</li>
+                    <li>Webhook creation/deletion</li>
+                    <li>Permission changes</li>
+                    <li>Bot additions</li>
+                    <li>Administrator role changes</li>
+                  </ul>
+                  <h4>How it works</h4>
+                  <p>The bot reads the Discord audit log for each event and counts actions per executor within the time window. If the threshold is exceeded, it takes the configured action.</p>
+                  <h4>Trusted users/roles</h4>
+                  <p>The server owner is always trusted. You can add additional trusted users and roles in the database. Trusted executors are never punished.</p>
+                  <h4>Role hierarchy check</h4>
+                  <p>Before removing roles, timing out, kicking, or banning, the bot checks that its highest role is above the target's highest role. If not, it falls back to alert-only.</p>
+                  <h4>Default behavior</h4>
+                  <p>Anti-nuke defaults to <strong>alert-only</strong>. You must explicitly choose stronger actions in the dashboard. We strongly recommend testing with alert-only first.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-security-logs">
+                <div class="section-title"><div><span class="step">14</span><h3>Security Logs</h3></div></div>
+                <div class="docs-body">
+                  <p>Both anti-raid and anti-nuke can send alerts and logs to dedicated channels.</p>
+                  <h4>Alert channel</h4>
+                  <p>Where real-time notifications are sent when a threshold is triggered. Recommended: a private staff-only channel.</p>
+                  <h4>Log channel</h4>
+                  <p>Where structured moderation actions are recorded. These are also stored in the database and appear on the Moderation dashboard page.</p>
+                  <h4>Setting up</h4>
+                  <ol>
+                    <li>Create private channels for alerts and logs.</li>
+                    <li>Give the bot Send Messages and Embed Links in those channels.</li>
+                    <li>Select them in the Security dashboard page.</li>
+                  </ol>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-permissions">
+                <div class="section-title"><div><span class="step">15</span><h3>Permissions &amp; Discord Role Hierarchy</h3></div></div>
+                <div class="docs-body">
+                  <p>Discord has strict rules about what bots can do. Understanding them prevents many common errors.</p>
+                  <h4>Role hierarchy</h4>
+                  <p>A bot can only assign, remove, or manage roles that are <strong>below</strong> its highest role in the server role list. This applies to moderation actions, role commands, and anti-nuke responses.</p>
+                  <h4>Required bot permissions by feature</h4>
+                  <table>
+                    <thead><tr><th>Feature</th><th>Required permissions</th></tr></thead>
+                    <tbody>
+                      <tr><td>Basic commands</td><td>Send Messages, Embed Links</td></tr>
+                      <tr><td>Role actions</td><td>Manage Roles</td></tr>
+                      <tr><td>Tickets</td><td>Manage Channels, Send Messages, Read Message History</td></tr>
+                      <tr><td>Timeouts</td><td>Moderate Members</td></tr>
+                      <tr><td>Kick / Ban</td><td>Kick Members / Ban Members</td></tr>
+                      <tr><td>Purge</td><td>Manage Messages</td></tr>
+                      <tr><td>Anti-raid lockdown</td><td>Manage Channels</td></tr>
+                      <tr><td>Anti-raid disable invites</td><td>Manage Guild</td></tr>
+                      <tr><td>Welcome auto-roles</td><td>Manage Roles</td></tr>
+                    </tbody>
+                  </table>
+                  <h4>Common mistake</h4>
+                  <p>Inviting the bot without <code>applications.commands</code> scope means slash commands won't appear. Re-invite with the correct OAuth2 URL.</p>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-troubleshooting">
+                <div class="section-title"><div><span class="step">16</span><h3>Troubleshooting</h3></div></div>
+                <div class="docs-body">
+                  <h4>Commands not appearing in Discord</h4>
+                  <ul>
+                    <li>Run <code>pnpm deploy:commands</code> after any command definition change.</li>
+                    <li>Confirm <code>DISCORD_GUILD_ID</code> matches the server you're testing in.</li>
+                    <li>Make sure the bot was invited with the <code>applications.commands</code> scope.</li>
+                  </ul>
+                  <h4>Role actions failing</h4>
+                  <ul>
+                    <li>Check that the bot's role is above the target role in Server Settings > Roles.</li>
+                    <li>Verify the bot has Manage Roles permission.</li>
+                  </ul>
+                  <h4>Tickets not creating</h4>
+                  <ul>
+                    <li>Check that a category is configured and the bot has Manage Channels.</li>
+                    <li>Verify the ticket type is active and has staff roles set.</li>
+                    <li>Make sure the user hasn't hit the max open tickets limit.</li>
+                  </ul>
+                  <h4>Anti-raid not triggering</h4>
+                  <ul>
+                    <li>Ensure the feature is enabled in the Security dashboard.</li>
+                    <li>Check that the bot has the Guild Members intent enabled in the Developer Portal.</li>
+                    <li>Verify alert/log channels are configured and the bot can write to them.</li>
+                  </ul>
+                  <h4>Anti-nuke not detecting events</h4>
+                  <ul>
+                    <li>The bot needs <strong>View Audit Log</strong> permission.</li>
+                    <li>Audit logs may be delayed. The bot reads recent entries within 5 seconds of an event.</li>
+                    <li>Very high-rate abuse may outpace the audit log. Consider stronger Discord native protections for extreme cases.</li>
+                  </ul>
+                  <h4>Welcome messages not sending</h4>
+                  <ul>
+                    <li>Ensure welcome is enabled and a channel is selected.</li>
+                    <li>The bot needs <strong>Guild Members</strong> intent and <strong>Send Messages</strong> in the welcome channel.</li>
+                    <li>DM welcome fails silently if the user has DMs disabled. This is expected behavior.</li>
+                  </ul>
+                </div>
+              </article>
+
+              <article class="surface docs-section" id="docs-examples">
+                <div class="section-title"><div><span class="step">17</span><h3>Examples &amp; Recipes</h3></div></div>
+                <div class="docs-body">
+                  <h4>Rules command</h4>
+                  <p>Action: <strong>Reply with a plain message</strong>. Content: your rules. Access: Everyone.</p>
+                  <h4>Self-role command</h4>
+                  <p>Action: <strong>Toggle a role</strong>. Access: Everyone. The user runs <code>/custom gamer</code> to add/remove the Gamer role.</p>
+                  <h4>Admin-only announcement command</h4>
+                  <p>Action: <strong>Send a saved announcement</strong>. Access: Bot admins only.</p>
+                  <h4>Ticket + auto-close workflow</h4>
+                  <p>Create a ticket type with <strong>Close requests</strong> enabled and an <strong>Auto-close</strong> timer. Members request closure; staff approve; inactive tickets close automatically.</p>
+                  <h4>Moderation action sequence</h4>
+                  <p>Action: <strong>Run multiple actions in sequence</strong>. Step 1: Log to moderation log. Step 2: Kick user. Step 3: Send a confirmation to a staff channel.</p>
+                  <h4>Conservative anti-raid</h4>
+                  <p>Join threshold: 15. Time window: 60s. Action: Alert. Account age: 1 day. This catches obvious raids without false positives.</p>
+                  <h4>Conservative anti-nuke</h4>
+                  <p>All thresholds at default (5). Action: Alert only. Review logs for a week before considering stronger actions.</p>
+                </div>
+              </article>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+    <div id="toast"></div>
+  </body>
+</html>

@@ -1,0 +1,54 @@
+{
+  "name": "rapid-discord-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A modular Discord bot with a local admin dashboard.",
+  "packageManager": "pnpm@10.34.1",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "bin": {
+    "rapidbot": "./scripts/rapidbot.mjs"
+  },
+  "scripts": {
+    "setup": "pnpm install && pnpm db:setup",
+    "dev": "concurrently -n bot,dashboard -c cyan,magenta \"pnpm bot\" \"pnpm dashboard:no-open\"",
+    "bot": "tsx src/bot/index.ts",
+    "dashboard": "tsx src/dashboard/server.ts --open",
+    "dashboard:no-open": "tsx src/dashboard/server.ts",
+    "deploy:commands": "tsx src/bot/deploy-commands.ts",
+    "db:setup": "tsx src/database/setup.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "start": "node dist/database/setup.js && node dist/production.js",
+    "start:bot": "node dist/bot/index.js",
+    "start:dashboard": "node dist/dashboard/server.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1",
+    "discord.js": "^14.24.2",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "express-session": "^1.18.2",
+    "helmet": "^8.1.0",
+    "multer": "^2.0.2",
+    "open": "^10.2.0",
+    "pg": "^8.16.3",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.5",
+    "@types/express-session": "^1.18.2",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.10.1",
+    "@types/pg": "^8.15.6",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
