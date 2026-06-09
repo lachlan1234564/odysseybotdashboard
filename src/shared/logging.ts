@@ -1,7 +1,9 @@
 const sensitiveKeys = [
   "DISCORD_TOKEN",
+  "DISCORD_CLIENT_SECRET",
   "DASHBOARD_PASSWORD",
-  "DATABASE_URL"
+  "DATABASE_URL",
+  "VPN_CHECK_API_KEY"
 ] as const;
 
 function redactSensitiveText(value: string): string {

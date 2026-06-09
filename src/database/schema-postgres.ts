@@ -441,5 +441,50 @@ export const postgresMigrations = [
         updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `
+  },
+  {
+    version: 10,
+    sql: `
+      CREATE TABLE IF NOT EXISTS verification_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        verified_role_id TEXT,
+        action TEXT NOT NULL DEFAULT 'flag',
+        log_channel_id TEXT,
+        min_account_age_days INTEGER NOT NULL DEFAULT 0,
+        min_server_days INTEGER NOT NULL DEFAULT 0,
+        vpn_check_enabled INTEGER NOT NULL DEFAULT 0,
+        vpn_fail_closed INTEGER NOT NULL DEFAULT 0,
+        device_check_enabled INTEGER NOT NULL DEFAULT 0,
+        record_retention_hours INTEGER NOT NULL DEFAULT 168,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS verification_links (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS verification_records (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'flagged',
+        reason_codes TEXT NOT NULL DEFAULT '[]',
+        risk_score INTEGER NOT NULL DEFAULT 0,
+        device_hash TEXT,
+        account_created_at TIMESTAMPTZ,
+        server_joined_at TIMESTAMPTZ,
+        vpn_detected INTEGER,
+        verified_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        expires_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_verification_links_hash ON verification_links(token_hash);
+      CREATE INDEX IF NOT EXISTS idx_verification_records_guild ON verification_records(guild_id, verified_at);
+    `
   }
 ] as const;

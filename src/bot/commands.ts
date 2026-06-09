@@ -12,6 +12,30 @@ export const commandBuilders = [
     .setName("help")
     .setDescription("List every Odyssey Bot command, its purpose, and who can use it."),
   new SlashCommandBuilder()
+    .setName("bot-help")
+    .setDescription("Show all available commands grouped by category."),
+  new SlashCommandBuilder()
+    .setName("server-info")
+    .setDescription("View server stats and bot setup status."),
+  new SlashCommandBuilder()
+    .setName("user-info")
+    .setDescription("View a user's account age, join date, roles, and warning count.")
+    .addUserOption((option) =>
+      option.setName("member").setDescription("Member to inspect").setRequired(true)
+    ),
+  new SlashCommandBuilder()
+    .setName("automod-status")
+    .setDescription("View current Auto Mod rules and channel-specific link settings."),
+  new SlashCommandBuilder()
+    .setName("socials-post")
+    .setDescription("Publish the configured social promotion embed to a channel.")
+    .addChannelOption((option) =>
+      option
+        .setName("channel")
+        .setDescription("Channel to post in (defaults to the saved target or current channel)")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    ),
+  new SlashCommandBuilder()
     .setName("custom")
     .setDescription("Run a dashboard-created custom command.")
     .addStringOption((option) =>

@@ -55,6 +55,13 @@ import { emptyEmbedConfig } from "../shared/types.js";
 import { replacePlaceholders } from "../shared/placeholders.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
 import { handleHelpCommand } from "./help.js";
+import {
+  handleBotHelp,
+  handleServerInfo,
+  handleUserInfo,
+  handleAutomodStatus,
+  handleSocialsPost
+} from "./info-commands.js";
 import { logError } from "../shared/logging.js";
 
 const config = loadDiscordConfig();
@@ -292,6 +299,31 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 
   if (interaction.commandName === "help") {
     await handleHelpCommand(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "bot-help") {
+    await handleBotHelp(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "server-info") {
+    await handleServerInfo(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "user-info") {
+    await handleUserInfo(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "automod-status") {
+    await handleAutomodStatus(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "socials-post") {
+    await handleSocialsPost(interaction);
     return;
   }
 

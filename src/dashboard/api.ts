@@ -11,6 +11,8 @@ import {
   createRolePanel,
   createScheduledAnnouncement,
   createStickyMessage,
+  createVerificationLink,
+  createVerificationRecord,
   createCustomCommand,
   createTicketPanel,
   createTicketType,
@@ -33,6 +35,9 @@ import {
   getRolePanel,
   getScheduledAnnouncement,
   getSocialPromotionSettings,
+  getVerificationLink,
+  getVerificationSettings,
+  getDeviceHashAltMatches,
   getWelcomeSettings,
   listAnnouncements,
   listCustomCommands,
@@ -45,6 +50,7 @@ import {
   listTicketCloseRequests,
   listTicketTypes,
   listWarnings,
+  listVerificationRecords,
   saveAntiNukeSettings,
   saveAntiRoleSettings,
   saveAntiRaidSettings,
@@ -52,6 +58,7 @@ import {
   saveBranding,
   saveGuildSettings,
   saveSocialPromotionSettings,
+  saveVerificationSettings,
   saveWelcomeSettings,
   updateAnnouncement,
   updateCustomCommand,
@@ -64,7 +71,7 @@ import {
 import { loadDashboardConfig, resolveUploadsPath } from "../shared/config.js";
 import { normalizeDomain } from "../shared/domains.js";
 import { parseDiscordComponentEmoji } from "../shared/discord-components.js";
-import { friendlyDiscordError, logDiscordError } from "../shared/logging.js";
+import { friendlyDiscordError, logDiscordError, logError, logErrorStack } from "../shared/logging.js";
 import { emptyActionConfig, emptyEmbedConfig } from "../shared/types.js";
 import { customCommandNeedsTrustedAccess } from "../shared/security.js";
 import { isValidCommandName, normalizeCommandName } from "../shared/validation.js";
@@ -527,6 +534,39 @@ function dashboardComponentEmoji(value: string) {
   }
 }
 
+function getVerificationHmacSecret(): string {
+  return crypto.createHash("sha256")
+    .update(`${config.DASHBOARD_PASSWORD}:${config.DISCORD_CLIENT_ID}`)
+    .digest("hex");
+}
+
+function hashVerificationToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function discordAccountCreatedAt(userId: string): Date {
+  return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
+}
+
+async function checkVpnOrProxy(ip: string): Promise<{ detected: boolean; reason: string }> {
+  if (!config.VPN_CHECK_URL_TEMPLATE || !config.VPN_CHECK_API_KEY) {
+    throw new Error("VPN/proxy checking is not configured on this dashboard.");
+  }
+  const url = config.VPN_CHECK_URL_TEMPLATE.replace("{ip}", encodeURIComponent(ip));
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${config.VPN_CHECK_API_KEY}`,
+      "X-API-Key": config.VPN_CHECK_API_KEY
+    },
+    signal: AbortSignal.timeout(8_000)
+  });
+  if (!response.ok) throw new Error(`VPN provider returned HTTP ${response.status}.`);
+  const data = await response.json() as Record<string, unknown>;
+  const detected = [data.vpn, data.proxy, data.hosting, data.is_vpn, data.is_proxy]
+    .some((value) => value === true || value === "true" || value === 1);
+  return { detected, reason: detected ? "VPN or proxy detected." : "No VPN or proxy detected." };
+}
+
 function safeExternalUrl(value: string): string {
   if (value.length > 2048) throw new Error("URL must be 2,048 characters or fewer.");
   const url = new URL(value);
@@ -764,6 +804,182 @@ router.post("/login", (req, res) => {
 
 router.post("/logout", (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
+});
+
+router.get("/verify/:token/start", async (req, res, next) => {
+  try {
+    if (!config.DISCORD_CLIENT_SECRET) {
+      throw publicRequestError("Discord OAuth verification is not configured.", 503);
+    }
+    const tokenHash = hashVerificationToken(req.params.token);
+    const link = await getVerificationLink(tokenHash);
+    if (!link) throw publicRequestError("This verification link is invalid or expired.", 404);
+    const settings = await getVerificationSettings(link.guildId);
+    if (!settings.enabled) throw publicRequestError("Verification is currently disabled for this server.", 403);
+
+    const state = crypto.randomBytes(24).toString("base64url");
+    req.session.verificationTokenHash = tokenHash;
+    req.session.verificationOAuthState = state;
+    const redirectUri = config.DISCORD_OAUTH_REDIRECT_URI
+      ?? `${config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+    const authorization = new URL("https://discord.com/oauth2/authorize");
+    authorization.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
+    authorization.searchParams.set("response_type", "code");
+    authorization.searchParams.set("scope", "identify guilds.members.read");
+    authorization.searchParams.set("redirect_uri", redirectUri);
+    authorization.searchParams.set("state", state);
+    res.redirect(authorization.toString());
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/verify/callback", async (req, res, next) => {
+  try {
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const state = typeof req.query.state === "string" ? req.query.state : "";
+    const tokenHash = req.session.verificationTokenHash;
+    if (!code || !state || !tokenHash || state !== req.session.verificationOAuthState) {
+      throw publicRequestError("The verification session is invalid or expired.", 400);
+    }
+    delete req.session.verificationTokenHash;
+    delete req.session.verificationOAuthState;
+
+    const link = await getVerificationLink(tokenHash);
+    if (!link) throw publicRequestError("This verification link is invalid or expired.", 404);
+    const settings = await getVerificationSettings(link.guildId);
+    if (!settings.enabled || !config.DISCORD_CLIENT_SECRET) {
+      throw publicRequestError("Verification is not currently available.", 503);
+    }
+
+    const redirectUri = config.DISCORD_OAUTH_REDIRECT_URI
+      ?? `${config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+    const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: config.DISCORD_CLIENT_ID,
+        client_secret: config.DISCORD_CLIENT_SECRET,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri
+      }),
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!tokenResponse.ok) throw new Error(`Discord OAuth token exchange failed with HTTP ${tokenResponse.status}.`);
+    const tokenData = await tokenResponse.json() as { access_token?: string };
+    if (!tokenData.access_token) throw new Error("Discord OAuth did not return an access token.");
+
+    const userResponse = await fetch("https://discord.com/api/v10/users/@me", {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      signal: AbortSignal.timeout(10_000)
+    });
+    if (!userResponse.ok) throw new Error(`Discord user lookup failed with HTTP ${userResponse.status}.`);
+    const user = await userResponse.json() as { id: string };
+    const accountCreatedAt = discordAccountCreatedAt(user.id);
+    const accountAgeDays = Math.floor((Date.now() - accountCreatedAt.getTime()) / 86_400_000);
+
+    let serverJoinedAt: string | null = null;
+    let serverAgeDays = 0;
+    try {
+      const member = await rest.get(Routes.guildMember(link.guildId, user.id)) as { joined_at?: string };
+      if (member?.joined_at) {
+        serverJoinedAt = new Date(member.joined_at).toISOString();
+        serverAgeDays = Math.floor((Date.now() - new Date(member.joined_at).getTime()) / 86_400_000);
+      }
+    } catch (error) {
+      const errorCode = error && typeof error === "object" && "code" in error ? Number(error.code) : null;
+      if (errorCode === 10007) {
+        res.redirect("/verify.html?result=failed");
+        return;
+      }
+    }
+
+    const reasonCodes: string[] = [];
+    let riskScore = 0;
+    let status: "passed" | "flagged" | "denied" = "passed";
+
+    if (accountAgeDays < settings.minAccountAgeDays) {
+      reasonCodes.push("new_discord_account");
+      riskScore += 30;
+    }
+
+    if (settings.minServerDays > 0 && serverAgeDays < settings.minServerDays) {
+      reasonCodes.push("recent_server_member");
+      riskScore += 20;
+    }
+
+    let vpnDetected: boolean | null = null;
+    if (settings.vpnCheckEnabled) {
+      try {
+        const vpn = await checkVpnOrProxy(req.ip ?? "");
+        vpnDetected = vpn.detected;
+        if (vpn.detected) {
+          reasonCodes.push("vpn_proxy_detected");
+          riskScore += 40;
+        }
+      } catch (error) {
+        logError("Verification VPN check failed", error);
+        if (settings.vpnFailClosed) {
+          reasonCodes.push("vpn_check_unavailable");
+          riskScore += 30;
+        }
+      }
+    }
+
+    let deviceHash: string | null = null;
+    if (settings.deviceCheckEnabled) {
+      const deviceString = [
+        req.headers["user-agent"] ?? "",
+        (req.ip ?? "").split(".").slice(0, 2).join(".")
+      ].join("|");
+      deviceHash = crypto.createHmac("sha256", getVerificationHmacSecret())
+        .update(deviceString)
+        .digest("hex");
+
+      const altMatches = await getDeviceHashAltMatches(link.guildId, deviceHash, user.id);
+      if (altMatches.length > 0) {
+        reasonCodes.push("device_match_other_account");
+        riskScore += 50;
+      }
+    }
+
+    if (settings.action === "deny" && reasonCodes.length > 0) {
+      status = "denied";
+    } else if (reasonCodes.length > 0) {
+      status = "flagged";
+    }
+
+    const expiresAt = new Date(Date.now() + settings.recordRetentionHours * 3_600_000).toISOString();
+    await createVerificationRecord({
+      guildId: link.guildId,
+      userId: user.id,
+      status,
+      reasonCodes,
+      riskScore,
+      deviceHash,
+      accountCreatedAt: accountCreatedAt.toISOString(),
+      serverJoinedAt,
+      vpnDetected,
+      expiresAt
+    });
+
+    if (status === "denied") {
+      res.redirect("/verify.html?result=failed");
+    } else {
+      if (settings.verifiedRoleId) {
+        try {
+          await rest.put(Routes.guildMemberRole(link.guildId, user.id, settings.verifiedRoleId));
+        } catch {
+          // role assignment failed, but verification passed
+        }
+      }
+      res.redirect("/verify.html?result=passed");
+    }
+  } catch (error) {
+    logErrorStack("Discord OAuth verification callback failed", error);
+    res.redirect("/verify.html?result=error");
+  }
 });
 
 router.use(async (req, res, next) => {
@@ -1399,6 +1615,65 @@ router.put("/auto-mod", async (req, res) => {
     );
   }
   res.json(await saveAutoModSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+const verificationSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  verifiedRoleId: optionalId,
+  action: z.enum(["allow", "flag", "deny", "assign_role"]).default("flag"),
+  logChannelId: optionalId,
+  minAccountAgeDays: z.coerce.number().int().min(0).max(3650).default(0),
+  minServerDays: z.coerce.number().int().min(0).max(3650).default(0),
+  vpnCheckEnabled: z.boolean().default(false),
+  vpnFailClosed: z.boolean().default(false),
+  deviceCheckEnabled: z.boolean().default(false),
+  recordRetentionHours: z.coerce.number().int().min(1).max(8760).default(168)
+});
+
+router.get("/verification", async (_req, res) => {
+  const [settings, records] = await Promise.all([
+    getVerificationSettings(res.locals.guildId),
+    listVerificationRecords(res.locals.guildId)
+  ]);
+  res.json({
+    settings,
+    records,
+    oauthConfigured: Boolean(config.DISCORD_CLIENT_SECRET),
+    vpnProviderConfigured: Boolean(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY)
+  });
+});
+
+router.put("/verification", async (req, res) => {
+  const input = verificationSettingsSchema.parse(req.body);
+  if (input.enabled && !config.DISCORD_CLIENT_SECRET) {
+    throw publicRequestError(
+      "Add DISCORD_CLIENT_SECRET and a redirect URI before enabling verification.",
+      400,
+      { enabled: "Discord OAuth is not configured on this dashboard." }
+    );
+  }
+  if (input.vpnCheckEnabled && !(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY)) {
+    throw publicRequestError(
+      "Configure both VPN_CHECK_URL_TEMPLATE and VPN_CHECK_API_KEY before enabling VPN/proxy checks.",
+      400,
+      { vpnCheckEnabled: "The optional VPN/proxy provider is not configured." }
+    );
+  }
+  res.json(await saveVerificationSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+router.post("/verification/link", async (req, res) => {
+  const settings = await getVerificationSettings(res.locals.guildId);
+  if (!settings.enabled) throw publicRequestError("Enable verification before creating a link.");
+  if (!config.DISCORD_CLIENT_SECRET) throw publicRequestError("Discord OAuth verification is not configured.", 503);
+  const token = crypto.randomBytes(32).toString("base64url");
+  const expiresAt = new Date(Date.now() + 24 * 3_600_000).toISOString();
+  await createVerificationLink(res.locals.guildId, hashVerificationToken(token), expiresAt);
+  const baseUrl = (config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  res.status(201).json({
+    url: `${baseUrl}/verify/${token}`,
+    expiresAt
+  });
 });
 
 const rolePanelSchema = z.object({

@@ -20,7 +20,8 @@ const state = {
   rolePanels: [],
   stickyMessages: [],
   scheduledAnnouncements: [],
-  socials: null
+  socials: null,
+  verification: null
 };
 
 const pageMeta = {
@@ -788,14 +789,16 @@ async function loadWelcome() {
 }
 
 async function loadSecurity() {
-  const [antiRaid, antiNuke, antiRole] = await Promise.all([
+  const [antiRaid, antiNuke, antiRole, verification] = await Promise.all([
     api("/anti-raid"),
     api("/anti-nuke"),
-    api("/anti-role")
+    api("/anti-role"),
+    api("/verification")
   ]);
   state.antiRaid = antiRaid;
   state.antiNuke = antiNuke;
   state.antiRole = antiRole;
+  state.verification = verification;
 
   const raidForm = document.querySelector("#anti-raid-form");
   Object.entries(antiRaid).forEach(([key, value]) => {
@@ -823,6 +826,35 @@ async function loadSecurity() {
     else if (Array.isArray(value)) field.value = value.join(" ");
     else field.value = value ?? "";
   });
+
+  const verificationForm = document.querySelector("#verification-form");
+  Object.entries(verification.settings).forEach(([key, value]) => {
+    const field = verificationForm.elements[key];
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value ?? "";
+  });
+  const oauthStatus = verification.oauthConfigured
+    ? "Discord OAuth is configured and ready."
+    : "Discord OAuth is not configured. Add DISCORD_CLIENT_SECRET and the redirect URL to .env before enabling verification.";
+  const vpnStatus = verification.vpnProviderConfigured
+    ? "VPN/proxy provider is configured."
+    : "VPN/proxy checks are unavailable until provider env vars are set.";
+  document.querySelector("#verification-provider-status").innerHTML =
+    `<strong>Provider status</strong><p>${escapeHtml(oauthStatus)} ${escapeHtml(vpnStatus)}</p>`;
+  document.querySelector("#verification-records").innerHTML = table(
+    ["User", "Result", "Reasons", "Risk", "VPN", "Device", "Verified", "Expires"],
+    verification.records.map((record) => `<tr>
+      <td>${escapeHtml(record.userId)}</td>
+      <td><span class="pill status-${escapeHtml(record.status)}">${escapeHtml(record.status)}</span></td>
+      <td class="wrap-cell">${escapeHtml((record.reasonCodes || []).join(", ") || "None")}</td>
+      <td>${record.riskScore}</td>
+      <td>${record.vpnDetected === null ? "N/A" : record.vpnDetected ? "Yes" : "No"}</td>
+      <td>${record.deviceHash ? "Recorded" : "N/A"}</td>
+      <td>${escapeHtml(record.verifiedAt)}</td>
+      <td>${escapeHtml(record.expiresAt)}</td>
+    </tr>`)
+  );
 }
 
 function automationList(items, type, subtitle, extraAction) {
@@ -1008,7 +1040,8 @@ function setSecurityView(view) {
   const labels = {
     "anti-raid": ["Anti Raid", "Detect suspicious join waves and protect member-facing channels."],
     "anti-nuke": ["Anti Nuke", "Monitor destructive administrative actions and respond with explicit safeguards."],
-    "anti-role": ["Role Protection", "Audit dangerous role changes and protected-role assignments."]
+    "anti-role": ["Role Protection", "Audit dangerous role changes and protected-role assignments."],
+    verification: ["Verification", "Confirm Discord identity with a transparent consent flow."]
   };
   const label = labels[state.securityView] || labels["anti-raid"];
   document.querySelector("#page-title").textContent = label[0];
@@ -1766,6 +1799,61 @@ document.querySelector("#anti-role-form").addEventListener("submit", async (even
       toast(`Could not save Role Protection settings: ${error.message}`, true);
     }
   });
+});
+
+document.querySelector("#verification-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  clearErrors(form);
+  await withBusy(form.querySelector('[type="submit"]'), "Saving verification...", async () => {
+    try {
+      await api("/verification", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: form.elements.enabled.checked,
+          verifiedRoleId: values.verifiedRoleId || null,
+          action: values.action,
+          logChannelId: values.logChannelId || null,
+          minAccountAgeDays: Number(values.minAccountAgeDays),
+          minServerDays: Number(values.minServerDays),
+          vpnCheckEnabled: form.elements.vpnCheckEnabled.checked,
+          vpnFailClosed: form.elements.vpnFailClosed.checked,
+          deviceCheckEnabled: form.elements.deviceCheckEnabled.checked,
+          recordRetentionHours: Number(values.recordRetentionHours)
+        })
+      });
+      await loadSecurity();
+      success("Successfully saved verification settings.");
+    } catch (error) {
+      showErrors(form, error.fields);
+      toast(`Could not save verification settings: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#create-verification-link").addEventListener("click", async () => {
+  const button = document.querySelector("#create-verification-link");
+  await withBusy(button, "Creating link...", async () => {
+    try {
+      const result = await api("/verification/link", { method: "POST", body: "{}" });
+      document.querySelector("#verification-link").value = result.url;
+      success(`Verification link created. It expires ${new Date(result.expiresAt).toLocaleString()}.`);
+    } catch (error) {
+      toast(`Could not create verification link: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#copy-verification-link").addEventListener("click", async () => {
+  const value = document.querySelector("#verification-link").value;
+  if (!value) return toast("Create a verification link first.", true);
+  try {
+    await navigator.clipboard.writeText(value);
+    success("Verification link copied.");
+  } catch {
+    toast("The browser could not copy the link. Select the link and copy it manually.", true);
+  }
 });
 
 document.querySelector("#add-automod-link-rule").addEventListener("click", () => addAutoModLinkRule());

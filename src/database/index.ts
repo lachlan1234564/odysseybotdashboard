@@ -17,6 +17,8 @@ import type {
   TicketCloseRequest,
   TicketPanel,
   TicketType,
+  VerificationRecord,
+  VerificationSettings,
   WelcomeSettings
 } from "../shared/types.js";
 import { emptyActionConfig } from "../shared/types.js";
@@ -78,6 +80,7 @@ async function ensureGuildRows(guildId: string): Promise<void> {
   await db.run("INSERT INTO anti_role_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO auto_mod_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO social_promotion_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
+  await db.run("INSERT INTO verification_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
 }
 
 export async function getGuildSettings(guildId: string): Promise<GuildSettings> {
@@ -975,6 +978,135 @@ export async function saveSocialPromotionSettings(
     memberEntries: JSON.stringify(settings.memberEntries)
   });
   return getSocialPromotionSettings(settings.guildId);
+}
+
+export async function getVerificationSettings(guildId: string): Promise<VerificationSettings> {
+  await ensureGuildRows(guildId);
+  const row = (await db.get<Record<string, unknown>>(
+    "SELECT * FROM verification_settings WHERE guild_id = ?",
+    [guildId]
+  ))!;
+  return {
+    guildId,
+    enabled: Boolean(row.enabled),
+    verifiedRoleId: row.verified_role_id as string | null,
+    action: (row.action as VerificationSettings["action"]) ?? "flag",
+    logChannelId: row.log_channel_id as string | null,
+    minAccountAgeDays: Number(row.min_account_age_days ?? 0),
+    minServerDays: Number(row.min_server_days ?? 0),
+    vpnCheckEnabled: Boolean(row.vpn_check_enabled),
+    vpnFailClosed: Boolean(row.vpn_fail_closed),
+    deviceCheckEnabled: Boolean(row.device_check_enabled),
+    recordRetentionHours: Number(row.record_retention_hours ?? 168)
+  };
+}
+
+export async function saveVerificationSettings(settings: VerificationSettings): Promise<VerificationSettings> {
+  await ensureGuildRows(settings.guildId);
+  await db.run(`
+    UPDATE verification_settings SET
+      enabled = @enabled, verified_role_id = @verifiedRoleId,
+      action = @action, log_channel_id = @logChannelId,
+      min_account_age_days = @minAccountAgeDays,
+      min_server_days = @minServerDays,
+      vpn_check_enabled = @vpnCheckEnabled,
+      vpn_fail_closed = @vpnFailClosed,
+      device_check_enabled = @deviceCheckEnabled,
+      record_retention_hours = @recordRetentionHours,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...settings,
+    enabled: Number(settings.enabled),
+    vpnCheckEnabled: Number(settings.vpnCheckEnabled),
+    vpnFailClosed: Number(settings.vpnFailClosed),
+    deviceCheckEnabled: Number(settings.deviceCheckEnabled)
+  });
+  return getVerificationSettings(settings.guildId);
+}
+
+export async function createVerificationLink(
+  guildId: string,
+  tokenHash: string,
+  expiresAt: string
+): Promise<void> {
+  await db.run(
+    "INSERT INTO verification_links (guild_id, token_hash, expires_at) VALUES (?, ?, ?)",
+    [guildId, tokenHash, expiresAt]
+  );
+}
+
+export async function getVerificationLink(tokenHash: string): Promise<{ guildId: string; expiresAt: string } | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT guild_id, expires_at FROM verification_links WHERE token_hash = ? AND expires_at > CURRENT_TIMESTAMP",
+    [tokenHash]
+  );
+  return row ? { guildId: String(row.guild_id), expiresAt: String(row.expires_at) } : null;
+}
+
+export async function createVerificationRecord(
+  record: Omit<VerificationRecord, "id" | "verifiedAt">
+): Promise<void> {
+  await db.run(`
+    INSERT INTO verification_records (
+      guild_id, user_id, status, reason_codes, risk_score, device_hash,
+      account_created_at, server_joined_at, vpn_detected, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `, [
+    record.guildId,
+    record.userId,
+    record.status,
+    JSON.stringify(record.reasonCodes),
+    record.riskScore,
+    record.deviceHash ?? null,
+    record.accountCreatedAt,
+    record.serverJoinedAt ?? null,
+    record.vpnDetected === null ? null : Number(record.vpnDetected),
+    record.expiresAt
+  ]);
+}
+
+export async function listVerificationRecords(guildId: string, limit = 50): Promise<VerificationRecord[]> {
+  await db.run("DELETE FROM verification_records WHERE expires_at <= CURRENT_TIMESTAMP");
+  const rows = await db.all<Record<string, unknown>>(`
+    SELECT * FROM verification_records
+    WHERE guild_id = ?
+    ORDER BY verified_at DESC
+    LIMIT ?
+  `, [guildId, limit]);
+  return rows.map((row) => ({
+    id: Number(row.id),
+    guildId: String(row.guild_id),
+    userId: String(row.user_id),
+    status: row.status as VerificationRecord["status"],
+    reasonCodes: parseJsonArray(row.reason_codes as string),
+    riskScore: Number(row.risk_score ?? 0),
+    deviceHash: row.device_hash as string | null,
+    accountCreatedAt: String(row.account_created_at ?? ""),
+    serverJoinedAt: row.server_joined_at ? String(row.server_joined_at) : null,
+    vpnDetected: row.vpn_detected === null || row.vpn_detected === undefined
+      ? null
+      : Boolean(row.vpn_detected),
+    verifiedAt: String(row.verified_at),
+    expiresAt: String(row.expires_at)
+  }));
+}
+
+export async function getDeviceHashAltMatches(
+  guildId: string,
+  deviceHash: string,
+  excludeUserId: string
+): Promise<Array<{ userId: string; verifiedAt: string }>> {
+  if (!deviceHash) return [];
+  const rows = await db.all<Record<string, unknown>>(`
+    SELECT user_id, verified_at FROM verification_records
+    WHERE guild_id = ? AND device_hash = ? AND user_id != ?
+    ORDER BY verified_at DESC LIMIT 20
+  `, [guildId, deviceHash, excludeUserId]);
+  return rows.map((row) => ({
+    userId: String(row.user_id),
+    verifiedAt: String(row.verified_at)
+  }));
 }
 
 export async function listAntiNukeTrusted(guildId: string): Promise<AntiNukeTrusted[]> {

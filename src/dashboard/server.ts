@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import path from "node:path";
 import express from "express";
 import session from "express-session";
@@ -52,6 +53,11 @@ app.get(["/docs", "/docs/:topic", "/help"], (req, res) => {
     return;
   }
   res.sendFile(path.join(publicPath, "index.html"));
+});
+app.get("/verify/:token", (_req, res) => {
+  const filePath = path.join(publicPath, "verify.html");
+  const content = fs.readFileSync(filePath, "utf8");
+  res.setHeader("Content-Type", "text/html; charset=utf-8").send(content);
 });
 app.use("/uploads", express.static(uploadsPath, {
   fallthrough: false,

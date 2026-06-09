@@ -355,6 +355,35 @@ export interface SocialPromotionSettings {
   memberEntries: Array<{ label: string; url: string }>;
 }
 
+export interface VerificationSettings {
+  guildId: string;
+  enabled: boolean;
+  verifiedRoleId: string | null;
+  action: "allow" | "flag" | "deny" | "assign_role";
+  logChannelId: string | null;
+  minAccountAgeDays: number;
+  minServerDays: number;
+  vpnCheckEnabled: boolean;
+  vpnFailClosed: boolean;
+  deviceCheckEnabled: boolean;
+  recordRetentionHours: number;
+}
+
+export interface VerificationRecord {
+  id: number;
+  guildId: string;
+  userId: string;
+  status: "passed" | "flagged" | "denied";
+  reasonCodes: string[];
+  riskScore: number;
+  deviceHash: string | null;
+  accountCreatedAt: string;
+  serverJoinedAt: string | null;
+  vpnDetected: boolean | null;
+  verifiedAt: string;
+  expiresAt: string;
+}
+
 export interface RolePanel {
   id: number;
   guildId: string;

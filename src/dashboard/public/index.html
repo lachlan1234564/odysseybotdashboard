@@ -46,6 +46,7 @@
               <button data-page="security" data-security-view="anti-raid">Anti Raid</button>
               <button data-page="security" data-security-view="anti-nuke">Anti Nuke</button>
               <button data-page="security" data-security-view="anti-role">Role Protection</button>
+              <button data-page="security" data-security-view="verification">Verification</button>
             </div>
           </div>
           <div class="nav-group">
@@ -644,6 +645,45 @@
                 </section>
                 <div class="sticky-actions"><button type="submit">Save Role Protection</button></div>
               </form>
+            </div>
+            <div class="security-view security-full-span" id="security-view-verification">
+              <form id="verification-form" class="builder-stack">
+                <section class="surface form-section">
+                  <div class="section-title"><div><span class="step">04</span><h3>Anti-alt verification</h3><p>Confirm Discord identity with a transparent consent flow. Members see a disclosure before any checks run.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                  <div class="privacy-disclosure">
+                    <strong>Privacy-first design</strong>
+                    <p>Odyssey Bot checks Discord account age, server membership, and optional network risk signals. Only salted risk records with reason codes are stored. Raw technical data is never shown to server staff. All records expire automatically.</p>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field">Verified role<select name="verifiedRoleId" data-role-select></select><small>Assigned after verification passes. Leave blank to skip auto-role assignment.</small></label>
+                    <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select></label>
+                    <label class="field">Action<select name="action"><option value="allow">Allow all (record only)</option><option value="flag">Flag for review (default)</option><option value="deny">Deny if any risk signal</option><option value="assign_role">Assign verified role</option></select><small>Default is Flag for review - safe for production.</small></label>
+                    <label class="field">Min account age (days)<input name="minAccountAgeDays" type="number" min="0" max="3650" value="0"><small>0 disables. Flags accounts newer than this many days.</small></label>
+                    <label class="field">Min server time (days)<input name="minServerDays" type="number" min="0" max="3650" value="0"><small>0 disables. Flags members who joined less than this many days ago.</small></label>
+                  </div>
+                  <div class="option-grid">
+                    <label class="check-card"><input name="vpnCheckEnabled" type="checkbox"><span><strong>VPN / proxy check</strong><small>Disabled unless VPN provider env vars are set.</small></span></label>
+                    <label class="check-card"><input name="vpnFailClosed" type="checkbox"><span><strong>Fail if VPN check unavailable</strong><small>Leave off to avoid blocking during outages.</small></span></label>
+                    <label class="check-card"><input name="deviceCheckEnabled" type="checkbox"><span><strong>Device consistency check</strong><small>Flags if the same device hash appears for another account in this server. Only a salted hash is stored, never raw device data.</small></span></label>
+                    <label class="field">Record retention (hours)<input name="recordRetentionHours" type="number" min="1" max="8760" value="168"></label>
+                  </div>
+                  <div id="verification-provider-status" class="inline-alert"></div>
+                </section>
+                <div class="sticky-actions"><button type="submit">Save verification settings</button></div>
+              </form>
+
+              <section class="surface form-section verification-link-panel">
+                <div class="section-title"><div><h3>Create a verification link</h3><p>Links expire after 24 hours. Give this URL to members who need to verify.</p></div><button type="button" id="create-verification-link">Create link</button></div>
+                <div class="copy-row">
+                  <input id="verification-link" readonly placeholder="Create a link to show it here">
+                  <button type="button" class="secondary-button" id="copy-verification-link">Copy</button>
+                </div>
+              </section>
+
+              <article class="surface table-card">
+                <div class="section-title"><div><p class="eyebrow">Recent verifications</p><h3>Verification records</h3><p>Only limited risk records are stored. Reason codes explain decisions. Records expire automatically.</p></div></div>
+                <div id="verification-records" class="table-wrap"></div>
+              </article>
             </div>
           </div>
         </section>

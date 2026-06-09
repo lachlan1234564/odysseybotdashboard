@@ -23,7 +23,12 @@ const discordSchema = baseSchema.extend({
 });
 
 const dashboardSchema = discordSchema.extend({
-  DASHBOARD_PASSWORD: z.string().min(8, "DASHBOARD_PASSWORD must be at least 8 characters")
+  DASHBOARD_PASSWORD: z.string().min(8, "DASHBOARD_PASSWORD must be at least 8 characters"),
+  DISCORD_CLIENT_SECRET: z.string().min(1).optional(),
+  DISCORD_OAUTH_REDIRECT_URI: z.string().url().optional(),
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  VPN_CHECK_URL_TEMPLATE: z.string().min(1).optional(),
+  VPN_CHECK_API_KEY: z.string().min(1).optional()
 });
 
 function formatConfigError(error: z.ZodError): Error {
