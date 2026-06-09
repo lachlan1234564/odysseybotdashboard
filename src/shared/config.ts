@@ -19,7 +19,7 @@ const baseSchema = z.object({
 const discordSchema = baseSchema.extend({
   DISCORD_TOKEN: z.string().min(1, "DISCORD_TOKEN is required"),
   DISCORD_CLIENT_ID: z.string().min(1, "DISCORD_CLIENT_ID is required"),
-  DISCORD_GUILD_ID: z.string().min(1, "DISCORD_GUILD_ID is required")
+  DISCORD_GUILD_ID: z.string().min(1).optional()
 });
 
 const dashboardSchema = discordSchema.extend({

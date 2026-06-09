@@ -11,17 +11,18 @@ import {
   getGuildSettings,
   recordModerationAction,
   closeTicket,
-  getTicketByChannel,
   createTicketRecord,
-  createCloseRequest,
+  getTicketByChannel,
   getTicketType
 } from "../database/index.js";
 import type { CustomCommand } from "../shared/types.js";
+import { customCommandNeedsTrustedAccess } from "../shared/security.js";
 import { replacePlaceholders, type PlaceholderValues } from "../shared/placeholders.js";
-import { buildAnnouncementMessage } from "./announcements.js";
+import { buildAnnouncementMessage, getMissingAnnouncementPermission } from "./announcements.js";
 import { renderEmbedMessage } from "./messages.js";
-import { postTicketPanel } from "./tickets.js";
+import { postTicketPanel, prepareTicketCloseRequest } from "./tickets.js";
 import { sendGuildLog } from "./utils.js";
+import { buildDiscordPlaceholders } from "./placeholders.js";
 
 const cooldowns = new Map<string, number>();
 
@@ -34,23 +35,44 @@ function intersect<T>(a: T[], b: T[]): T[] {
   return a.filter((x) => setB.has(x));
 }
 
+function channelLabels(interaction: ChatInputCommandInteraction, ids: string[]): string {
+  return ids.map((id) => {
+    const channel = interaction.guild?.channels.cache.get(id);
+    return channel ? `#${channel.name} (${id})` : id;
+  }).join(", ");
+}
+
+function roleLabels(interaction: ChatInputCommandInteraction, ids: string[]): string {
+  return ids.map((id) => {
+    const role = interaction.guild?.roles.cache.get(id);
+    return role ? `${role.name} (${id})` : id;
+  }).join(", ");
+}
+
 async function checkAccess(
   interaction: ChatInputCommandInteraction,
   command: CustomCommand,
   member: GuildMember
 ): Promise<string | null> {
   const settings = await getGuildSettings(interaction.guildId!);
+  if (
+    command.accessMode === "everyone"
+    && customCommandNeedsTrustedAccess(command.actionType, command.actionConfig)
+  ) {
+    return "This high-impact command is disabled until an administrator restricts it to bot admins, staff, or selected roles.";
+  }
   if (command.blockedChannelIds.includes(interaction.channelId)) {
-    return "This command is blocked in this channel.";
+    return `This command is blocked in ${channelLabels(interaction, [interaction.channelId])}.`;
   }
   if (command.allowedChannelIds.length > 0 && !command.allowedChannelIds.includes(interaction.channelId)) {
-    return "This command is not enabled in this channel.";
+    return `This command can only be used in: ${channelLabels(interaction, command.allowedChannelIds)}.`;
   }
-  if (memberHasAnyRole(member, command.blockedRoleIds)) {
-    return "One of your roles is blocked from using this command.";
+  const matchedBlockedRoles = command.blockedRoleIds.filter((roleId) => member.roles.cache.has(roleId));
+  if (matchedBlockedRoles.length > 0) {
+    return `Your role ${roleLabels(interaction, matchedBlockedRoles)} is blocked from using this command.`;
   }
   if (command.allowedRoleIds.length > 0 && !memberHasAnyRole(member, command.allowedRoleIds)) {
-    return "You do not have an allowed role for this command.";
+    return `You need one of these roles: ${roleLabels(interaction, command.allowedRoleIds)}.`;
   }
 
   if (command.accessMode === "admins") {
@@ -58,11 +80,20 @@ async function checkAccess(
       || memberHasAnyRole(member, settings.adminRoleIds);
     if (!isAdmin) return "This command is restricted to bot administrators.";
   }
-  if (command.accessMode === "staff" && !memberHasAnyRole(member, settings.staffRoleIds)) {
-    return "This command is restricted to configured staff roles.";
+  if (command.accessMode === "staff") {
+    const isStaff = interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
+      || memberHasAnyRole(member, settings.adminRoleIds)
+      || memberHasAnyRole(member, settings.staffRoleIds);
+    if (!isStaff) {
+      return settings.staffRoleIds.length
+        ? `This command requires a configured staff role: ${roleLabels(interaction, settings.staffRoleIds)}.`
+        : "This command requires a configured staff role, but no staff roles are configured.";
+    }
   }
   if (command.accessMode === "roles" && !memberHasAnyRole(member, command.allowedRoleIds)) {
-    return "You do not have an allowed role for this command.";
+    return command.allowedRoleIds.length
+      ? `You need one of these roles: ${roleLabels(interaction, command.allowedRoleIds)}.`
+      : "This command is set to selected roles, but no allowed roles are configured.";
   }
   return null;
 }
@@ -78,17 +109,25 @@ function checkCooldown(command: CustomCommand, guildId: string, userId: string):
   return 0;
 }
 
-function variablesFor(interaction: ChatInputCommandInteraction): PlaceholderValues {
+async function variablesFor(interaction: ChatInputCommandInteraction): Promise<PlaceholderValues> {
   const target = interaction.options.getUser("target");
-  return {
-    user: `<@${interaction.user.id}>`,
-    username: interaction.user.username,
-    server: interaction.guild?.name ?? "this server",
-    channel: `<#${interaction.channelId}>`,
+  const ticket = interaction.guildId
+    ? await getTicketByChannel(interaction.guildId, interaction.channelId)
+    : null;
+  const ticketType = ticket?.ticketTypeId && interaction.guildId
+    ? await getTicketType(ticket.ticketTypeId, interaction.guildId)
+    : null;
+  return buildDiscordPlaceholders({
+    guild: interaction.guild!,
+    channel: interaction.channel,
+    user: interaction.user,
+    target,
     text: interaction.options.getString("text") ?? "",
     reason: interaction.options.getString("reason") ?? "",
-    target: target ? `<@${target.id}>` : interaction.user.toString()
-  };
+    ticket,
+    ticketType,
+    createdAt: ticket?.openedAt ?? interaction.createdTimestamp
+  });
 }
 
 function embedHasContent(command: CustomCommand): boolean {
@@ -136,14 +175,16 @@ export async function handleCustomCommand(interaction: ChatInputCommandInteracti
     return;
   }
 
-  const variables = variablesFor(interaction);
+  const variables = await variablesFor(interaction);
 
   if (command.actionType === "action_sequence") {
     await handleActionSequence(interaction, command, variables);
     return;
   }
 
-  await runSingleAction(interaction, command.actionType, command.actionConfig, variables);
+  await runSingleAction(interaction, command.actionType, command.actionConfig, variables, {
+    ephemeral: command.replyVisibility === "private"
+  });
 }
 
 async function handleActionSequence(
@@ -155,24 +196,17 @@ async function handleActionSequence(
     await interaction.reply({ content: "This sequence has no actions configured.", ephemeral: true });
     return;
   }
+  const ephemeral = command.replyVisibility === "private";
+  await interaction.deferReply({ ephemeral });
   const results: string[] = [];
-  let replied = false;
   for (const item of command.actionConfig.actionSequence) {
     const result = await runSingleAction(interaction, item.actionType, {
       ...emptyActionLike(item),
       ...item
-    } as CustomCommand["actionConfig"], variables, { skipReply: replied });
-    if (result) {
-      results.push(result);
-      if (!replied) {
-        await interaction.reply({ content: result, ephemeral: command.replyVisibility === "private" });
-        replied = true;
-      }
-    }
+    } as CustomCommand["actionConfig"], variables, { skipReply: true, ephemeral });
+    if (result) results.push(result);
   }
-  if (!replied) {
-    await interaction.reply({ content: "Sequence completed.", ephemeral: command.replyVisibility === "private" });
-  }
+  await interaction.editReply({ content: results.length ? results.join("\n").slice(0, 2000) : "Sequence completed." });
 }
 
 function emptyActionLike(item: { embed?: unknown }): CustomCommand["actionConfig"] {
@@ -196,6 +230,7 @@ function emptyActionLike(item: { embed?: unknown }): CustomCommand["actionConfig
     logChannelId: null,
     newName: "",
     newCategoryId: null,
+    pingType: "none",
     actionSequence: []
   };
 }
@@ -205,9 +240,9 @@ async function runSingleAction(
   actionType: CustomCommand["actionType"],
   config: CustomCommand["actionConfig"],
   variables: PlaceholderValues,
-  opts: { skipReply?: boolean } = {}
+  opts: { skipReply?: boolean; ephemeral?: boolean } = {}
 ): Promise<string | undefined> {
-  const ephemeral = (interaction as any).commandReplyEphemeral ?? false;
+  const ephemeral = opts.ephemeral ?? false;
 
   if (actionType === "reply_message") {
     if (opts.skipReply) {
@@ -260,7 +295,31 @@ async function runSingleAction(
     const message = embedHasContentConfig(config.embed)
       ? renderEmbedMessage(config.embed, variables)
       : { content: replacePlaceholders(config.content, variables) };
-    await channel.send(message);
+    const ping = config.pingType === "everyone" ? "@everyone" : config.pingType === "here" ? "@here" : "";
+    const missingPermission = getMissingAnnouncementPermission(
+      interaction.guild!,
+      channel,
+      message,
+      config.pingType
+    );
+    if (missingPermission) {
+      if (!opts.skipReply) {
+        await interaction.reply({
+          content: `I need the **${missingPermission}** permission in the destination channel.`,
+          ephemeral: true
+        });
+      }
+      return `Destination permission missing: ${missingPermission}.`;
+    }
+    const sent = await channel.send({
+      ...message,
+      content: [ping, message.content].filter(Boolean).join("\n") || undefined,
+      allowedMentions: ping ? { parse: ["everyone"] } : { parse: [] }
+    }).then(() => true).catch(() => false);
+    if (!sent) {
+      if (!opts.skipReply) await interaction.reply({ content: "I could not send to that channel.", ephemeral: true });
+      return "Destination send failed.";
+    }
     if (!opts.skipReply) await interaction.reply({ content: `Sent to ${channel}.`, ephemeral });
     return `Sent to ${channel}.`;
   }
@@ -332,23 +391,36 @@ async function runSingleAction(
   if (actionType === "send_announcement") {
     const templateId = config.announcementTemplateId;
     const template = templateId ? await getAnnouncement(templateId, interaction.guildId!) : null;
-    const built = templateId ? await buildAnnouncementMessage(interaction.guildId!, templateId) : null;
     const channelId = config.targetChannelId ?? template?.targetChannelId;
     const channel = channelId ? await interaction.guild!.channels.fetch(channelId).catch(() => null) : null;
+    const built = templateId && channel?.isTextBased() && !channel.isDMBased()
+      ? await buildAnnouncementMessage(interaction.guild!, templateId, channel)
+      : null;
     if (!template || !built || !channel || !channel.isTextBased() || channel.isDMBased() || !("send" in channel)) {
       if (!opts.skipReply) await interaction.reply({ content: "The saved announcement or destination channel is unavailable.", ephemeral: true });
       return "Announcement unavailable.";
     }
-    const { message, pingType } = built;
+    const { message, pingType: templatePingType } = built;
+    const pingType = config.pingType === "none" ? templatePingType : config.pingType;
     const sendPayload: Record<string, unknown> = { ...message };
-    if (pingType === "everyone") {
-      sendPayload.content = "@everyone";
-      sendPayload.allowedMentions = { parse: ["everyone"] };
-    } else if (pingType === "here") {
-      sendPayload.content = "@here";
-      sendPayload.allowedMentions = { parse: ["everyone"] };
+    const ping = pingType === "everyone" ? "@everyone" : pingType === "here" ? "@here" : "";
+    const missingPermission = getMissingAnnouncementPermission(interaction.guild!, channel, message, pingType);
+    if (missingPermission) {
+      if (!opts.skipReply) {
+        await interaction.reply({
+          content: `I need the **${missingPermission}** permission in the announcement channel.`,
+          ephemeral: true
+        });
+      }
+      return `Announcement permission missing: ${missingPermission}.`;
     }
-    await channel.send(sendPayload);
+    sendPayload.content = [ping, message.content].filter(Boolean).join("\n") || undefined;
+    sendPayload.allowedMentions = ping ? { parse: ["everyone"] } : { parse: [] };
+    const sent = await channel.send(sendPayload).then(() => true).catch(() => false);
+    if (!sent) {
+      if (!opts.skipReply) await interaction.reply({ content: "I could not send that announcement.", ephemeral: true });
+      return "Announcement send failed.";
+    }
     if (!opts.skipReply) await interaction.reply({ content: `Announcement sent to ${channel}.`, ephemeral });
     return "Announcement sent.";
   }
@@ -397,23 +469,17 @@ async function runSingleAction(
   }
 
   if (actionType === "request_close_ticket") {
-    if (!(interaction.channel instanceof TextChannel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "This action only works in ticket channels.", ephemeral: true });
-      return "Not a ticket channel.";
+    const prepared = await prepareTicketCloseRequest(
+      interaction,
+      formatReason(config, variables),
+      "community"
+    );
+    if (prepared.error || !prepared.payload) {
+      if (!opts.skipReply) await interaction.reply({ content: prepared.error ?? "Could not create the close request.", ephemeral: true });
+      return prepared.error ?? "Close request failed.";
     }
-    const ticket = await getTicketByChannel(interaction.guildId!, interaction.channelId);
-    if (!ticket || ticket.status !== "open") {
-      if (!opts.skipReply) await interaction.reply({ content: "This is not an active ticket.", ephemeral: true });
-      return "Not an active ticket.";
-    }
-    await createCloseRequest({
-      guildId: interaction.guildId!,
-      ticketId: ticket.id,
-      requestedBy: interaction.user.id,
-      reason: formatReason(config, variables),
-      status: "pending"
-    });
-    if (!opts.skipReply) await interaction.reply({ content: `Close request submitted. Staff will review it.`, ephemeral });
+    if (opts.skipReply) await interaction.followUp({ ...prepared.payload, ephemeral: false });
+    else await interaction.reply(prepared.payload);
     return "Close request submitted.";
   }
 

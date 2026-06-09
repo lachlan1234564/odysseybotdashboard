@@ -63,7 +63,7 @@ Give trusted staff **only** these three things:
 
 - `DISCORD_TOKEN`
 - Your `.env` file
-n- Railway PostgreSQL credentials
+- Railway PostgreSQL credentials
 - Railway project owner access (unless they actually administer hosting)
 - Your Discord Developer Portal account
 

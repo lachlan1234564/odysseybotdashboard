@@ -93,6 +93,7 @@ export interface ActionSequenceItem {
   logChannelId: string | null;
   newName: string;
   newCategoryId: string | null;
+  pingType: "none" | "everyone" | "here";
 }
 
 export interface CustomCommandActionConfig {
@@ -111,6 +112,7 @@ export interface CustomCommandActionConfig {
   logChannelId: string | null;
   newName: string;
   newCategoryId: string | null;
+  pingType: "none" | "everyone" | "here";
   actionSequence: ActionSequenceItem[];
 }
 
@@ -195,6 +197,7 @@ export interface AnnouncementTemplate {
   id: number;
   guildId: string;
   name: string;
+  outputMode: "embed" | "plain";
   title: string;
   body: string;
   color: string;
@@ -240,6 +243,7 @@ export const emptyActionConfig = (): CustomCommandActionConfig => ({
   logChannelId: null,
   newName: "",
   newCategoryId: null,
+  pingType: "none",
   actionSequence: []
 });
 
@@ -301,11 +305,104 @@ export interface AntiNukeTrusted {
   roleId: string | null;
 }
 
+export interface AntiRoleSettings {
+  guildId: string;
+  enabled: boolean;
+  protectedRoleIds: string[];
+  trustedUserIds: string[];
+  trustedRoleIds: string[];
+  action: "log" | "remove_permission" | "remove_role" | "timeout" | "kick" | "ban";
+  massChangeThreshold: number;
+  timeWindowSeconds: number;
+  logChannelId: string | null;
+}
+
+export interface AutoModSettings {
+  guildId: string;
+  enabled: boolean;
+  blockInvites: boolean;
+  blockSuspiciousLinks: boolean;
+  blockCaps: boolean;
+  blockSpam: boolean;
+  blockMassMentions: boolean;
+  capsPercentage: number;
+  spamThreshold: number;
+  mentionThreshold: number;
+  action: "delete" | "warn" | "timeout" | "log";
+  timeoutMinutes: number;
+  alwaysBlockDiscordInvites: boolean;
+  linkChannelRules: Array<{
+    channelId: string;
+    allowedDomains: string[];
+    blockedDomains: string[];
+  }>;
+  ignoredChannelIds: string[];
+  ignoredRoleIds: string[];
+  ignoredUserIds: string[];
+  logChannelId: string | null;
+}
+
+export interface SocialPromotionSettings {
+  guildId: string;
+  outputMode: "embed" | "plain";
+  title: string;
+  description: string;
+  color: string;
+  thumbnailUrl: string;
+  imageUrl: string;
+  targetChannelId: string | null;
+  links: Array<{ label: string; url: string }>;
+  memberEntries: Array<{ label: string; url: string }>;
+}
+
+export interface RolePanel {
+  id: number;
+  guildId: string;
+  name: string;
+  channelId: string | null;
+  title: string;
+  description: string;
+  color: string;
+  active: boolean;
+  roleIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StickyMessage {
+  id: number;
+  guildId: string;
+  channelId: string;
+  content: string;
+  enabled: boolean;
+  minIntervalSeconds: number;
+  lastMessageId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScheduledAnnouncement {
+  id: number;
+  guildId: string;
+  name: string;
+  announcementTemplateId: number;
+  channelId: string;
+  pingType: "none" | "everyone" | "here";
+  scheduleType: "once" | "repeat";
+  nextRunAt: string;
+  intervalMinutes: number | null;
+  enabled: boolean;
+  lastRunAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TicketCloseRequest {
   id: number;
   guildId: string;
   ticketId: number;
   requestedBy: string;
+  requestSource: "staff" | "community";
   reason: string;
   status: "pending" | "approved" | "denied";
   createdAt: string;

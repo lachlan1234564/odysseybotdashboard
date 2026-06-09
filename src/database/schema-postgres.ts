@@ -21,7 +21,7 @@ export const postgresMigrations = [
 
       CREATE TABLE IF NOT EXISTS branding (
         guild_id TEXT PRIMARY KEY,
-        server_name TEXT NOT NULL DEFAULT 'Rapid Bot',
+        server_name TEXT NOT NULL DEFAULT 'Odyssey Bot',
         footer_text TEXT NOT NULL DEFAULT '',
         ticket_panel_title TEXT NOT NULL DEFAULT 'Support Tickets',
         ticket_panel_description TEXT NOT NULL DEFAULT 'Choose a ticket type below to contact the team.',
@@ -287,6 +287,159 @@ export const postgresMigrations = [
     version: 4,
     sql: `
       ALTER TABLE announcement_templates ADD COLUMN IF NOT EXISTS ping_type TEXT NOT NULL DEFAULT 'none';
+    `
+  },
+  {
+    version: 5,
+    sql: `
+      UPDATE ticket_close_requests
+      SET status = 'denied', resolved_at = CURRENT_TIMESTAMP, resolved_by = 'migration'
+      WHERE status = 'pending'
+        AND id NOT IN (
+          SELECT MAX(id) FROM ticket_close_requests
+          WHERE status = 'pending'
+          GROUP BY guild_id, ticket_id
+        );
+
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_close_requests_one_pending
+      ON ticket_close_requests(guild_id, ticket_id)
+      WHERE status = 'pending';
+    `
+  },
+  {
+    version: 6,
+    sql: `
+      CREATE TABLE IF NOT EXISTS anti_role_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        protected_role_ids TEXT NOT NULL DEFAULT '[]',
+        trusted_user_ids TEXT NOT NULL DEFAULT '[]',
+        trusted_role_ids TEXT NOT NULL DEFAULT '[]',
+        action TEXT NOT NULL DEFAULT 'log',
+        mass_change_threshold INTEGER NOT NULL DEFAULT 4,
+        time_window_seconds INTEGER NOT NULL DEFAULT 20,
+        log_channel_id TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS auto_mod_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        block_invites INTEGER NOT NULL DEFAULT 0,
+        block_suspicious_links INTEGER NOT NULL DEFAULT 0,
+        block_caps INTEGER NOT NULL DEFAULT 0,
+        block_spam INTEGER NOT NULL DEFAULT 0,
+        block_mass_mentions INTEGER NOT NULL DEFAULT 0,
+        caps_percentage INTEGER NOT NULL DEFAULT 75,
+        spam_threshold INTEGER NOT NULL DEFAULT 4,
+        mention_threshold INTEGER NOT NULL DEFAULT 5,
+        action TEXT NOT NULL DEFAULT 'delete',
+        timeout_minutes INTEGER NOT NULL DEFAULT 10,
+        ignored_channel_ids TEXT NOT NULL DEFAULT '[]',
+        ignored_role_ids TEXT NOT NULL DEFAULT '[]',
+        ignored_user_ids TEXT NOT NULL DEFAULT '[]',
+        log_channel_id TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS role_panels (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        channel_id TEXT,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        color TEXT NOT NULL DEFAULT '#5865F2',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(guild_id, name)
+      );
+
+      CREATE TABLE IF NOT EXISTS role_panel_roles (
+        panel_id BIGINT NOT NULL REFERENCES role_panels(id) ON DELETE CASCADE,
+        role_id TEXT NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY(panel_id, role_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS sticky_messages (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        content TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        min_interval_seconds INTEGER NOT NULL DEFAULT 30,
+        last_message_id TEXT,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(guild_id, channel_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS scheduled_announcements (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        announcement_template_id BIGINT NOT NULL REFERENCES announcement_templates(id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL,
+        ping_type TEXT NOT NULL DEFAULT 'none',
+        schedule_type TEXT NOT NULL DEFAULT 'once',
+        next_run_at TIMESTAMPTZ NOT NULL,
+        interval_minutes INTEGER,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_run_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(guild_id, name)
+      );
+
+      ALTER TABLE tickets ADD COLUMN IF NOT EXISTS priority TEXT NOT NULL DEFAULT 'normal';
+
+      CREATE INDEX IF NOT EXISTS idx_role_panels_guild ON role_panels(guild_id);
+      CREATE INDEX IF NOT EXISTS idx_sticky_messages_guild ON sticky_messages(guild_id);
+      CREATE INDEX IF NOT EXISTS idx_scheduled_due ON scheduled_announcements(enabled, next_run_at);
+    `
+  },
+  {
+    version: 7,
+    sql: `
+      ALTER TABLE ticket_close_requests
+      ADD COLUMN IF NOT EXISTS request_source TEXT NOT NULL DEFAULT 'community';
+    `
+  },
+  {
+    version: 8,
+    sql: `
+      ALTER TABLE announcement_templates
+      ADD COLUMN IF NOT EXISTS output_mode TEXT NOT NULL DEFAULT 'embed';
+
+      UPDATE branding
+      SET server_name = 'Odyssey Bot'
+      WHERE server_name = 'Rapid Bot';
+    `
+  },
+  {
+    version: 9,
+    sql: `
+      ALTER TABLE auto_mod_settings
+      ADD COLUMN IF NOT EXISTS always_block_discord_invites INTEGER NOT NULL DEFAULT 1;
+
+      ALTER TABLE auto_mod_settings
+      ADD COLUMN IF NOT EXISTS link_channel_rules TEXT NOT NULL DEFAULT '[]';
+
+      CREATE TABLE IF NOT EXISTS social_promotion_settings (
+        guild_id TEXT PRIMARY KEY,
+        output_mode TEXT NOT NULL DEFAULT 'embed',
+        title TEXT NOT NULL DEFAULT 'Follow our socials',
+        description TEXT NOT NULL DEFAULT '',
+        color TEXT NOT NULL DEFAULT '#5865F2',
+        thumbnail_url TEXT NOT NULL DEFAULT '',
+        image_url TEXT NOT NULL DEFAULT '',
+        target_channel_id TEXT,
+        links TEXT NOT NULL DEFAULT '[]',
+        member_entries TEXT NOT NULL DEFAULT '[]',
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
     `
   }
 ] as const;

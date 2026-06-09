@@ -1,31 +1,20 @@
 import {
-  ActionRowBuilder,
+  AuditLogEvent,
   AutocompleteInteraction,
-  ButtonBuilder,
   ButtonInteraction,
-  ButtonStyle,
   ChatInputCommandInteraction,
   Client,
   Events,
   GatewayIntentBits,
   ModalSubmitInteraction,
   PermissionFlagsBits,
-  StringSelectMenuInteraction,
-  TextChannel
+  StringSelectMenuInteraction
 } from "discord.js";
 import {
   listAnnouncements,
   listCustomCommands,
   updateTicketActivity,
-  getWelcomeSettings,
-  getTicketByChannel,
-  getTicketType,
-  resolveCloseRequest,
-  getTicketCloseRequest,
-  closeTicket,
-  getGuildSettings,
-  getPendingCloseRequestForTicket,
-  createCloseRequest
+  getWelcomeSettings
 } from "../database/index.js";
 import { loadDiscordConfig } from "../shared/config.js";
 import { handleAnnounce, handleAnnouncementButton } from "./announcements.js";
@@ -35,19 +24,38 @@ import {
   availableTicketPanels,
   handlePanelSelect,
   handleTicketButton,
+  handleTicketCloseDecision,
   handleTicketCloseModal,
+  handleTicketCloseRequestModal,
   handleTicketCreate,
   handleTicketCreateButton,
   handleTicketPanel,
+  handleTicketPrioritySelect,
   processInactiveTickets,
-  sendTicketLog
+  prepareTicketCloseRequest
 } from "./tickets.js";
 import { handleGuildMemberAdd } from "./anti-raid.js";
 import { auditHandler } from "./anti-nuke.js";
+import {
+  handleMemberRoleUpdate,
+  handleRoleCreate,
+  handleRoleDelete,
+  handleRoleUpdate
+} from "./anti-role.js";
+import { handleAutoModMessage } from "./auto-mod.js";
+import {
+  availableRolePanels,
+  handleReactionRolesCommand,
+  handleRolePanelButton
+} from "./role-panels.js";
+import { handleStickyActivity } from "./sticky-messages.js";
+import { processScheduledAnnouncements } from "./scheduled-announcements.js";
 import { renderEmbedMessage } from "./messages.js";
 import { emptyEmbedConfig } from "../shared/types.js";
 import { replacePlaceholders } from "../shared/placeholders.js";
-import { asColor } from "./utils.js";
+import { buildDiscordPlaceholders } from "./placeholders.js";
+import { handleHelpCommand } from "./help.js";
+import { logError } from "../shared/logging.js";
 
 const config = loadDiscordConfig();
 const client = new Client({
@@ -55,33 +63,48 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildModeration
+    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.MessageContent
   ]
 });
 
 client.once(Events.ClientReady, (readyClient) => {
-  console.log(`Rapid Bot logged in as ${readyClient.user.tag}.`);
+  console.log(`Odyssey Bot connected to Discord in ${readyClient.guilds.cache.size} server(s).`);
+  processScheduledAnnouncements(readyClient).catch((error) => {
+    logError("Scheduled announcement sweep failed", error);
+  });
   setInterval(() => {
     processInactiveTickets(readyClient.guilds.cache).catch((error) => {
-      console.error("Inactive ticket sweep failed:", error);
+      logError("Inactive ticket sweep failed", error);
     });
   }, 15 * 60_000).unref();
+  setInterval(() => {
+    processScheduledAnnouncements(readyClient).catch((error) => {
+      logError("Scheduled announcement sweep failed", error);
+    });
+  }, 30_000).unref();
 });
 
 client.on(Events.MessageCreate, async (message) => {
   if (message.guildId && !message.author.bot) {
+    await handleAutoModMessage(message).catch((error) => {
+      logError("Auto Mod message handler failed", error);
+    });
     await updateTicketActivity(message.guildId, message.channelId).catch((error) => {
-      console.error("Ticket activity update failed:", error);
+      logError("Ticket activity update failed", error);
+    });
+    await handleStickyActivity(message).catch((error) => {
+      logError("Sticky message handler failed", error);
     });
   }
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
   await handleGuildMemberAdd(member).catch((error) => {
-    console.error("Anti-raid member add handler failed:", error);
+    logError("Anti-raid member add handler failed", error);
   });
   await handleWelcome(member).catch((error) => {
-    console.error("Welcome handler failed:", error);
+    logError("Welcome handler failed", error);
   });
 });
 
@@ -90,22 +113,24 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
   const settings = await getWelcomeSettings(member.guild.id);
   if (!settings.enabled) return;
 
-  const variables = {
-    user: `<@${member.id}>`,
-    username: member.user.username,
-    server: member.guild.name,
-    channel: "#general",
-    text: "",
-    reason: "",
-    target: `<@${member.id}>`,
-    memberCount: String(member.guild.memberCount ?? 0),
-    createdAt: `<t:${Math.floor(member.user.createdTimestamp / 1000)}:D>`
-  };
+  const variables = buildDiscordPlaceholders({
+    guild: member.guild,
+    user: member.user,
+    target: member.user,
+    createdAt: Date.now()
+  });
 
   if (settings.channelId) {
     const channel = await member.guild.channels.fetch(settings.channelId).catch(() => null);
     if (channel && channel.isTextBased() && !channel.isDMBased() && "send" in channel) {
-      const content = replacePlaceholders(settings.content, variables);
+      const channelVariables = buildDiscordPlaceholders({
+        guild: member.guild,
+        channel,
+        user: member.user,
+        target: member.user,
+        createdAt: Date.now()
+      });
+      const content = replacePlaceholders(settings.content, channelVariables);
       const hasEmbed = settings.embedTitle || settings.embedDescription || settings.embedImageUrl || settings.embedThumbnailUrl || settings.embedFooterText;
       if (hasEmbed) {
         const embed = renderEmbedMessage({
@@ -117,7 +142,7 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
           imageUrl: settings.embedImageUrl,
           thumbnailUrl: settings.embedThumbnailUrl,
           footerText: settings.embedFooterText
-        }, variables);
+        }, channelVariables);
         await channel.send({ content: content || undefined, ...embed }).catch(() => undefined);
       } else if (content) {
         await channel.send(content).catch(() => undefined);
@@ -185,10 +210,22 @@ client.on(Events.GuildMemberRemove, async (member) => {
 
 client.on(Events.GuildRoleDelete, async (role) => {
   await auditHandler(role.guild, 32); // AuditLogEvent.RoleDelete
+  await handleRoleDelete(role).catch((error) => {
+    logError("Role Protection delete handler failed", error);
+  });
 });
 
 client.on(Events.GuildRoleCreate, async (role) => {
   await auditHandler(role.guild, 30); // AuditLogEvent.RoleCreate
+  await handleRoleCreate(role).catch((error) => {
+    logError("Role Protection create handler failed", error);
+  });
+});
+
+client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
+  await handleRoleUpdate(oldRole, newRole).catch((error) => {
+    logError("Role Protection update handler failed", error);
+  });
 });
 
 client.on(Events.WebhooksUpdate, async (channel) => {
@@ -199,11 +236,15 @@ client.on(Events.WebhooksUpdate, async (channel) => {
 
 client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   if (!newMember.guild) return;
+  if (_oldMember.partial) return;
   const hadAdmin = _oldMember.roles.cache.some((r) => r.permissions.has(PermissionFlagsBits.Administrator));
   const hasAdmin = newMember.roles.cache.some((r) => r.permissions.has(PermissionFlagsBits.Administrator));
   if (hadAdmin !== hasAdmin) {
-    await import("./anti-nuke.js").then((m) => m.checkEvent(newMember.guild, newMember.guild.members.me?.id ?? "system", "adminRoleChange", newMember.id));
+    await auditHandler(newMember.guild, AuditLogEvent.MemberRoleUpdate, "admin");
   }
+  await handleMemberRoleUpdate(_oldMember, newMember).catch((error) => {
+    logError("Role Protection assignment handler failed", error);
+  });
 });
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
@@ -233,11 +274,24 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
       .map((template) => ({ name: template.name, value: String(template.id) }));
     await interaction.respond(choices);
   }
+
+  if (interaction.commandName === "reaction-roles") {
+    const choices = (await availableRolePanels(interaction.guildId))
+      .filter((panel) => panel.active && panel.name.toLowerCase().includes(query))
+      .slice(0, 25)
+      .map((panel) => ({ name: panel.name, value: String(panel.id) }));
+    await interaction.respond(choices);
+  }
 }
 
 async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (interaction.commandName === "ping") {
     await interaction.reply({ content: `Pong! ${client.ws.ping}ms`, ephemeral: true });
+    return;
+  }
+
+  if (interaction.commandName === "help") {
+    await handleHelpCommand(interaction);
     return;
   }
 
@@ -256,6 +310,11 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
     return;
   }
 
+  if (interaction.commandName === "reaction-roles") {
+    await handleReactionRolesCommand(interaction);
+    return;
+  }
+
   if (interaction.commandName === "close-request") {
     await handleCloseRequest(interaction);
     return;
@@ -267,57 +326,12 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 }
 
 async function handleCloseRequest(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!interaction.guildId || !interaction.guild) {
-    await interaction.reply({ content: "This command can only be used in a server.", ephemeral: true });
-    return;
-  }
-  if (!(interaction.channel instanceof TextChannel)) {
-    await interaction.reply({ content: "This command only works inside ticket channels.", ephemeral: true });
-    return;
-  }
-
-  const ticket = await getTicketByChannel(interaction.guildId, interaction.channelId);
-  if (!ticket || ticket.status !== "open") {
-    await interaction.reply({ content: "This is not an active ticket channel.", ephemeral: true });
-    return;
-  }
-
-  const existing = await getPendingCloseRequestForTicket(interaction.guildId, ticket.id);
-  if (existing) {
-    await interaction.reply({ content: "A close request is already pending for this ticket.", ephemeral: true });
-    return;
-  }
-
   const reason = interaction.options.getString("reason") ?? "";
-  const request = await createCloseRequest({
-    guildId: interaction.guildId,
-    ticketId: ticket.id,
-    requestedBy: interaction.user.id,
-    reason,
-    status: "pending"
+  const prepared = await prepareTicketCloseRequest(interaction, reason, "staff");
+  await interaction.reply(prepared.payload ?? {
+    content: prepared.error ?? "Could not create the close request.",
+    ephemeral: true
   });
-
-  const settings = await getGuildSettings(interaction.guildId);
-  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guildId) : null;
-  const staffRoleIds = [...new Set([...settings.staffRoleIds, ...(type?.staffRoleIds ?? [])])];
-  const staffRoleMentions = staffRoleIds.map((id) => `<@&${id}>`).join(" ");
-
-  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`ticket-close:approve:${request.id}`).setLabel("Approve close").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`ticket-close:deny:${request.id}`).setLabel("Deny close").setStyle(ButtonStyle.Danger)
-  );
-
-  await interaction.reply({
-    content: `${interaction.user} requested to close this ticket.${reason ? "\nReason: " + reason : ""}${staffRoleMentions ? "\n" + staffRoleMentions : ""}`,
-    components: [buttons]
-  });
-
-  await sendTicketLog(
-    interaction.guild,
-    type,
-    "Close request created",
-    `<@${interaction.user.id}> \`${interaction.user.id}\` requested to close <#${interaction.channelId}> \`${interaction.channelId}\`.${reason ? `\nReason: ${reason}` : ""}`
-  );
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -330,12 +344,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleTicketCreate(interaction);
     } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith("ticket:panel-select:")) {
       await handlePanelSelect(interaction);
+    } else if (interaction.isStringSelectMenu() && interaction.customId === "ticket:set-priority") {
+      await handleTicketPrioritySelect(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket:create-button:")) {
       await handleTicketCreateButton(interaction);
+    } else if (interaction.isButton() && interaction.customId.startsWith("role-panel:toggle:")) {
+      await handleRolePanelButton(interaction);
+    } else if (interaction.isButton() && interaction.customId.startsWith("ticket-close:")) {
+      await handleTicketCloseDecision(interaction as ButtonInteraction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket:")) {
       await handleTicketButton(interaction);
-    } else if (interaction.isButton() && interaction.customId.startsWith("ticket-close:")) {
-      await handleTicketCloseButton(interaction as ButtonInteraction);
     } else if (interaction.isButton() && interaction.customId.startsWith("announce:")) {
       await handleAnnouncementButton(interaction);
     } else if (interaction.isModalSubmit() && interaction.customId === "ticket:close-reason") {
@@ -344,7 +362,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleTicketCloseRequestModal(interaction as ModalSubmitInteraction);
     }
   } catch (error) {
-    console.error("Interaction failed:", error);
+    logError("Interaction failed", error);
     if (interaction.isRepliable()) {
       const message = { content: "Something went wrong while handling that action.", ephemeral: true };
       if (interaction.replied || interaction.deferred) {
@@ -355,86 +373,5 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   }
 });
-
-async function handleTicketCloseButton(interaction: ButtonInteraction): Promise<void> {
-  if (!interaction.guild || !(interaction.channel instanceof TextChannel)) return;
-  const [, action, requestIdStr] = interaction.customId.split(":");
-  const requestId = Number(requestIdStr);
-  const request = await getTicketCloseRequest(requestId, interaction.guild.id);
-  if (!request || request.status !== "pending") {
-    await interaction.reply({ content: "That close request is no longer pending.", ephemeral: true });
-    return;
-  }
-
-  const ticket = await getTicketByChannel(interaction.guild.id, interaction.channel.id);
-  if (!ticket || ticket.status !== "open") {
-    await interaction.reply({ content: "This is not an active ticket.", ephemeral: true });
-    return;
-  }
-
-  const settings = await getGuildSettings(interaction.guild.id);
-  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guild.id) : null;
-  const member = await interaction.guild.members.fetch(interaction.user.id);
-  const isStaff = interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
-    || member.roles.cache.some((r) => [...settings.staffRoleIds, ...(type?.staffRoleIds ?? [])].includes(r.id));
-
-  if (!isStaff) {
-    await interaction.reply({ content: "Only staff can approve or deny close requests.", ephemeral: true });
-    return;
-  }
-
-  if (action === "approve") {
-    const closed = await closeTicket(interaction.guild.id, interaction.channel.id, interaction.user.id, request.reason);
-    if (closed) {
-      await resolveCloseRequest(requestId, interaction.guild.id, interaction.user.id, "approved");
-      const delaySeconds = type?.closeRequestDelaySeconds ?? 5;
-      await interaction.reply(`Close request approved by ${interaction.user}. This channel will be deleted in ${delaySeconds} second(s).`);
-      await sendTicketLog(
-        interaction.guild,
-        type,
-        "Ticket closed",
-        `**#${interaction.channel.name}** closed by <@${interaction.user.id}> (approved close request). Owner: <@${ticket.userId}>.${request.reason ? `\nReason: ${request.reason}` : ""}`
-      );
-      setTimeout(() => interaction.channel!.delete("Ticket closed").catch(() => undefined), delaySeconds * 1000);
-    } else {
-      await interaction.reply({ content: "This ticket is already closed.", ephemeral: true });
-    }
-  } else {
-    await resolveCloseRequest(requestId, interaction.guild.id, interaction.user.id, "denied");
-    await interaction.reply(`Close request denied by ${interaction.user}.`);
-  }
-}
-
-async function handleTicketCloseRequestModal(interaction: ModalSubmitInteraction): Promise<void> {
-  if (!interaction.guild || !(interaction.channel instanceof TextChannel)) return;
-  const reason = interaction.fields.getTextInputValue("reason").trim();
-  const ticket = await getTicketByChannel(interaction.guild.id, interaction.channel.id);
-  if (!ticket || ticket.status !== "open") {
-    await interaction.reply({ content: "This is not an active ticket.", ephemeral: true });
-    return;
-  }
-
-  const request = await import("../database/index.js").then((db) => db.createCloseRequest({
-    guildId: interaction.guild!.id,
-    ticketId: ticket.id,
-    requestedBy: interaction.user.id,
-    reason,
-    status: "pending"
-  }));
-
-  const settings = await getGuildSettings(interaction.guild.id);
-  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guild.id) : null;
-  const staffRoleMentions = [...new Set([...settings.staffRoleIds, ...(type?.staffRoleIds ?? [])])].map((id) => `<@&${id}>`).join(" ");
-
-  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`ticket-close:approve:${request.id}`).setLabel("Approve close").setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId(`ticket-close:deny:${request.id}`).setLabel("Deny close").setStyle(ButtonStyle.Danger)
-  );
-
-  await interaction.reply({
-    content: `${interaction.user} requested to close this ticket.${reason ? `\nReason: ${reason}` : ""}${staffRoleMentions ? `\n${staffRoleMentions}` : ""}`,
-    components: [buttons]
-  });
-}
 
 client.login(config.DISCORD_TOKEN);

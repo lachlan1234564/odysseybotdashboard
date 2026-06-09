@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonInteraction,
   ButtonStyle,
@@ -8,6 +9,7 @@ import {
   EmbedBuilder,
   Guild,
   GuildMember,
+  InteractionReplyOptions,
   ModalBuilder,
   ModalSubmitInteraction,
   PermissionFlagsBits,
@@ -21,37 +23,53 @@ import {
   claimTicket,
   closeTicket,
   countOpenTicketsForUser,
+  createCloseRequest,
   createTicketRecord,
   getBranding,
   getGuildSettings,
   getTicketByChannel,
   getTicketPanel,
   getTicketType,
+  getPendingCloseRequestForTicket,
+  getTicketCloseRequest,
   listInactiveTickets,
   listTicketPanels,
-  listTicketTypes
+  listTicketTypes,
+  resolveCloseRequest,
+  updateTicketPriority
 } from "../database/index.js";
-import type { TicketPanel, TicketType } from "../shared/types.js";
+import type { TicketRecord } from "../database/index.js";
+import type { TicketCloseRequest, TicketPanel, TicketType } from "../shared/types.js";
 import { emptyEmbedConfig } from "../shared/types.js";
+import { parseDiscordComponentEmoji } from "../shared/discord-components.js";
 import { renderEmbedMessage } from "./messages.js";
+import { buildDiscordPlaceholders } from "./placeholders.js";
+import { friendlyDiscordError, logDiscordError, logError } from "../shared/logging.js";
+import {
+  closeRequestAudience,
+  closeRequestCreationDenial,
+  closeRequestDecisionDenial,
+  type CloseRequestSource
+} from "./ticket-close-policy.js";
 import { asColor, requireBotAdmin, sendGuildLog } from "./utils.js";
 
-type SendableChannel = { send: (message: any) => Promise<unknown> };
+type SendableChannel = {
+  id?: string;
+  name?: string | null;
+  send: (message: any) => Promise<unknown>;
+  isThread?: () => boolean;
+  permissionsFor?: (member: GuildMember) => Readonly<import("discord.js").PermissionsBitField> | null;
+};
 type TicketCreateInteraction = StringSelectMenuInteraction | ButtonInteraction;
+type CloseRequestInteraction = ChatInputCommandInteraction | ModalSubmitInteraction;
 
-function placeholderValues(guild: Guild) {
-  return {
-    user: "@user",
-    username: "username",
-    server: guild.name,
-    channel: "#channel",
-    text: "",
-    reason: "",
-    target: "@target"
-  };
-}
-
-async function ticketPanelMessage(guild: Guild, panel: TicketPanel) {
+async function ticketPanelMessage(guild: Guild, panel: TicketPanel, channel?: SendableChannel | null) {
+  if (panel.guildId !== guild.id) {
+    throw new Error("That ticket panel belongs to a different server.");
+  }
+  if (!panel.title.trim() || !panel.description.trim()) {
+    throw new Error("The ticket panel needs both a title and description.");
+  }
   const embedConfig = {
     ...emptyEmbedConfig(),
     title: panel.title,
@@ -62,7 +80,10 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel) {
     footerText: panel.footerText,
     footerIconUrl: panel.footerIconUrl
   };
-  const rendered = renderEmbedMessage(embedConfig, placeholderValues(guild));
+  const rendered = renderEmbedMessage(embedConfig, buildDiscordPlaceholders({
+    guild,
+    channel: channel?.id ? { id: channel.id, name: channel.name } : null
+  }));
   const components: ActionRowBuilder<any>[] = [];
 
   if (panel.panelKind === "multi") {
@@ -82,6 +103,9 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel) {
           })))
       ));
     }
+    if (!children.length) {
+      throw new Error("This multi-panel has no active child panels.");
+    }
     return { ...rendered, components };
   }
 
@@ -97,7 +121,7 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel) {
         new ButtonBuilder()
           .setCustomId(`ticket:create-button:${panel.id}:${type.id}`)
           .setLabel(type.label.slice(0, 80))
-          .setEmoji(type.emoji || "🎫")
+          .setEmoji(parseDiscordComponentEmoji(type.emoji || "🎫")!)
           .setStyle(ButtonStyle.Secondary)
       ));
       components.push(row);
@@ -111,9 +135,12 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel) {
           label: type.label.slice(0, 100),
           value: String(type.id),
           description: type.description.slice(0, 100) || undefined,
-          emoji: type.emoji || undefined
+          emoji: parseDiscordComponentEmoji(type.emoji)
         })))
     ));
+  }
+  if (!types.length) {
+    throw new Error("This ticket panel has no active ticket types.");
   }
   return { ...rendered, components };
 }
@@ -121,25 +148,57 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel) {
 export async function postTicketPanel(guild: Guild, panelId: number, channel: SendableChannel): Promise<void> {
   const panel = await getTicketPanel(panelId, guild.id);
   if (!panel?.active) throw new Error("Ticket panel not found or inactive.");
-  await channel.send(await ticketPanelMessage(guild, panel));
+  const payload = await ticketPanelMessage(guild, panel, channel);
+  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+  if (!botMember) throw new Error("Odyssey Bot could not verify its server permissions.");
+  const permissions = channel.permissionsFor?.(botMember);
+  if (permissions) {
+    const required = [
+      PermissionFlagsBits.ViewChannel,
+      channel.isThread?.() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages,
+      PermissionFlagsBits.EmbedLinks,
+      ...(payload.files?.length ? [PermissionFlagsBits.AttachFiles] : [])
+    ];
+    const missing = required.filter((permission) => !permissions.has(permission));
+    if (missing.length) {
+      const names = [
+        !permissions.has(PermissionFlagsBits.ViewChannel) ? "View Channel" : "",
+        !permissions.has(channel.isThread?.() ? PermissionFlagsBits.SendMessagesInThreads : PermissionFlagsBits.SendMessages)
+          ? (channel.isThread?.() ? "Send Messages in Threads" : "Send Messages")
+          : "",
+        !permissions.has(PermissionFlagsBits.EmbedLinks) ? "Embed Links" : "",
+        payload.files?.length && !permissions.has(PermissionFlagsBits.AttachFiles) ? "Attach Files" : ""
+      ].filter(Boolean);
+      throw new Error(`Odyssey Bot is missing these permissions in the target channel: ${names.join(", ")}.`);
+    }
+  }
+  await channel.send(payload);
 }
 
 function ticketButtons(type: TicketType): ActionRowBuilder<ButtonBuilder>[] {
   const buttons: ButtonBuilder[] = [];
   if (type.claimButtonEnabled) {
-    buttons.push(new ButtonBuilder().setCustomId("ticket:claim").setLabel("Claim ticket").setStyle(ButtonStyle.Primary));
+    buttons.push(new ButtonBuilder().setCustomId("ticket:claim").setLabel("Claim Ticket").setStyle(ButtonStyle.Primary));
   }
+  buttons.push(new ButtonBuilder().setCustomId("ticket:priority").setLabel("Set Priority").setStyle(ButtonStyle.Secondary));
   if (type.closeButtonEnabled && !type.requestCloseEnabled) {
-    buttons.push(new ButtonBuilder().setCustomId("ticket:close").setLabel("Close ticket").setStyle(ButtonStyle.Danger));
+    buttons.push(new ButtonBuilder().setCustomId("ticket:close").setLabel("Close Ticket").setStyle(ButtonStyle.Danger));
   }
   if (type.requestCloseEnabled) {
-    buttons.push(new ButtonBuilder().setCustomId("ticket:close-request").setLabel("Request close").setStyle(ButtonStyle.Secondary));
+    buttons.push(new ButtonBuilder().setCustomId("ticket:close-request").setLabel("Request Staff Close").setStyle(ButtonStyle.Secondary));
   }
   return buttons.length ? [new ActionRowBuilder<ButtonBuilder>().addComponents(buttons)] : [];
 }
 
 function sanitizeChannelName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 90);
+}
+
+function formatDiscordDate(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isFinite(date.getTime())
+    ? `<t:${Math.floor(date.getTime() / 1000)}:F>`
+    : "Unavailable";
 }
 
 function formatTicketChannelName(type: TicketType, username: string, userId: string): string {
@@ -152,6 +211,27 @@ function formatTicketChannelName(type: TicketType, username: string, userId: str
 
 function hasAnyRole(member: GuildMember, roleIds: string[]): boolean {
   return roleIds.some((roleId) => member.roles.cache.has(roleId));
+}
+
+async function ticketActorAccess(
+  guild: Guild,
+  userId: string,
+  ticket: Awaited<ReturnType<typeof getTicketByChannel>>,
+  type: TicketType | null,
+  memberPermissions?: Readonly<import("discord.js").PermissionsBitField> | null
+) {
+  if (!ticket) return { isStaff: false, isCommunity: false, member: null };
+  const [member, settings] = await Promise.all([
+    guild.members.fetch(userId),
+    getGuildSettings(guild.id)
+  ]);
+  const staffRoleIds = [...new Set([...settings.staffRoleIds, ...(type?.staffRoleIds ?? [])])];
+  return {
+    member,
+    isStaff: Boolean(memberPermissions?.has(PermissionFlagsBits.ManageChannels))
+      || hasAnyRole(member, staffRoleIds),
+    isCommunity: ticket.userId === userId || hasAnyRole(member, type?.allowedRoleIds ?? [])
+  };
 }
 
 async function canManageTicket(interaction: ButtonInteraction, allowOwner: boolean): Promise<boolean> {
@@ -177,6 +257,14 @@ export async function sendTicketLog(guild: Guild, type: TicketType | null, title
     .setColor(asColor(type?.color ?? branding.ticketPanelColor))
     .setTitle(title)
     .setDescription(description)
+    .addFields(
+      { name: "Action", value: title, inline: true },
+      {
+        name: "Status",
+        value: /denied/i.test(title) ? "Denied" : /failed|error/i.test(title) ? "Failed" : "Completed",
+        inline: true
+      }
+    )
     .setTimestamp();
   await sendGuildLog(
     guild.id,
@@ -184,6 +272,236 @@ export async function sendTicketLog(guild: Guild, type: TicketType | null, title
     (id) => guild.channels.fetch(id),
     embed
   );
+}
+
+export function buildTicketTranscriptEmbed(input: {
+  channelName: string;
+  channelId: string;
+  ticket: TicketRecord | undefined;
+  type: TicketType | null;
+  closedBy: string;
+  reason: string;
+  messageCount: number;
+  closedAt: string;
+}) {
+  const { channelName, channelId, ticket, type, closedBy, reason, messageCount, closedAt } = input;
+  return new EmbedBuilder()
+    .setColor(asColor("#57F287"))
+    .setTitle("Ticket Transcript Saved")
+    .setDescription("The ticket was closed and its latest messages were exported successfully.")
+    .addFields(
+      { name: "Status", value: "Saved and ready to download", inline: false },
+      { name: "Ticket", value: `#${channelName}\n\`${channelId}\``, inline: true },
+      { name: "Ticket ID", value: ticket ? `#${ticket.id}` : "Unavailable", inline: true },
+      { name: "Category", value: type?.label ?? "General", inline: true },
+      { name: "Requester", value: ticket ? `<@${ticket.userId}>\n\`${ticket.userId}\`` : "Unavailable", inline: true },
+      { name: "Closed by", value: `<@${closedBy}>\n\`${closedBy}\``, inline: true },
+      { name: "Messages saved", value: String(messageCount), inline: true },
+      { name: "Opened", value: ticket ? formatDiscordDate(ticket.openedAt) : "Unavailable", inline: true },
+      { name: "Closed", value: formatDiscordDate(closedAt), inline: true },
+      { name: "Close reason", value: reason || "No reason provided.", inline: false }
+    )
+    .setFooter({ text: "Odyssey Bot ticket archive" })
+    .setTimestamp(new Date(closedAt));
+}
+
+export async function sendTicketTranscript(
+  guild: Guild,
+  channel: TextChannel,
+  type: TicketType | null,
+  closedBy: string,
+  reason: string
+): Promise<{ saved: boolean; downloadUrl: string | null; messageCount: number }> {
+  const settings = await getGuildSettings(guild.id);
+  const logChannelId = type?.transcriptChannelId ?? settings.transcriptChannelId;
+  if (!logChannelId) return { saved: false, downloadUrl: null, messageCount: 0 };
+  const logChannel = await guild.channels.fetch(logChannelId).catch(() => null);
+  if (!logChannel?.isTextBased() || logChannel.isDMBased() || !("send" in logChannel)) {
+    return { saved: false, downloadUrl: null, messageCount: 0 };
+  }
+
+  try {
+    const ticket = await getTicketByChannel(guild.id, channel.id);
+    const messages = await channel.messages.fetch({ limit: 100 });
+    const lines = messages
+      .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
+      .map((message) => {
+        const attachments = [...message.attachments.values()].map((file) => file.url).join(" ");
+        const content = [message.cleanContent, attachments].filter(Boolean).join(" ");
+        return `[${message.createdAt.toISOString()}] ${message.author.tag} (${message.author.id}): ${content || "(no text content)"}`;
+      });
+    const transcript = [
+      `Ticket: #${channel.name} (${channel.id})`,
+      `Closed by: ${closedBy}`,
+      `Reason: ${reason || "No reason provided"}`,
+      `Exported messages: ${lines.length}`,
+      "",
+      ...lines
+    ].join("\n");
+    const safeName = channel.name.replace(/[^a-z0-9-_]/gi, "-").slice(0, 80);
+    const file = new AttachmentBuilder(Buffer.from(transcript, "utf8"), {
+      name: `${safeName || "ticket"}-transcript.txt`
+    });
+    const closedAt = ticket?.closedAt ?? new Date().toISOString();
+    const embed = buildTicketTranscriptEmbed({
+      channelName: channel.name,
+      channelId: channel.id,
+      ticket,
+      type,
+      closedBy,
+      reason,
+      messageCount: lines.length,
+      closedAt
+    });
+    const sent = await logChannel.send({
+      embeds: [embed],
+      files: [file],
+      allowedMentions: { users: [] }
+    });
+    const downloadUrl = sent.attachments.first()?.url ?? null;
+    if (downloadUrl) {
+      await sent.edit({
+        embeds: [embed],
+        components: [
+          new ActionRowBuilder<ButtonBuilder>().addComponents(
+            new ButtonBuilder()
+              .setStyle(ButtonStyle.Link)
+              .setLabel("Download Transcript")
+              .setURL(downloadUrl)
+          )
+        ]
+      });
+    }
+    return { saved: true, downloadUrl, messageCount: lines.length };
+  } catch (error) {
+    logError("Could not export ticket transcript", error);
+    return { saved: false, downloadUrl: null, messageCount: 0 };
+  }
+}
+
+export async function prepareTicketCloseRequest(
+  interaction: CloseRequestInteraction,
+  reason: string,
+  requestSource: CloseRequestSource
+): Promise<{ payload?: InteractionReplyOptions; error?: string }> {
+  if (!interaction.guildId || !interaction.guild || !(interaction.channel instanceof TextChannel)) {
+    return { error: "Close requests only work inside an active ticket text channel." };
+  }
+  const guildId = interaction.guildId;
+  const guild = interaction.guild;
+  const channel = interaction.channel;
+  const channelId = channel.id;
+
+  const ticket = await getTicketByChannel(guildId, channelId);
+  if (!ticket) return { error: "This channel is not registered as a ticket." };
+  if (ticket.status !== "open") return { error: `This ticket is ${ticket.status} and cannot receive a close request.` };
+
+  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, guildId) : null;
+  const access = await ticketActorAccess(
+    guild,
+    interaction.user.id,
+    ticket,
+    type,
+    interaction.memberPermissions
+  );
+  const creationDenial = closeRequestCreationDenial(
+    requestSource,
+    access.isStaff,
+    access.isCommunity
+  );
+  if (creationDenial) return { error: creationDenial };
+  if (requestSource === "staff" && ticket.userId === interaction.user.id) {
+    return {
+      error: "You opened this ticket, so use the **Request Staff Close** button instead. Another staff member must review that request."
+    };
+  }
+
+  const existing = await getPendingCloseRequestForTicket(guildId, ticket.id);
+  if (existing) {
+    return {
+      error: `Close request #${existing.id} is already waiting for ${closeRequestAudience(existing.requestSource)} to respond.`
+    };
+  }
+
+  const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
+  if (!botMember) return { error: "I could not verify my permissions in this server." };
+  const permissions = channel.permissionsFor(botMember);
+  if (!permissions?.has(PermissionFlagsBits.ViewChannel) || !permissions.has(PermissionFlagsBits.SendMessages)) {
+    return { error: "I need View Channel and Send Messages in this ticket before I can create a close request." };
+  }
+
+  const settings = await getGuildSettings(guildId);
+  const staffRoleIds = [...new Set([...settings.staffRoleIds, ...(type?.staffRoleIds ?? [])])];
+  if (requestSource === "community") {
+    const unmentionableStaffRole = staffRoleIds
+      .map((id) => guild.roles.cache.get(id))
+      .find((role) => role && !role.mentionable);
+    if (unmentionableStaffRole && !permissions.has(PermissionFlagsBits.MentionEveryone)) {
+      return {
+        error: `I need Mention @everyone, @here, and All Roles to notify ${unmentionableStaffRole.name}, or that staff role must be mentionable.`
+      };
+    }
+  }
+
+  const request = await createCloseRequest({
+    guildId,
+    ticketId: ticket.id,
+    requestedBy: interaction.user.id,
+    requestSource,
+    reason
+  });
+  if (!request) return { error: "A close request was created at the same time and is already pending." };
+
+  const buttons = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`ticket-close:accept:${request.id}`).setLabel("Accept Close").setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`ticket-close:deny:${request.id}`).setLabel("Deny Close").setStyle(ButtonStyle.Danger)
+  );
+  const staffRoleMentions = staffRoleIds.map((id) => `<@&${id}>`).join(" ");
+  const audience = closeRequestAudience(requestSource);
+  const audienceMention = requestSource === "staff"
+    ? `<@${ticket.userId}>`
+    : staffRoleMentions;
+  const title = requestSource === "staff"
+    ? "Staff Requested Ticket Closure"
+    : "Community Requested Staff Closure";
+  const embed = new EmbedBuilder()
+    .setColor(asColor("#FEE75C"))
+    .setTitle(title)
+    .setDescription(
+      requestSource === "staff"
+        ? "Staff believe this ticket is ready to close. The ticket opener or an allowed community member must accept or deny the request."
+        : "The ticket opener or community has asked staff to close this ticket. A staff member must accept or deny the request."
+    )
+    .addFields(
+      { name: "Status", value: `Waiting for ${audience}`, inline: false },
+      { name: "Requested by", value: `<@${interaction.user.id}>\n\`${interaction.user.id}\``, inline: true },
+      { name: "Ticket requester", value: `<@${ticket.userId}>\n\`${ticket.userId}\``, inline: true },
+      { name: "Ticket", value: `#${channel.name}\nID: \`${ticket.id}\``, inline: true },
+      { name: "Category", value: type?.label ?? "General", inline: true },
+      { name: "Request ID", value: `#${request.id}`, inline: true },
+      { name: "Created", value: formatDiscordDate(request.createdAt), inline: true },
+      { name: "Reason", value: reason || "No reason provided.", inline: false }
+    )
+    .setFooter({ text: "The requester cannot decide their own close request." })
+    .setTimestamp(new Date(request.createdAt));
+
+  await sendTicketLog(
+    guild,
+    type,
+    "Close request created",
+    `Source: **${requestSource === "staff" ? "Staff" : "Community"}**\nRequester: <@${interaction.user.id}> \`${interaction.user.id}\`\nChannel: <#${channelId}> \`${channelId}\`\nWaiting for: **${audience}**\nReason: ${reason || "No reason provided"}`
+  );
+
+  return {
+    payload: {
+      content: audienceMention || undefined,
+      embeds: [embed],
+      components: [buttons],
+      allowedMentions: requestSource === "staff"
+        ? { users: [ticket.userId], roles: [] }
+        : { users: [], roles: staffRoleIds }
+    }
+  };
 }
 
 export async function handleTicketPanel(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -211,8 +529,16 @@ export async function handleTicketPanel(interaction: ChatInputCommandInteraction
     return;
   }
 
-  await postTicketPanel(interaction.guild, panel.id, target as SendableChannel);
-  await interaction.reply({ content: `Posted **${panel.name}** in ${target}.`, ephemeral: true });
+  try {
+    await postTicketPanel(interaction.guild, panel.id, target as SendableChannel);
+    await interaction.reply({ content: `Posted **${panel.name}** in ${target}.`, ephemeral: true });
+  } catch (error) {
+    logDiscordError(`Ticket panel "${panel.name}" could not be posted`, error);
+    const detail = error instanceof Error && !("code" in error)
+      ? error.message
+      : friendlyDiscordError(error, "Could not post the ticket panel.");
+    await interaction.reply({ content: detail, ephemeral: true });
+  }
 }
 
 async function createTicket(interaction: TicketCreateInteraction, panelId: number, typeId: number): Promise<void> {
@@ -246,11 +572,29 @@ async function createTicket(interaction: TicketCreateInteraction, panelId: numbe
   const settings = await getGuildSettings(interaction.guildId);
   const staffRoleIds = [...new Set([...settings.staffRoleIds, ...type.staffRoleIds])];
   const botMember = interaction.guild.members.me ?? await interaction.guild.members.fetchMe();
+  if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await interaction.editReply("Odyssey Bot needs the Manage Channels permission before it can create ticket channels.");
+    return;
+  }
+  const parentId = type.categoryId ?? settings.ticketCategoryId;
+  if (parentId) {
+    const category = await interaction.guild.channels.fetch(parentId).catch(() => null);
+    if (!category || category.type !== ChannelType.GuildCategory) {
+      await interaction.editReply("The configured ticket category no longer exists. Ask an admin to choose a valid category in the dashboard.");
+      return;
+    }
+  }
+  await interaction.guild.roles.fetch();
+  const missingStaffRole = staffRoleIds.some((roleId) => !interaction.guild!.roles.cache.has(roleId));
+  if (missingStaffRole) {
+    await interaction.editReply("A configured ticket staff role no longer exists. Ask an admin to refresh the ticket type settings.");
+    return;
+  }
   const channelName = formatTicketChannelName(type, interaction.user.username, interaction.user.id);
   const channel = await interaction.guild.channels.create({
     name: channelName,
     type: ChannelType.GuildText,
-    parent: type.categoryId ?? settings.ticketCategoryId ?? undefined,
+    parent: parentId ?? undefined,
     topic: `Ticket for ${interaction.user.tag} (${interaction.user.id}) - ${type.label}`,
     permissionOverwrites: [
       { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
@@ -283,17 +627,18 @@ async function createTicket(interaction: TicketCreateInteraction, panelId: numbe
     ]
   });
 
-  await createTicketRecord({
+  const ticketId = await createTicketRecord({
     guildId: interaction.guildId,
     channelId: channel.id,
     userId: interaction.user.id,
     ticketTypeId: type.id,
     panelId
   });
+  const ticket = await getTicketByChannel(interaction.guildId, channel.id);
 
   const rendered = renderEmbedMessage({
     ...emptyEmbedConfig(),
-    title: type.label,
+    title: `Support Ticket · ${type.label}`,
     description: type.welcomeMessage,
     color: type.color,
     imageUrl: type.imageUrl,
@@ -301,22 +646,31 @@ async function createTicket(interaction: TicketCreateInteraction, panelId: numbe
     footerText: type.footerText,
     footerIconUrl: type.footerIconUrl,
     timestamp: true,
-    fields: [{ name: "Opened by", value: `<@${interaction.user.id}>`, inline: false }]
-  }, {
-    user: interaction.user.toString(),
-    username: interaction.user.username,
-    server: interaction.guild.name,
-    channel: channel.toString(),
-    text: "",
-    reason: "",
-    target: interaction.user.toString()
-  });
+    fields: [
+      { name: "Ticket requester", value: `<@${interaction.user.id}>`, inline: true },
+      { name: "Ticket ID", value: `#${ticketId}`, inline: true },
+      { name: "Status", value: "Open · waiting for staff", inline: true },
+      { name: "Category", value: type.label, inline: true },
+      { name: "Created", value: formatDiscordDate(ticket?.openedAt ?? new Date()), inline: true }
+    ]
+  }, buildDiscordPlaceholders({
+    guild: interaction.guild,
+    channel,
+    user: interaction.user,
+    target: interaction.user,
+    ticket,
+    ticketType: type
+  }));
 
   const pingRoles = [...new Set(type.pingRoleIds)].map((id) => `<@&${id}>`).join(" ");
   await channel.send({
     ...rendered,
     content: [interaction.user.toString(), pingRoles, rendered.content].filter(Boolean).join(" "),
-    components: ticketButtons(type)
+    components: ticketButtons(type),
+    allowedMentions: {
+      users: [interaction.user.id],
+      roles: type.pingRoleIds
+    }
   });
 
   await sendTicketLog(interaction.guild, type, "Ticket opened", `Channel: ${channel} \`${channel.id}\` | Owner: <@${interaction.user.id}> \`${interaction.user.id}\` | Type: **${type.label}**`);
@@ -340,7 +694,16 @@ export async function handlePanelSelect(interaction: StringSelectMenuInteraction
     await interaction.reply({ content: "That panel is no longer available.", ephemeral: true });
     return;
   }
-  await interaction.reply({ ...(await ticketPanelMessage(interaction.guild, child)), ephemeral: true });
+  await interaction.reply({
+    ...(await ticketPanelMessage(
+      interaction.guild,
+      child,
+      interaction.channel && "send" in interaction.channel
+        ? interaction.channel as SendableChannel
+        : null
+    )),
+    ephemeral: true
+  });
 }
 
 async function finishClose(
@@ -353,6 +716,7 @@ async function finishClose(
   if (!ticket || ticket.status !== "open") return false;
   const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, guild.id) : null;
   if (!(await closeTicket(guild.id, channel.id, userId, reason))) return false;
+  await sendTicketTranscript(guild, channel, type, userId, reason);
   await sendTicketLog(
     guild,
     type,
@@ -371,13 +735,53 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     return;
   }
 
-  const allowOwner = interaction.customId === "ticket:close" || interaction.customId === "ticket:close-request";
-  if (!(await canManageTicket(interaction, allowOwner))) {
-    await interaction.reply({ content: "You are not allowed to manage this ticket.", ephemeral: true });
+  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guildId) : null;
+  if (interaction.customId === "ticket:close-request") {
+    const access = await ticketActorAccess(
+      interaction.guild,
+      interaction.user.id,
+      ticket,
+      type,
+      interaction.memberPermissions
+    );
+    const denial = closeRequestCreationDenial("community", access.isStaff, access.isCommunity);
+    if (denial) {
+      await interaction.reply({ content: denial, ephemeral: true });
+      return;
+    }
+    const pending = await getPendingCloseRequestForTicket(interaction.guildId, ticket.id);
+    if (pending) {
+      await interaction.reply({
+        content: `Close request #${pending.id} is already waiting for ${closeRequestAudience(pending.requestSource)} to respond.`,
+        ephemeral: true
+      });
+      return;
+    }
+    const modal = new ModalBuilder()
+      .setCustomId("ticket:close-request-reason")
+      .setTitle("Request Staff Closure");
+    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("reason")
+        .setLabel("Why should staff close this ticket?")
+        .setPlaceholder("Briefly explain why this ticket is ready to close.")
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(false)
+        .setMaxLength(500)
+    ));
+    await interaction.showModal(modal);
     return;
   }
 
-  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guildId) : null;
+  const allowOwner = interaction.customId === "ticket:close";
+  if (!(await canManageTicket(interaction, allowOwner))) {
+    await interaction.reply({
+      content: "Only the ticket opener or configured ticket staff can use that action.",
+      ephemeral: true
+    });
+    return;
+  }
+
   if (interaction.customId === "ticket:claim") {
     const claimed = await claimTicket(interaction.guildId, interaction.channelId, interaction.user.id);
     await interaction.reply({
@@ -385,6 +789,24 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
       ephemeral: !claimed
     });
     if (claimed) await sendTicketLog(interaction.guild, type, "Ticket claimed", `Channel: ${interaction.channel} \`${interaction.channel.id}\` | Claimed by: <@${interaction.user.id}> \`${interaction.user.id}\``);
+    return;
+  }
+
+  if (interaction.customId === "ticket:priority") {
+    const menu = new StringSelectMenuBuilder()
+      .setCustomId("ticket:set-priority")
+      .setPlaceholder(`Current priority: ${ticket.priority}`)
+      .addOptions(
+        { label: "Low", value: "low", description: "Can wait behind normal requests" },
+        { label: "Normal", value: "normal", description: "Default ticket priority" },
+        { label: "High", value: "high", description: "Needs prompt staff attention" },
+        { label: "Urgent", value: "urgent", description: "Time-sensitive or critical" }
+      );
+    await interaction.reply({
+      content: "Choose the priority for this ticket.",
+      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
+      ephemeral: true
+    });
     return;
   }
 
@@ -410,18 +832,34 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     return;
   }
 
-  if (interaction.customId === "ticket:close-request") {
-    const modal = new ModalBuilder().setCustomId("ticket:close-request-reason").setTitle("Request to close ticket");
-    modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
-      new TextInputBuilder()
-        .setCustomId("reason")
-        .setLabel("Why do you want to close this ticket?")
-        .setStyle(TextInputStyle.Paragraph)
-        .setRequired(false)
-        .setMaxLength(500)
-    ));
-    await interaction.showModal(modal);
+}
+
+export async function handleTicketPrioritySelect(interaction: StringSelectMenuInteraction): Promise<void> {
+  if (!interaction.guild || !interaction.guildId || !(interaction.channel instanceof TextChannel)) return;
+  const allowed = await canManageTicket(interaction as unknown as ButtonInteraction, false);
+  if (!allowed) {
+    await interaction.reply({ content: "Only ticket staff can change priority.", ephemeral: true });
     return;
+  }
+  const priority = interaction.values[0] as "low" | "normal" | "high" | "urgent";
+  if (!["low", "normal", "high", "urgent"].includes(priority)) {
+    await interaction.reply({ content: "That priority is invalid.", ephemeral: true });
+    return;
+  }
+  const changed = await updateTicketPriority(interaction.guildId, interaction.channelId, priority);
+  await interaction.update({
+    content: changed ? `Ticket priority changed to **${priority}**.` : "This ticket is no longer active.",
+    components: []
+  });
+  if (changed) {
+    const ticket = await getTicketByChannel(interaction.guildId, interaction.channelId);
+    const type = ticket?.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guildId) : null;
+    await sendTicketLog(
+      interaction.guild,
+      type,
+      "Ticket priority changed",
+      `Channel: ${interaction.channel} \`${interaction.channel.id}\` | Priority: **${priority}** | Changed by: <@${interaction.user.id}> \`${interaction.user.id}\``
+    );
   }
 }
 
@@ -432,6 +870,165 @@ export async function handleTicketCloseModal(interaction: ModalSubmitInteraction
   await interaction.reply(closed
     ? "Ticket closed. This channel will be deleted in 5 seconds."
     : { content: "This ticket is already closed.", ephemeral: true });
+}
+
+export async function handleTicketCloseRequestModal(interaction: ModalSubmitInteraction): Promise<void> {
+  const reason = interaction.fields.getTextInputValue("reason").trim();
+  const prepared = await prepareTicketCloseRequest(interaction, reason, "community");
+  await interaction.reply(prepared.payload ?? {
+    content: prepared.error ?? "Could not create the close request.",
+    ephemeral: true
+  });
+}
+
+function resolvedCloseRequestEmbed(input: {
+  request: TicketCloseRequest;
+  channel: TextChannel;
+  type: TicketType | null;
+  ticketOwnerId: string;
+  resolvedBy: string;
+  accepted: boolean;
+}) {
+  const { request, channel, type, ticketOwnerId, resolvedBy, accepted } = input;
+  return new EmbedBuilder()
+    .setColor(asColor(accepted ? "#57F287" : "#ED4245"))
+    .setTitle(accepted ? "Close Request Accepted" : "Close Request Denied")
+    .setDescription(
+      accepted
+        ? "The required reviewer accepted this request. The transcript is being saved before the ticket channel is removed."
+        : "The required reviewer denied this request. The ticket will remain open."
+    )
+    .addFields(
+      { name: "Status", value: accepted ? "Accepted · closing ticket" : "Denied · ticket remains open", inline: false },
+      { name: "Request source", value: request.requestSource === "staff" ? "Staff" : "Ticket opener / community", inline: true },
+      { name: "Requested by", value: `<@${request.requestedBy}>`, inline: true },
+      { name: "Reviewed by", value: `<@${resolvedBy}>`, inline: true },
+      { name: "Ticket requester", value: `<@${ticketOwnerId}>`, inline: true },
+      { name: "Ticket", value: `#${channel.name}\nID: \`${request.ticketId}\``, inline: true },
+      { name: "Category", value: type?.label ?? "General", inline: true },
+      { name: "Reason", value: request.reason || "No reason provided.", inline: false }
+    )
+    .setFooter({ text: `Close request #${request.id}` })
+    .setTimestamp();
+}
+
+export async function handleTicketCloseDecision(interaction: ButtonInteraction): Promise<void> {
+  if (!interaction.guild || !(interaction.channel instanceof TextChannel)) return;
+  const [, action, requestIdText] = interaction.customId.split(":");
+  const requestId = Number(requestIdText);
+  const request = await getTicketCloseRequest(requestId, interaction.guild.id);
+  if (!request || request.status !== "pending") {
+    await interaction.reply({ content: "That close request has already been handled or no longer exists.", ephemeral: true });
+    return;
+  }
+
+  const ticket = await getTicketByChannel(interaction.guild.id, interaction.channel.id);
+  if (!ticket || ticket.status !== "open") {
+    await interaction.reply({ content: "This ticket is no longer active.", ephemeral: true });
+    return;
+  }
+  if (request.ticketId !== ticket.id) {
+    await interaction.reply({ content: "That close request belongs to a different ticket.", ephemeral: true });
+    return;
+  }
+
+  const type = ticket.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guild.id) : null;
+  const access = await ticketActorAccess(
+    interaction.guild,
+    interaction.user.id,
+    ticket,
+    type,
+    interaction.memberPermissions
+  );
+  const denial = closeRequestDecisionDenial(
+    request.requestSource,
+    access.isStaff,
+    access.isCommunity,
+    request.requestedBy === interaction.user.id
+  );
+  if (denial) {
+    await interaction.reply({ content: denial, ephemeral: true });
+    return;
+  }
+
+  const accepted = action === "accept" || action === "approve";
+  if (!accepted && action !== "deny") {
+    await interaction.reply({ content: "That close-request action is invalid.", ephemeral: true });
+    return;
+  }
+  const resolved = await resolveCloseRequest(
+    request.id,
+    interaction.guild.id,
+    interaction.user.id,
+    accepted ? "approved" : "denied"
+  );
+  if (!resolved) {
+    await interaction.reply({ content: "Someone else handled that close request first.", ephemeral: true });
+    return;
+  }
+
+  const resultEmbed = resolvedCloseRequestEmbed({
+    request,
+    channel: interaction.channel,
+    type,
+    ticketOwnerId: ticket.userId,
+    resolvedBy: interaction.user.id,
+    accepted
+  });
+  await interaction.update({
+    content: null,
+    embeds: [resultEmbed],
+    components: []
+  });
+
+  if (!accepted) {
+    await sendTicketLog(
+      interaction.guild,
+      type,
+      "Close request denied",
+      `Request: \`#${request.id}\`\nSource: **${request.requestSource === "staff" ? "Staff" : "Community"}**\nChannel: <#${interaction.channel.id}> \`${interaction.channel.id}\`\nDenied by: <@${interaction.user.id}> \`${interaction.user.id}\`\nRequester: <@${request.requestedBy}> \`${request.requestedBy}\`${request.reason ? `\nReason: ${request.reason}` : ""}`
+    );
+    return;
+  }
+
+  const closed = await closeTicket(
+    interaction.guild.id,
+    interaction.channel.id,
+    interaction.user.id,
+    request.reason
+  );
+  if (!closed) return;
+
+  const transcript = await sendTicketTranscript(
+    interaction.guild,
+    interaction.channel,
+    type,
+    interaction.user.id,
+    request.reason
+  );
+  const delaySeconds = Math.max(5, type?.closeRequestDelaySeconds ?? 5);
+  await interaction.followUp({
+    embeds: [
+      new EmbedBuilder()
+        .setColor(asColor("#57F287"))
+        .setTitle("Ticket Closing")
+        .setDescription(`This ticket will be removed in **${delaySeconds} seconds**.`)
+        .addFields(
+          { name: "Transcript", value: transcript.saved ? `Saved ${transcript.messageCount} message(s) to the transcript channel.` : "No transcript channel is configured or the export failed.", inline: false },
+          { name: "Closed by", value: `<@${interaction.user.id}>`, inline: true },
+          { name: "Ticket ID", value: `#${ticket.id}`, inline: true }
+        )
+        .setTimestamp()
+    ],
+    allowedMentions: { users: [] }
+  });
+  await sendTicketLog(
+    interaction.guild,
+    type,
+    "Ticket closed",
+    `**#${interaction.channel.name}** closed by <@${interaction.user.id}> after close request #${request.id}. Owner: <@${ticket.userId}>.${request.reason ? `\nReason: ${request.reason}` : ""}`
+  );
+  setTimeout(() => interaction.channel?.delete("Ticket close request accepted").catch(() => undefined), delaySeconds * 1000);
 }
 
 export async function processInactiveTickets(clientGuilds: ReadonlyMap<string, Guild>): Promise<void> {

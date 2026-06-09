@@ -1,6 +1,8 @@
 import type {
   ActionSequenceItem,
   AnnouncementTemplate,
+  AntiRoleSettings,
+  AutoModSettings,
   AntiNukeSettings,
   AntiNukeTrusted,
   AntiRaidSettings,
@@ -8,6 +10,10 @@ import type {
   CustomCommand,
   CustomCommandActionConfig,
   GuildSettings,
+  RolePanel,
+  ScheduledAnnouncement,
+  SocialPromotionSettings,
+  StickyMessage,
   TicketCloseRequest,
   TicketPanel,
   TicketType,
@@ -69,6 +75,9 @@ async function ensureGuildRows(guildId: string): Promise<void> {
   await db.run("INSERT INTO welcome_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO anti_raid_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO anti_nuke_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
+  await db.run("INSERT INTO anti_role_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
+  await db.run("INSERT INTO auto_mod_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
+  await db.run("INSERT INTO social_promotion_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
 }
 
 export async function getGuildSettings(guildId: string): Promise<GuildSettings> {
@@ -465,6 +474,7 @@ function mapAnnouncement(row: Record<string, unknown>): AnnouncementTemplate {
     id: Number(row.id),
     guildId: row.guild_id as string,
     name: row.name as string,
+    outputMode: (row.output_mode as AnnouncementTemplate["outputMode"]) ?? "embed",
     title: row.title as string,
     body: row.body as string,
     color: row.color as string,
@@ -492,9 +502,9 @@ export async function createAnnouncement(
 ): Promise<AnnouncementTemplate> {
   const row = await db.get<Record<string, unknown>>(`
     INSERT INTO announcement_templates (
-      guild_id, name, title, body, color, image_url, thumbnail_url, footer, target_channel_id, ping_type
+      guild_id, name, output_mode, title, body, color, image_url, thumbnail_url, footer, target_channel_id, ping_type
     ) VALUES (
-      @guildId, @name, @title, @body, @color, @imageUrl, @thumbnailUrl, @footer, @targetChannelId, @pingType
+      @guildId, @name, @outputMode, @title, @body, @color, @imageUrl, @thumbnailUrl, @footer, @targetChannelId, @pingType
     ) RETURNING *
   `, input);
   return mapAnnouncement(row!);
@@ -507,7 +517,7 @@ export async function updateAnnouncement(
 ): Promise<AnnouncementTemplate | null> {
   const row = await db.get<Record<string, unknown>>(`
     UPDATE announcement_templates SET
-      name = @name, title = @title, body = @body, color = @color,
+      name = @name, output_mode = @outputMode, title = @title, body = @body, color = @color,
       image_url = @imageUrl, thumbnail_url = @thumbnailUrl, footer = @footer,
       target_channel_id = @targetChannelId, ping_type = @pingType, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id AND guild_id = @guildId RETURNING *
@@ -568,6 +578,7 @@ export interface TicketRecord {
   closedAt: string | null;
   closedBy: string | null;
   lastActivityAt: string;
+  priority: "low" | "normal" | "high" | "urgent";
 }
 
 export async function getTicketByChannel(guildId: string, channelId: string): Promise<TicketRecord | undefined> {
@@ -576,7 +587,7 @@ export async function getTicketByChannel(guildId: string, channelId: string): Pr
       ticket_type_id AS "ticketTypeId", status, claimed_by AS "claimedBy",
       panel_id AS "panelId", close_reason AS "closeReason",
       opened_at AS "openedAt", closed_at AS "closedAt", closed_by AS "closedBy",
-      last_activity_at AS "lastActivityAt"
+      last_activity_at AS "lastActivityAt", priority
     FROM tickets WHERE guild_id = ? AND channel_id = ?
   `, [guildId, channelId]);
   if (!row) return undefined;
@@ -593,6 +604,17 @@ export async function closeTicket(guildId: string, channelId: string, userId: st
 
 export async function updateTicketActivity(guildId: string, channelId: string): Promise<void> {
   await db.run("UPDATE tickets SET last_activity_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND channel_id = ? AND status = 'open'", [guildId, channelId]);
+}
+
+export async function updateTicketPriority(
+  guildId: string,
+  channelId: string,
+  priority: TicketRecord["priority"]
+): Promise<boolean> {
+  return (await db.run(
+    "UPDATE tickets SET priority = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open'",
+    [priority, guildId, channelId]
+  )).changes > 0;
 }
 
 export async function listInactiveTickets() {
@@ -653,7 +675,7 @@ export async function listRecentTickets(guildId: string, limit = 50) {
   return db.all(`
     SELECT tickets.id, tickets.channel_id AS "channelId", tickets.user_id AS "userId",
       tickets.status, tickets.claimed_by AS "claimedBy", tickets.opened_at AS "openedAt",
-      tickets.closed_at AS "closedAt", ticket_types.label AS "typeLabel"
+      tickets.closed_at AS "closedAt", tickets.priority, ticket_types.label AS "typeLabel"
     FROM tickets LEFT JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id
     WHERE tickets.guild_id = ? ORDER BY tickets.id DESC LIMIT ?
   `, [guildId, limit]);
@@ -801,6 +823,160 @@ export async function saveAntiNukeSettings(settings: AntiNukeSettings): Promise<
   return getAntiNukeSettings(settings.guildId);
 }
 
+function mapAntiRole(row: Record<string, unknown>): AntiRoleSettings {
+  return {
+    guildId: row.guild_id as string,
+    enabled: Boolean(row.enabled),
+    protectedRoleIds: parseJsonArray(row.protected_role_ids as string | null),
+    trustedUserIds: parseJsonArray(row.trusted_user_ids as string | null),
+    trustedRoleIds: parseJsonArray(row.trusted_role_ids as string | null),
+    action: (row.action as AntiRoleSettings["action"]) ?? "log",
+    massChangeThreshold: Number(row.mass_change_threshold ?? 4),
+    timeWindowSeconds: Number(row.time_window_seconds ?? 20),
+    logChannelId: row.log_channel_id as string | null
+  };
+}
+
+export async function getAntiRoleSettings(guildId: string): Promise<AntiRoleSettings> {
+  await ensureGuildRows(guildId);
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM anti_role_settings WHERE guild_id = ?", [guildId]);
+  return mapAntiRole(row!);
+}
+
+export async function saveAntiRoleSettings(settings: AntiRoleSettings): Promise<AntiRoleSettings> {
+  await ensureGuildRows(settings.guildId);
+  await db.run(`
+    UPDATE anti_role_settings SET
+      enabled = @enabled, protected_role_ids = @protectedRoleIds,
+      trusted_user_ids = @trustedUserIds, trusted_role_ids = @trustedRoleIds,
+      action = @action, mass_change_threshold = @massChangeThreshold,
+      time_window_seconds = @timeWindowSeconds, log_channel_id = @logChannelId,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...settings,
+    enabled: Number(settings.enabled),
+    protectedRoleIds: JSON.stringify(settings.protectedRoleIds),
+    trustedUserIds: JSON.stringify(settings.trustedUserIds),
+    trustedRoleIds: JSON.stringify(settings.trustedRoleIds)
+  });
+  return getAntiRoleSettings(settings.guildId);
+}
+
+function mapAutoMod(row: Record<string, unknown>): AutoModSettings {
+  return {
+    guildId: row.guild_id as string,
+    enabled: Boolean(row.enabled),
+    blockInvites: Boolean(row.block_invites),
+    blockSuspiciousLinks: Boolean(row.block_suspicious_links),
+    blockCaps: Boolean(row.block_caps),
+    blockSpam: Boolean(row.block_spam),
+    blockMassMentions: Boolean(row.block_mass_mentions),
+    capsPercentage: Number(row.caps_percentage ?? 75),
+    spamThreshold: Number(row.spam_threshold ?? 4),
+    mentionThreshold: Number(row.mention_threshold ?? 5),
+    action: (row.action as AutoModSettings["action"]) ?? "delete",
+    timeoutMinutes: Number(row.timeout_minutes ?? 10),
+    alwaysBlockDiscordInvites: row.always_block_discord_invites === undefined
+      ? true
+      : Boolean(row.always_block_discord_invites),
+    linkChannelRules: parseJsonArrayOfObjects(row.link_channel_rules as string | null),
+    ignoredChannelIds: parseJsonArray(row.ignored_channel_ids as string | null),
+    ignoredRoleIds: parseJsonArray(row.ignored_role_ids as string | null),
+    ignoredUserIds: parseJsonArray(row.ignored_user_ids as string | null),
+    logChannelId: row.log_channel_id as string | null
+  };
+}
+
+export async function getAutoModSettings(guildId: string): Promise<AutoModSettings> {
+  await ensureGuildRows(guildId);
+  const row = await db.get<Record<string, unknown>>("SELECT * FROM auto_mod_settings WHERE guild_id = ?", [guildId]);
+  return mapAutoMod(row!);
+}
+
+export async function saveAutoModSettings(settings: AutoModSettings): Promise<AutoModSettings> {
+  await ensureGuildRows(settings.guildId);
+  await db.run(`
+    UPDATE auto_mod_settings SET
+      enabled = @enabled, block_invites = @blockInvites,
+      block_suspicious_links = @blockSuspiciousLinks, block_caps = @blockCaps,
+      block_spam = @blockSpam, block_mass_mentions = @blockMassMentions,
+      caps_percentage = @capsPercentage, spam_threshold = @spamThreshold,
+      mention_threshold = @mentionThreshold, action = @action,
+      timeout_minutes = @timeoutMinutes, ignored_channel_ids = @ignoredChannelIds,
+      always_block_discord_invites = @alwaysBlockDiscordInvites,
+      link_channel_rules = @linkChannelRules,
+      ignored_role_ids = @ignoredRoleIds, ignored_user_ids = @ignoredUserIds,
+      log_channel_id = @logChannelId, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...settings,
+    enabled: Number(settings.enabled),
+    blockInvites: Number(settings.blockInvites),
+    blockSuspiciousLinks: Number(settings.blockSuspiciousLinks),
+    blockCaps: Number(settings.blockCaps),
+    blockSpam: Number(settings.blockSpam),
+    blockMassMentions: Number(settings.blockMassMentions),
+    alwaysBlockDiscordInvites: Number(settings.alwaysBlockDiscordInvites),
+    linkChannelRules: JSON.stringify(settings.linkChannelRules),
+    ignoredChannelIds: JSON.stringify(settings.ignoredChannelIds),
+    ignoredRoleIds: JSON.stringify(settings.ignoredRoleIds),
+    ignoredUserIds: JSON.stringify(settings.ignoredUserIds)
+  });
+  return getAutoModSettings(settings.guildId);
+}
+
+function parseJsonArrayOfObjects<T extends Record<string, unknown>>(value: string | null): T[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is T => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function getSocialPromotionSettings(guildId: string): Promise<SocialPromotionSettings> {
+  await ensureGuildRows(guildId);
+  const row = (await db.get<Record<string, unknown>>(
+    "SELECT * FROM social_promotion_settings WHERE guild_id = ?",
+    [guildId]
+  ))!;
+  return {
+    guildId,
+    outputMode: (row.output_mode as SocialPromotionSettings["outputMode"]) ?? "embed",
+    title: String(row.title ?? "Follow our socials"),
+    description: String(row.description ?? ""),
+    color: String(row.color ?? "#5865F2"),
+    thumbnailUrl: String(row.thumbnail_url ?? ""),
+    imageUrl: String(row.image_url ?? ""),
+    targetChannelId: (row.target_channel_id as string | null) ?? null,
+    links: parseJsonArrayOfObjects(row.links as string | null),
+    memberEntries: parseJsonArrayOfObjects(row.member_entries as string | null)
+  };
+}
+
+export async function saveSocialPromotionSettings(
+  settings: SocialPromotionSettings
+): Promise<SocialPromotionSettings> {
+  await ensureGuildRows(settings.guildId);
+  await db.run(`
+    UPDATE social_promotion_settings SET
+      output_mode = @outputMode, title = @title, description = @description,
+      color = @color, thumbnail_url = @thumbnailUrl, image_url = @imageUrl,
+      target_channel_id = @targetChannelId, links = @links,
+      member_entries = @memberEntries, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...settings,
+    links: JSON.stringify(settings.links),
+    memberEntries: JSON.stringify(settings.memberEntries)
+  });
+  return getSocialPromotionSettings(settings.guildId);
+}
+
 export async function listAntiNukeTrusted(guildId: string): Promise<AntiNukeTrusted[]> {
   const rows = await db.all<Record<string, unknown>>("SELECT * FROM anti_nuke_trusted WHERE guild_id = ?", [guildId]);
   return rows.map((row) => ({
@@ -822,67 +998,357 @@ export async function removeAntiNukeTrusted(id: number, guildId: string): Promis
   return (await db.run("DELETE FROM anti_nuke_trusted WHERE id = ? AND guild_id = ?", [id, guildId])).changes > 0;
 }
 
-export async function createCloseRequest(input: Omit<TicketCloseRequest, "id" | "createdAt" | "resolvedAt" | "resolvedBy">): Promise<TicketCloseRequest> {
-  const row = await db.get<Record<string, unknown>>(`
-    INSERT INTO ticket_close_requests (guild_id, ticket_id, requested_by, reason, status)
-    VALUES (@guildId, @ticketId, @requestedBy, @reason, 'pending') RETURNING *
-  `, input);
+async function getRolePanelRoleIds(panelId: number): Promise<string[]> {
+  const rows = await db.all<{ roleId: string }>(
+    `SELECT role_id AS "roleId" FROM role_panel_roles WHERE panel_id = ? ORDER BY sort_order, role_id`,
+    [panelId]
+  );
+  return rows.map((row) => row.roleId);
+}
+
+async function mapRolePanel(row: Record<string, unknown>): Promise<RolePanel> {
   return {
-    id: Number(row!.id),
-    guildId: input.guildId,
-    ticketId: input.ticketId,
-    requestedBy: input.requestedBy,
-    reason: input.reason,
-    status: "pending",
-    createdAt: String(row!.created_at),
-    resolvedAt: null,
-    resolvedBy: null
+    id: Number(row.id),
+    guildId: row.guild_id as string,
+    name: row.name as string,
+    channelId: row.channel_id as string | null,
+    title: row.title as string,
+    description: row.description as string,
+    color: row.color as string,
+    active: Boolean(row.active),
+    roleIds: await getRolePanelRoleIds(Number(row.id)),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
   };
+}
+
+export async function listRolePanels(guildId: string): Promise<RolePanel[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    "SELECT * FROM role_panels WHERE guild_id = ? ORDER BY name",
+    [guildId]
+  );
+  return Promise.all(rows.map(mapRolePanel));
+}
+
+export async function getRolePanel(id: number, guildId: string): Promise<RolePanel | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM role_panels WHERE id = ? AND guild_id = ?",
+    [id, guildId]
+  );
+  return row ? mapRolePanel(row) : null;
+}
+
+async function saveRolePanelRoles(panelId: number, roleIds: string[]): Promise<void> {
+  await db.run("DELETE FROM role_panel_roles WHERE panel_id = ?", [panelId]);
+  for (const [index, roleId] of roleIds.entries()) {
+    await db.run(
+      "INSERT INTO role_panel_roles (panel_id, role_id, sort_order) VALUES (?, ?, ?)",
+      [panelId, roleId, index]
+    );
+  }
+}
+
+export async function createRolePanel(
+  input: Omit<RolePanel, "id" | "createdAt" | "updatedAt">
+): Promise<RolePanel> {
+  const id = await db.transaction(async () => {
+    const row = await db.get<{ id: number }>(`
+      INSERT INTO role_panels (
+        guild_id, name, channel_id, title, description, color, active
+      ) VALUES (
+        @guildId, @name, @channelId, @title, @description, @color, @active
+      ) RETURNING id
+    `, { ...input, active: Number(input.active) });
+    const panelId = Number(row!.id);
+    await saveRolePanelRoles(panelId, input.roleIds);
+    return panelId;
+  });
+  return (await getRolePanel(id, input.guildId))!;
+}
+
+export async function updateRolePanel(
+  id: number,
+  guildId: string,
+  input: Omit<RolePanel, "id" | "guildId" | "createdAt" | "updatedAt">
+): Promise<RolePanel | null> {
+  const changed = await db.transaction(async () => {
+    const result = await db.run(`
+      UPDATE role_panels SET
+        name = @name, channel_id = @channelId, title = @title,
+        description = @description, color = @color, active = @active,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = @id AND guild_id = @guildId
+    `, { ...input, id, guildId, active: Number(input.active) });
+    if (!result.changes) return false;
+    await saveRolePanelRoles(id, input.roleIds);
+    return true;
+  });
+  return changed ? getRolePanel(id, guildId) : null;
+}
+
+export async function deleteRolePanel(id: number, guildId: string): Promise<boolean> {
+  return (await db.run("DELETE FROM role_panels WHERE id = ? AND guild_id = ?", [id, guildId])).changes > 0;
+}
+
+function mapStickyMessage(row: Record<string, unknown>): StickyMessage {
+  return {
+    id: Number(row.id),
+    guildId: row.guild_id as string,
+    channelId: row.channel_id as string,
+    content: row.content as string,
+    enabled: Boolean(row.enabled),
+    minIntervalSeconds: Number(row.min_interval_seconds ?? 30),
+    lastMessageId: row.last_message_id as string | null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+export async function listStickyMessages(guildId: string): Promise<StickyMessage[]> {
+  return (await db.all<Record<string, unknown>>(
+    "SELECT * FROM sticky_messages WHERE guild_id = ? ORDER BY id DESC",
+    [guildId]
+  )).map(mapStickyMessage);
+}
+
+export async function getStickyMessageByChannel(guildId: string, channelId: string): Promise<StickyMessage | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM sticky_messages WHERE guild_id = ? AND channel_id = ?",
+    [guildId, channelId]
+  );
+  return row ? mapStickyMessage(row) : null;
+}
+
+export async function createStickyMessage(
+  input: Omit<StickyMessage, "id" | "lastMessageId" | "createdAt" | "updatedAt">
+): Promise<StickyMessage> {
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO sticky_messages (
+      guild_id, channel_id, content, enabled, min_interval_seconds
+    ) VALUES (
+      @guildId, @channelId, @content, @enabled, @minIntervalSeconds
+    ) RETURNING *
+  `, { ...input, enabled: Number(input.enabled) });
+  return mapStickyMessage(row!);
+}
+
+export async function updateStickyMessage(
+  id: number,
+  guildId: string,
+  input: Omit<StickyMessage, "id" | "guildId" | "lastMessageId" | "createdAt" | "updatedAt">
+): Promise<StickyMessage | null> {
+  const row = await db.get<Record<string, unknown>>(`
+    UPDATE sticky_messages SET
+      channel_id = @channelId, content = @content, enabled = @enabled,
+      min_interval_seconds = @minIntervalSeconds, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND guild_id = @guildId RETURNING *
+  `, { ...input, id, guildId, enabled: Number(input.enabled) });
+  return row ? mapStickyMessage(row) : null;
+}
+
+export async function updateStickyMessageLastMessage(
+  id: number,
+  guildId: string,
+  lastMessageId: string | null
+): Promise<void> {
+  await db.run(
+    "UPDATE sticky_messages SET last_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND guild_id = ?",
+    [lastMessageId, id, guildId]
+  );
+}
+
+export async function deleteStickyMessage(id: number, guildId: string): Promise<boolean> {
+  return (await db.run("DELETE FROM sticky_messages WHERE id = ? AND guild_id = ?", [id, guildId])).changes > 0;
+}
+
+function mapScheduledAnnouncement(row: Record<string, unknown>): ScheduledAnnouncement {
+  return {
+    id: Number(row.id),
+    guildId: row.guild_id as string,
+    name: row.name as string,
+    announcementTemplateId: Number(row.announcement_template_id),
+    channelId: row.channel_id as string,
+    pingType: row.ping_type as ScheduledAnnouncement["pingType"],
+    scheduleType: row.schedule_type as ScheduledAnnouncement["scheduleType"],
+    nextRunAt: String(row.next_run_at),
+    intervalMinutes: row.interval_minutes === null ? null : Number(row.interval_minutes),
+    enabled: Boolean(row.enabled),
+    lastRunAt: row.last_run_at ? String(row.last_run_at) : null,
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  };
+}
+
+export async function listScheduledAnnouncements(guildId: string): Promise<ScheduledAnnouncement[]> {
+  return (await db.all<Record<string, unknown>>(
+    "SELECT * FROM scheduled_announcements WHERE guild_id = ? ORDER BY next_run_at, name",
+    [guildId]
+  )).map(mapScheduledAnnouncement);
+}
+
+export async function getScheduledAnnouncement(id: number, guildId: string): Promise<ScheduledAnnouncement | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM scheduled_announcements WHERE id = ? AND guild_id = ?",
+    [id, guildId]
+  );
+  return row ? mapScheduledAnnouncement(row) : null;
+}
+
+export async function createScheduledAnnouncement(
+  input: Omit<ScheduledAnnouncement, "id" | "lastRunAt" | "createdAt" | "updatedAt">
+): Promise<ScheduledAnnouncement> {
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO scheduled_announcements (
+      guild_id, name, announcement_template_id, channel_id, ping_type,
+      schedule_type, next_run_at, interval_minutes, enabled
+    ) VALUES (
+      @guildId, @name, @announcementTemplateId, @channelId, @pingType,
+      @scheduleType, @nextRunAt, @intervalMinutes, @enabled
+    ) RETURNING *
+  `, { ...input, enabled: Number(input.enabled) });
+  return mapScheduledAnnouncement(row!);
+}
+
+export async function updateScheduledAnnouncement(
+  id: number,
+  guildId: string,
+  input: Omit<ScheduledAnnouncement, "id" | "guildId" | "lastRunAt" | "createdAt" | "updatedAt">
+): Promise<ScheduledAnnouncement | null> {
+  const row = await db.get<Record<string, unknown>>(`
+    UPDATE scheduled_announcements SET
+      name = @name, announcement_template_id = @announcementTemplateId,
+      channel_id = @channelId, ping_type = @pingType,
+      schedule_type = @scheduleType, next_run_at = @nextRunAt,
+      interval_minutes = @intervalMinutes, enabled = @enabled,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND guild_id = @guildId RETURNING *
+  `, { ...input, id, guildId, enabled: Number(input.enabled) });
+  return row ? mapScheduledAnnouncement(row) : null;
+}
+
+export async function deleteScheduledAnnouncement(id: number, guildId: string): Promise<boolean> {
+  return (await db.run(
+    "DELETE FROM scheduled_announcements WHERE id = ? AND guild_id = ?",
+    [id, guildId]
+  )).changes > 0;
+}
+
+export async function listDueScheduledAnnouncements(): Promise<ScheduledAnnouncement[]> {
+  const sql = db.dialect === "postgres"
+    ? "SELECT * FROM scheduled_announcements WHERE enabled = 1 AND next_run_at <= CURRENT_TIMESTAMP ORDER BY next_run_at"
+    : "SELECT * FROM scheduled_announcements WHERE enabled = 1 AND datetime(next_run_at) <= CURRENT_TIMESTAMP ORDER BY datetime(next_run_at)";
+  return (await db.all<Record<string, unknown>>(sql)).map(mapScheduledAnnouncement);
+}
+
+export async function markScheduledAnnouncementRun(
+  schedule: ScheduledAnnouncement,
+  nextRunAt: string | null
+): Promise<void> {
+  await db.run(`
+    UPDATE scheduled_announcements SET
+      last_run_at = CURRENT_TIMESTAMP, next_run_at = COALESCE(@nextRunAt, next_run_at),
+      enabled = @enabled, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND guild_id = @guildId
+  `, {
+    id: schedule.id,
+    guildId: schedule.guildId,
+    nextRunAt,
+    enabled: Number(Boolean(nextRunAt))
+  });
+}
+
+function mapTicketCloseRequest(row: Record<string, unknown>): TicketCloseRequest {
+  return {
+    id: Number(row.id),
+    guildId: (row.guildId ?? row.guild_id) as string,
+    ticketId: Number(row.ticketId ?? row.ticket_id),
+    requestedBy: (row.requestedBy ?? row.requested_by) as string,
+    requestSource: ((row.requestSource ?? row.request_source) as TicketCloseRequest["requestSource"]) ?? "community",
+    reason: row.reason as string,
+    status: row.status as TicketCloseRequest["status"],
+    createdAt: String(row.createdAt ?? row.created_at),
+    resolvedAt: (row.resolvedAt ?? row.resolved_at) ? String(row.resolvedAt ?? row.resolved_at) : null,
+    resolvedBy: (row.resolvedBy ?? row.resolved_by) as string | null
+  };
+}
+
+export async function createCloseRequest(input: Omit<TicketCloseRequest, "id" | "createdAt" | "resolvedAt" | "resolvedBy" | "status">): Promise<TicketCloseRequest | null> {
+  const existing = await getPendingCloseRequestForTicket(input.guildId, input.ticketId);
+  if (existing) return null;
+
+  let row: Record<string, unknown> | undefined;
+  try {
+    row = await db.get<Record<string, unknown>>(`
+      INSERT INTO ticket_close_requests (
+        guild_id, ticket_id, requested_by, request_source, reason, status
+      )
+      VALUES (
+        @guildId, @ticketId, @requestedBy, @requestSource, @reason, 'pending'
+      ) RETURNING *
+    `, input);
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+    const message = error instanceof Error ? error.message : "";
+    if (code === "23505" || message.includes("UNIQUE constraint failed")) return null;
+    throw error;
+  }
+  return mapTicketCloseRequest(row!);
+}
+
+export async function listTicketCloseRequests(guildId: string, limit = 100) {
+  const rows = await db.all<Record<string, unknown>>(`
+    SELECT requests.id, requests.ticket_id AS "ticketId",
+      requests.requested_by AS "requestedBy", requests.request_source AS "requestSource",
+      requests.reason, requests.status,
+      requests.created_at AS "createdAt", requests.resolved_at AS "resolvedAt",
+      requests.resolved_by AS "resolvedBy", tickets.channel_id AS "channelId",
+      tickets.user_id AS "ticketOwnerId", ticket_types.label AS "typeLabel"
+    FROM ticket_close_requests requests
+    JOIN tickets ON tickets.id = requests.ticket_id
+    LEFT JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id
+    WHERE requests.guild_id = ?
+    ORDER BY requests.id DESC LIMIT ?
+  `, [guildId, limit]);
+  return rows.map((row) => ({
+    ...row,
+    id: Number(row.id),
+    ticketId: Number(row.ticketId),
+    createdAt: String(row.createdAt),
+    resolvedAt: row.resolvedAt ? String(row.resolvedAt) : null
+  }));
 }
 
 export async function getPendingCloseRequests(guildId: string): Promise<TicketCloseRequest[]> {
   const rows = await db.all<Record<string, unknown>>(`
     SELECT id, guild_id AS guildId, ticket_id AS ticketId, requested_by AS requestedBy,
-      reason, status, created_at AS createdAt, resolved_at AS resolvedAt, resolved_by AS resolvedBy
+      request_source AS requestSource, reason, status, created_at AS createdAt,
+      resolved_at AS resolvedAt, resolved_by AS resolvedBy
     FROM ticket_close_requests WHERE guild_id = ? AND status = 'pending' ORDER BY id DESC
   `, [guildId]);
-  return rows.map((row) => ({
-    id: Number(row.id),
-    guildId: row.guildId as string,
-    ticketId: Number(row.ticketId),
-    requestedBy: row.requestedBy as string,
-    reason: row.reason as string,
-    status: row.status as string,
-    createdAt: String(row.createdAt),
-    resolvedAt: row.resolvedAt ? String(row.resolvedAt) : null,
-    resolvedBy: row.resolvedBy as string | null
-  })) as TicketCloseRequest[];
+  return rows.map(mapTicketCloseRequest);
 }
 
 export async function getPendingCloseRequestForTicket(guildId: string, ticketId: number): Promise<TicketCloseRequest | null> {
-  const row = await db.get<Record<string, unknown>>(`SELECT id, guild_id AS guildId, ticket_id AS ticketId, requested_by AS requestedBy, reason, status, created_at AS createdAt, resolved_at AS resolvedAt, resolved_by AS resolvedBy FROM ticket_close_requests WHERE guild_id = ? AND ticket_id = ? AND status = 'pending'`, [guildId, ticketId]);
+  const row = await db.get<Record<string, unknown>>(`
+    SELECT id, guild_id AS guildId, ticket_id AS ticketId, requested_by AS requestedBy,
+      request_source AS requestSource, reason, status, created_at AS createdAt,
+      resolved_at AS resolvedAt, resolved_by AS resolvedBy
+    FROM ticket_close_requests
+    WHERE guild_id = ? AND ticket_id = ? AND status = 'pending'
+  `, [guildId, ticketId]);
   if (!row) return null;
-  return { id: Number(row.id), guildId: row.guildId as string, ticketId: Number(row.ticketId), requestedBy: row.requestedBy as string, reason: row.reason as string, status: row.status as string, createdAt: String(row.createdAt), resolvedAt: row.resolvedAt ? String(row.resolvedAt) : null, resolvedBy: row.resolvedBy as string | null } as TicketCloseRequest;
+  return mapTicketCloseRequest(row);
 }
 
 export async function getTicketCloseRequest(id: number, guildId: string): Promise<TicketCloseRequest | null> {
   const row = await db.get<Record<string, unknown>>(`
     SELECT id, guild_id AS guildId, ticket_id AS ticketId, requested_by AS requestedBy,
-      reason, status, created_at AS createdAt, resolved_at AS resolvedAt, resolved_by AS resolvedBy
+      request_source AS requestSource, reason, status, created_at AS createdAt,
+      resolved_at AS resolvedAt, resolved_by AS resolvedBy
     FROM ticket_close_requests WHERE id = ? AND guild_id = ?
   `, [id, guildId]);
   if (!row) return null;
-  return {
-    id: Number(row.id),
-    guildId: row.guildId as string,
-    ticketId: Number(row.ticketId),
-    requestedBy: row.requestedBy as string,
-    reason: row.reason as string,
-    status: row.status as string,
-    createdAt: String(row.createdAt),
-    resolvedAt: row.resolvedAt ? String(row.resolvedAt) : null,
-    resolvedBy: row.resolvedBy as string | null
-  } as TicketCloseRequest;
+  return mapTicketCloseRequest(row);
 }
 
 export async function resolveCloseRequest(id: number, guildId: string, resolvedBy: string, status: "approved" | "denied"): Promise<boolean> {

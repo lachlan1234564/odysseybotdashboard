@@ -1,6 +1,6 @@
 # Getting Started
 
-Rapid Bot is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.
+Odyssey Bot is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.
 
 ## Quick setup
 
@@ -15,7 +15,7 @@ Rapid Bot is a self-hosted Discord bot with a web dashboard. You create commands
 
 - `DISCORD_TOKEN` — Bot token from Discord Developer Portal
 - `DISCORD_CLIENT_ID` — Application ID
-- `DISCORD_GUILD_ID` — Your server ID
+- `DISCORD_GUILD_ID` — Optional preferred server for a new dashboard session
 - `DASHBOARD_PASSWORD` — Dashboard login password (min 8 chars)
 - `DATABASE_URL` — `file:./data/bot.db` for SQLite
 

@@ -19,6 +19,24 @@ A bot can only assign, remove, or manage roles that are **below** its highest ro
 | Anti-raid lockdown | Manage Channels |
 | Anti-raid disable invites | Manage Guild |
 | Welcome auto-roles | Manage Roles |
+| Role Protection detection | View Audit Log |
+| Role Protection permission/role removal | Manage Roles |
+| Auto Mod message checks | Message Content Intent |
+| Auto Mod deletion | Manage Messages |
+| Role panels | Manage Roles |
+| Post role panel with `/reaction-roles` | Manage Server or configured bot admin role |
+| Sticky messages | Send Messages, Read Message History, Manage Messages |
+| Scheduled announcements | Send Messages, Embed Links |
+| Scheduled `@here` / `@everyone` | Mention Everyone |
+| Ticket transcript export | Read Message History, Attach Files |
+
+## Ticket close-request roles
+
+- `/close-request` is for ticket staff.
+- **Request Staff Close** is for the ticket opener or an Allowed / community role.
+- A community-created request must be reviewed by staff.
+- A staff-created request must be reviewed by the ticket opener or an Allowed / community role.
+- The requester cannot approve or deny their own request.
 
 ## Common mistake
 

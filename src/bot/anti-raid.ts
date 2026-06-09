@@ -7,7 +7,7 @@ import {
   TextChannel
 } from "discord.js";
 import { getAntiRaidSettings, recordModerationAction } from "../database/index.js";
-import { asColor, sendGuildLog } from "./utils.js";
+import { asColor, buildActionLogEmbed, sendGuildLog } from "./utils.js";
 
 interface JoinEvent {
   userId: string;
@@ -49,9 +49,9 @@ async function sendAlert(guild: Guild, channelId: string | null, embed: EmbedBui
   }
 }
 
-async function sendLog(guild: Guild, channelId: string | null, title: string, description: string, color = "#ED4245"): Promise<void> {
+async function sendLog(guild: Guild, channelId: string | null, input: Parameters<typeof buildActionLogEmbed>[0]): Promise<void> {
   if (!channelId) return;
-  const embed = new EmbedBuilder().setColor(asColor(color)).setTitle(title).setDescription(description).setTimestamp();
+  const embed = buildActionLogEmbed(input);
   await sendGuildLog(guild.id, channelId, (id) => guild.channels.fetch(id), embed);
 }
 
@@ -88,23 +88,30 @@ export async function handleGuildMemberAdd(member: GuildMember): Promise<void> {
 async function handleSuspiciousJoin(member: GuildMember, settings: ReturnType<typeof getAntiRaidSettings> extends Promise<infer T> ? T : never, reason: string): Promise<void> {
   const guild = member.guild;
   const action = settings.action;
+  let status = "Alerted";
 
   if (action === "kick_suspicious") {
     if (member.kickable) {
-      await member.kick(`Anti-raid: ${reason}`).catch(() => undefined);
+      status = await member.kick(`Anti-raid: ${reason}`).then(() => "Completed").catch(() => "Failed");
+    } else {
+      status = "Failed: member is not kickable";
     }
   } else if (action === "timeout_new") {
     if (member.moderatable) {
-      await member.timeout(60 * 60_000, `Anti-raid: ${reason}`).catch(() => undefined);
+      status = await member.timeout(60 * 60_000, `Anti-raid: ${reason}`).then(() => "Completed").catch(() => "Failed");
+    } else {
+      status = "Failed: member is not moderatable";
     }
   }
 
-  await sendLog(
-    guild,
-    settings.logChannelId,
-    "Anti-raid: Suspicious join",
-    `<@${member.id}> \`${member.id}\` joined. ${reason}. Action: ${action}.`
-  );
+  await sendLog(guild, settings.logChannelId, {
+    title: "Anti-raid: Suspicious join",
+    action,
+    status,
+    reason,
+    affectedUserId: member.id,
+    executorId: guild.members.me?.id ?? null
+  });
 
   if (action === "alert" || action === "disable_invites" || action === "lockdown") {
     await sendAlert(
@@ -175,11 +182,12 @@ async function triggerRaidResponse(guild: Guild, settings: ReturnType<typeof get
     metadata: { action: settings.action, joinCount: events.length }
   });
 
-  await sendLog(
-    guild,
-    settings.logChannelId,
-    "Anti-raid: Triggered",
-    `${events.length} joins detected. Action taken: ${action}. Triggering members: ${events.slice(0, 5).map((e) => `<@${e.userId}> \`${e.userId}\``).join(", ")}`,
-    "#ED4245"
-  );
+  await sendLog(guild, settings.logChannelId, {
+    title: "Anti-raid: Triggered",
+    action,
+    status: "Triggered",
+    reason: `${events.length} joins in ${settings.timeWindowSeconds} seconds`,
+    executorId: guild.members.me?.id ?? null,
+    details: `Triggering members: ${events.slice(0, 5).map((event) => `<@${event.userId}> \`${event.userId}\``).join(", ")}`
+  });
 }

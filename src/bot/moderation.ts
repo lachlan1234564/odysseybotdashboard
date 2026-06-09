@@ -1,4 +1,4 @@
-import { ChatInputCommandInteraction, TextChannel } from "discord.js";
+import { ChatInputCommandInteraction, PermissionFlagsBits, TextChannel } from "discord.js";
 import { addWarning, listWarnings } from "../database/index.js";
 import { getTargetMember, logModeration } from "./utils.js";
 
@@ -15,15 +15,40 @@ export async function handleModeration(interaction: ChatInputCommandInteraction)
   }
 
   const command = interaction.commandName;
+  const requiredPermission = {
+    warn: PermissionFlagsBits.ModerateMembers,
+    warnings: PermissionFlagsBits.ModerateMembers,
+    timeout: PermissionFlagsBits.ModerateMembers,
+    kick: PermissionFlagsBits.KickMembers,
+    ban: PermissionFlagsBits.BanMembers,
+    clear: PermissionFlagsBits.ManageMessages
+  }[command];
+  if (!requiredPermission || !interaction.memberPermissions?.has(requiredPermission)) {
+    await interaction.reply({
+      content: "You do not have the Discord permission required to use this moderation command.",
+      ephemeral: true
+    });
+    return;
+  }
+
   if (command === "clear") {
     if (!(interaction.channel instanceof TextChannel)) {
       await interaction.reply({ content: "This command requires a server text channel.", ephemeral: true });
       return;
     }
     const amount = interaction.options.getInteger("amount", true);
-    const deleted = await interaction.channel.bulkDelete(amount, true);
+    const botMember = interaction.guild.members.me;
+    if (!botMember || !interaction.channel.permissionsFor(botMember)?.has(PermissionFlagsBits.ManageMessages)) {
+      await interaction.reply({ content: "I need Manage Messages in this channel to clear messages.", ephemeral: true });
+      return;
+    }
+    const deleted = await interaction.channel.bulkDelete(amount, true).catch(() => null);
+    if (!deleted) {
+      await interaction.reply({ content: "I could not clear those messages. Messages older than 14 days cannot be bulk-deleted.", ephemeral: true });
+      return;
+    }
     await interaction.reply({ content: `Deleted ${deleted.size} recent messages.`, ephemeral: true });
-    await logModeration({ interaction, action: "clear", metadata: { requested: amount, deleted: deleted.size } });
+    await logModeration({ interaction, action: "clear", channelId: interaction.channelId, metadata: { requested: amount, deleted: deleted.size } });
     return;
   }
 
@@ -43,7 +68,12 @@ export async function handleModeration(interaction: ChatInputCommandInteraction)
     return;
   }
 
-  const reason = interaction.options.getString("reason") ?? "No reason provided";
+  const reasonInput = interaction.options.getString("reason")?.trim() ?? "";
+  const reason = reasonInput || "No reason provided";
+  if (command === "warn" && !reasonInput) {
+    await interaction.reply({ content: "Add a clear warning reason before running this command.", ephemeral: true });
+    return;
+  }
 
   if (command === "warn") {
     const warningId = await addWarning({
@@ -53,7 +83,7 @@ export async function handleModeration(interaction: ChatInputCommandInteraction)
       reason
     });
     await interaction.reply({ content: `${user} was warned. Warning #${warningId}.`, ephemeral: true });
-    await logModeration({ interaction, action: "warn", targetUserId: user.id, reason, metadata: { warningId } });
+    await logModeration({ interaction, action: "warn", targetUserId: user.id, reason, channelId: interaction.channelId, metadata: { warningId } });
     return;
   }
 
@@ -63,9 +93,13 @@ export async function handleModeration(interaction: ChatInputCommandInteraction)
       return;
     }
     const minutes = interaction.options.getInteger("minutes", true);
-    await member.timeout(minutes * 60_000, reason);
+    const timedOut = await member.timeout(minutes * 60_000, reason).then(() => true).catch(() => false);
+    if (!timedOut) {
+      await interaction.reply({ content: "I could not time out that member. Check my permissions and role position.", ephemeral: true });
+      return;
+    }
     await interaction.reply({ content: `${user} was timed out for ${minutes} minute(s).`, ephemeral: true });
-    await logModeration({ interaction, action: "timeout", targetUserId: user.id, reason, metadata: { minutes } });
+    await logModeration({ interaction, action: "timeout", targetUserId: user.id, reason, channelId: interaction.channelId, metadata: { minutes } });
     return;
   }
 
@@ -74,19 +108,36 @@ export async function handleModeration(interaction: ChatInputCommandInteraction)
       await interaction.reply({ content: "I cannot kick that member. Check role hierarchy and permissions.", ephemeral: true });
       return;
     }
-    await member.kick(reason);
+    const kicked = await member.kick(reason).then(() => true).catch(() => false);
+    if (!kicked) {
+      await interaction.reply({ content: "I could not kick that member. Check my permissions and role position.", ephemeral: true });
+      return;
+    }
     await interaction.reply({ content: `${user.tag} was kicked.`, ephemeral: true });
-    await logModeration({ interaction, action: "kick", targetUserId: user.id, reason });
+    await logModeration({ interaction, action: "kick", targetUserId: user.id, reason, channelId: interaction.channelId });
     return;
   }
 
   if (command === "ban") {
+    const botMember = interaction.guild.members.me;
+    if (!botMember?.permissions.has(PermissionFlagsBits.BanMembers)) {
+      await interaction.reply({ content: "I need Ban Members before I can ban users.", ephemeral: true });
+      return;
+    }
+    if (member && !member.bannable) {
+      await interaction.reply({ content: "I cannot ban that member. Check role hierarchy and permissions.", ephemeral: true });
+      return;
+    }
     const deleteDays = interaction.options.getInteger("delete_days") ?? 0;
-    await interaction.guild.members.ban(user.id, {
+    const banned = await interaction.guild.members.ban(user.id, {
       deleteMessageSeconds: deleteDays * 86_400,
       reason
-    });
+    }).then(() => true).catch(() => false);
+    if (!banned) {
+      await interaction.reply({ content: "I could not ban that user. Check my permissions and role position.", ephemeral: true });
+      return;
+    }
     await interaction.reply({ content: `${user.tag} was banned.`, ephemeral: true });
-    await logModeration({ interaction, action: "ban", targetUserId: user.id, reason, metadata: { deleteDays } });
+    await logModeration({ interaction, action: "ban", targetUserId: user.id, reason, channelId: interaction.channelId, metadata: { deleteDays } });
   }
 }

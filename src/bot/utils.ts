@@ -1,4 +1,5 @@
 import {
+  ButtonInteraction,
   ChatInputCommandInteraction,
   ColorResolvable,
   EmbedBuilder,
@@ -15,7 +16,46 @@ export function asColor(value: string, fallback = "#5865F2"): ColorResolvable {
   return /^#[0-9a-f]{6}$/i.test(value) ? value as ColorResolvable : fallback as ColorResolvable;
 }
 
-export async function isBotAdmin(interaction: ChatInputCommandInteraction): Promise<boolean> {
+export function buildActionLogEmbed(input: {
+  title: string;
+  action: string;
+  status: string;
+  reason?: string;
+  affectedUserId?: string | null;
+  executorId?: string | null;
+  channelId?: string | null;
+  roleId?: string | null;
+  details?: string;
+  color?: string;
+}): EmbedBuilder {
+  const fields: { name: string; value: string; inline?: boolean }[] = [
+    { name: "Action", value: input.action, inline: true },
+    { name: "Status", value: input.status, inline: true }
+  ];
+  if (input.affectedUserId) {
+    fields.push({ name: "Affected user", value: `<@${input.affectedUserId}> \`${input.affectedUserId}\``, inline: true });
+  }
+  if (input.executorId) {
+    fields.push({ name: "Executor", value: `<@${input.executorId}> \`${input.executorId}\``, inline: true });
+  }
+  if (input.channelId) {
+    fields.push({ name: "Channel", value: `<#${input.channelId}> \`${input.channelId}\``, inline: true });
+  }
+  if (input.roleId) {
+    fields.push({ name: "Role", value: `<@&${input.roleId}> \`${input.roleId}\``, inline: true });
+  }
+  fields.push({ name: "Reason", value: input.reason || "No reason provided" });
+  if (input.details) fields.push({ name: "Details", value: input.details.slice(0, 1024) });
+  return new EmbedBuilder()
+    .setColor(asColor(input.color ?? "#ED4245"))
+    .setTitle(input.title)
+    .addFields(fields)
+    .setTimestamp();
+}
+
+type AdminInteraction = ChatInputCommandInteraction | ButtonInteraction;
+
+export async function isBotAdmin(interaction: AdminInteraction): Promise<boolean> {
   if (!interaction.guildId || !interaction.guild) return false;
   if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
 
@@ -24,7 +64,7 @@ export async function isBotAdmin(interaction: ChatInputCommandInteraction): Prom
   return settings.adminRoleIds.some((roleId) => member.roles.cache.has(roleId));
 }
 
-export async function requireBotAdmin(interaction: ChatInputCommandInteraction): Promise<boolean> {
+export async function requireBotAdmin(interaction: AdminInteraction): Promise<boolean> {
   if (await isBotAdmin(interaction)) return true;
   await interaction.reply({ content: "You are not allowed to use this bot admin command.", ephemeral: true });
   return false;
@@ -75,6 +115,8 @@ export async function logModeration(input: {
     getBranding(interaction.guildId)
   ]);
   const fields: { name: string; value: string; inline?: boolean }[] = [
+    { name: "Action", value: action, inline: true },
+    { name: "Status", value: "Completed", inline: true },
     { name: "Moderator", value: `<@${interaction.user.id}> \`${interaction.user.id}\``, inline: true }
   ];
   if (targetUserId) {

@@ -6,6 +6,7 @@ import helmet from "helmet";
 import open from "open";
 import { ZodError } from "zod";
 import { loadDashboardConfig, resolveUploadsPath } from "../shared/config.js";
+import { logError, logErrorStack } from "../shared/logging.js";
 import { dashboardApi } from "./api.js";
 
 const config = loadDashboardConfig();
@@ -45,6 +46,13 @@ app.use(session({
 }));
 
 app.use("/api", dashboardApi);
+app.get(["/docs", "/docs/:topic", "/help"], (req, res) => {
+  if (!req.session.authenticated) {
+    res.redirect("/login");
+    return;
+  }
+  res.sendFile(path.join(publicPath, "index.html"));
+});
 app.use("/uploads", express.static(uploadsPath, {
   fallthrough: false,
   immutable: true,
@@ -53,11 +61,9 @@ app.use("/uploads", express.static(uploadsPath, {
 app.use(express.static(publicPath, { extensions: ["html"] }));
 
 app.get("/", (_req, res) => res.sendFile(path.join(publicPath, "index.html")));
-app.get("/docs", (_req, res) => res.sendFile(path.join(publicPath, "index.html")));
-app.get("/help", (_req, res) => res.sendFile(path.join(publicPath, "index.html")));
 app.get("/login", (_req, res) => res.sendFile(path.join(publicPath, "login.html")));
 
-app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {
     const fields = Object.fromEntries(error.issues.map((issue) => [issue.path.join("."), issue.message]));
     res.status(400).json({
@@ -74,8 +80,22 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
     res.status(409).json({ error: "An item with that name already exists." });
     return;
   }
-  console.error("Dashboard request failed:", error);
-  res.status(500).json({ error: "The dashboard could not complete that request." });
+  if (
+    error && typeof error === "object"
+    && "expose" in error && error.expose === true
+    && "statusCode" in error && typeof error.statusCode === "number"
+    && "message" in error && typeof error.message === "string"
+  ) {
+    const fields = "fields" in error && error.fields && typeof error.fields === "object"
+      ? error.fields
+      : undefined;
+    res.status(error.statusCode).json({ error: error.message, fields });
+    return;
+  }
+  logErrorStack(`Dashboard request failed (${req.method} ${req.path})`, error);
+  res.status(500).json({
+    error: "The dashboard could not complete that request. Check the dashboard terminal for details."
+  });
 });
 
 const port = config.PORT ?? config.DASHBOARD_PORT;
@@ -83,8 +103,8 @@ const host = config.PORT ? "0.0.0.0" : config.DASHBOARD_HOST;
 const displayHost = host === "0.0.0.0" ? "localhost" : host;
 const url = `http://${displayHost}:${port}`;
 app.listen(port, host, async () => {
-  console.log(`Rapid Bot dashboard listening on ${host}:${port}`);
+  console.log(`Odyssey Bot dashboard listening on ${host}:${port}`);
   if (process.argv.includes("--open") && config.NODE_ENV !== "production") {
-    await open(url).catch((error) => console.error("Could not open the browser:", error));
+    await open(url).catch((error) => logError("Could not open the browser", error));
   }
 });

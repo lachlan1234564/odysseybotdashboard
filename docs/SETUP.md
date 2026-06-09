@@ -67,13 +67,15 @@ A Discord application is the container that holds your bot. You create it once i
 
 1. Open [https://discord.com/developers/applications](https://discord.com/developers/applications) in your browser.
 2. Click **New Application** in the top-right corner.
-3. Give it a name, such as `Rapid Bot`, and click **Create**.
+3. Give it a name, such as `Odyssey Bot`, and click **Create**.
 4. You are now on the **General Information** page.
 5. Copy the **Application ID** (a long number near the top). This is your `DISCORD_CLIENT_ID`.
 6. On the left sidebar, click **Bot**.
 7. If Discord asks whether to create a bot user, click **Yes, do it!**
 8. Under the bot username, click **Reset Token** or **Copy** the existing token. This is your `DISCORD_TOKEN`.
-9. Scroll down to **Privileged Gateway Intents** and enable **Server Members Intent**.
+9. Scroll down to **Privileged Gateway Intents** and enable:
+   - **Server Members Intent** for welcome messages and member protection.
+   - **Message Content Intent** for dashboard-configured Auto Mod rules.
 
 > **Security warning:** Your bot token is like a password. Anyone who has it can control your bot. Never paste it into chat, screenshots, or public repositories. Store it only in your `.env` file.
 
@@ -94,8 +96,11 @@ The bot must be a member of your Discord server before it can do anything.
    - Embed Links
    - Attach Files
    - Read Message History
+   - Attach Files
    - Manage Channels
    - Manage Messages
+   - Manage Roles
+   - View Audit Log
    - Moderate Members
    - Kick Members
    - Ban Members
@@ -117,7 +122,7 @@ Your server has a unique ID number that the bot needs to know.
 5. Right-click your server icon in the left sidebar.
 6. Click **Copy Server ID**.
 
-This long number is your `DISCORD_GUILD_ID`.
+This long number can be used as the optional `DISCORD_GUILD_ID` preference. Odyssey Bot still discovers and manages every server where it is installed.
 
 ---
 
@@ -162,6 +167,10 @@ cp .env.example .env
 ```dotenv
 DISCORD_TOKEN=your_bot_token_here
 DISCORD_CLIENT_ID=your_application_id_here
+# Optional member verification:
+# DISCORD_CLIENT_SECRET=your_oauth_client_secret
+# DISCORD_OAUTH_REDIRECT_URI=https://your-domain.example/api/verify/callback
+# Optional preferred dashboard server:
 DISCORD_GUILD_ID=your_server_id_here
 DASHBOARD_PASSWORD=make_this_long_and_random
 DATABASE_URL=file:./data/bot.db
@@ -170,6 +179,9 @@ DASHBOARD_PORT=3210
 DASHBOARD_HOST=127.0.0.1
 UPLOADS_DIR=./uploads
 NODE_ENV=development
+# PUBLIC_BASE_URL=https://your-domain.example
+# VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
+# VPN_CHECK_API_KEY=your_provider_api_key
 ```
 
 ### Environment Variable Reference
@@ -178,7 +190,9 @@ NODE_ENV=development
 |----------|-----------|--------------|---------|
 | `DISCORD_TOKEN` | **Yes** | The secret token from Developer Portal > Bot | `MTAx...` |
 | `DISCORD_CLIENT_ID` | **Yes** | The Application ID from Developer Portal > General Information | `1234567890123456789` |
-| `DISCORD_GUILD_ID` | **Yes** | Your Discord server ID | `9876543210987654321` |
+| `DISCORD_CLIENT_SECRET` | Verification only | OAuth client secret used by the optional member verification flow. Never share it. | — |
+| `DISCORD_OAUTH_REDIRECT_URI` | Verification only | Exact OAuth callback registered in Discord Developer Portal. | `https://bot.example/api/verify/callback` |
+| `DISCORD_GUILD_ID` | No | Preferred server selected for a new dashboard session. It does not limit the bot to one server. | `9876543210987654321` |
 | `DASHBOARD_PASSWORD` | **Yes** | The shared password for logging into the web dashboard. Minimum 8 characters. | `my-s3cur3-pass` |
 | `DATABASE_URL` | **Yes** | Where the database lives. Use SQLite locally, PostgreSQL on Railway. | `file:./data/bot.db` |
 | `DATABASE_SSL` | No | Whether to use SSL for the database. `false` locally, `true` on Railway. | `false` |
@@ -186,6 +200,9 @@ NODE_ENV=development
 | `DASHBOARD_HOST` | No | The network address the dashboard binds to. `127.0.0.1` means only your computer. | `127.0.0.1` |
 | `UPLOADS_DIR` | No | Where uploaded images are stored. | `./uploads` |
 | `NODE_ENV` | No | `development` locally, `production` on Railway. | `development` |
+| `PUBLIC_BASE_URL` | Hosted verification only | Public HTTPS dashboard URL used when creating verification links. | `https://bot.example` |
+| `VPN_CHECK_URL_TEMPLATE` | No | Optional provider endpoint with `{ip}` placeholder. Leave unset to disable VPN checks. | `https://provider.example/check/{ip}` |
+| `VPN_CHECK_API_KEY` | No | Secret key for the optional VPN/proxy provider. | — |
 | `PORT` | Railway only | Supplied automatically by Railway. **Do not set this locally.** | — |
 
 ### What Should NOT Go in `.env`
@@ -231,7 +248,7 @@ pnpm bot
 Keep this terminal window open. A successful login prints something like:
 
 ```
-Rapid Bot logged in as Rapid Bot#1234
+Odyssey Bot connected to Discord.
 ```
 
 Test the bot in Discord by typing:
@@ -319,12 +336,20 @@ On the application service, go to **Variables** and add these:
 ```dotenv
 DISCORD_TOKEN=your_bot_token
 DISCORD_CLIENT_ID=your_application_id
+# Optional preferred dashboard server:
 DISCORD_GUILD_ID=your_server_id
 DASHBOARD_PASSWORD=use_a_long_unique_production_password
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 DATABASE_SSL=true
 NODE_ENV=production
 UPLOADS_DIR=/app/uploads
+# Required only when member verification is enabled:
+# DISCORD_CLIENT_SECRET=your_oauth_client_secret
+# DISCORD_OAUTH_REDIRECT_URI=https://your-railway-domain/api/verify/callback
+# PUBLIC_BASE_URL=https://your-railway-domain
+# Optional VPN/proxy provider:
+# VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
+# VPN_CHECK_API_KEY=your_provider_api_key
 ```
 
 - **Do not set `PORT`**—Railway injects it automatically.
@@ -382,13 +407,13 @@ Give this URL and password to trusted staff. **Never** give staff the bot token,
 
 ### H. Register Commands After Deployment
 
-Guild commands belong to the Discord application, not to one machine. The simplest method is still:
+Guild commands belong to the Discord application, not to one machine. This command discovers every server where the bot is installed and registers the commands in each one:
 
 ```bash
 pnpm deploy:commands
 ```
 
-Run it locally with the same application and guild values from your `.env`. You can also SSH into the Railway application service and run:
+Run it locally with the same Discord application token and client ID from your `.env`. You can also SSH into the Railway application service and run:
 
 ```bash
 node dist/bot/deploy-commands.js

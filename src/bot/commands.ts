@@ -7,7 +7,10 @@ import {
 export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("Check whether Rapid Bot is online."),
+    .setDescription("Quickly check that Odyssey Bot is online and responding."),
+  new SlashCommandBuilder()
+    .setName("help")
+    .setDescription("List every Odyssey Bot command, its purpose, and who can use it."),
   new SlashCommandBuilder()
     .setName("custom")
     .setDescription("Run a dashboard-created custom command.")
@@ -29,42 +32,58 @@ export const commandBuilders = [
     ),
   new SlashCommandBuilder()
     .setName("close-request")
-    .setDescription("Request to close the current ticket. Only works inside ticket channels.")
+    .setDescription("Staff: ask the ticket opener or community to approve closing this ticket.")
     .addStringOption((option) =>
       option
         .setName("reason")
-        .setDescription("Why do you want to close this ticket?")
+        .setDescription("Why staff believe this ticket is ready to close")
         .setMaxLength(500)
     ),
   new SlashCommandBuilder()
     .setName("ticket-panel")
-    .setDescription("Post the configured ticket panel.")
+    .setDescription("Post a saved ticket panel so members can open support tickets.")
     .addStringOption((option) =>
       option
         .setName("panel")
-        .setDescription("Saved ticket panel")
+        .setDescription("Which saved ticket panel to post")
         .setAutocomplete(true)
     )
     .addChannelOption((option) =>
       option
         .setName("channel")
-        .setDescription("Channel to post in (defaults to this channel)")
+        .setDescription("Channel to send the panel to (defaults to this channel)")
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     ),
   new SlashCommandBuilder()
     .setName("announce")
-    .setDescription("Preview a saved announcement template.")
+    .setDescription("Preview a saved announcement template, then confirm to publish it.")
     .addStringOption((option) =>
       option
         .setName("template")
-        .setDescription("Saved template name")
+        .setDescription("Which saved announcement template to use")
         .setRequired(true)
         .setAutocomplete(true)
     )
     .addChannelOption((option) =>
       option
         .setName("channel")
-        .setDescription("Override the template target channel")
+        .setDescription("Send to a different channel instead of the saved target")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    ),
+  new SlashCommandBuilder()
+    .setName("reaction-roles")
+    .setDescription("Post a saved self-service role panel with clickable role buttons.")
+    .addStringOption((option) =>
+      option
+        .setName("panel")
+        .setDescription("Which saved role panel to post")
+        .setRequired(true)
+        .setAutocomplete(true)
+    )
+    .addChannelOption((option) =>
+      option
+        .setName("channel")
+        .setDescription("Channel to post in (uses the panel's saved channel by default)")
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     ),
   new SlashCommandBuilder()

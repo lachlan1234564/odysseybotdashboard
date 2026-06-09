@@ -1,53 +1,123 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { Router } from "express";
-import { REST, Routes } from "discord.js";
+import { Router, type Request } from "express";
+import { PermissionFlagsBits, REST, Routes } from "discord.js";
 import multer from "multer";
+import { marked } from "marked";
 import { z } from "zod";
 import {
   createAnnouncement,
+  createRolePanel,
+  createScheduledAnnouncement,
+  createStickyMessage,
   createCustomCommand,
   createTicketPanel,
   createTicketType,
   deleteAnnouncement,
+  deleteRolePanel,
+  deleteScheduledAnnouncement,
+  deleteStickyMessage,
   deleteCustomCommand,
   deleteTicketPanel,
   deleteTicketType,
   getAntiNukeSettings,
+  getAntiRoleSettings,
   getAntiRaidSettings,
+  getAutoModSettings,
+  getAnnouncement,
   getBranding,
   getGuildSettings,
   getOverview,
   getTicketPanel,
+  getRolePanel,
+  getScheduledAnnouncement,
+  getSocialPromotionSettings,
   getWelcomeSettings,
   listAnnouncements,
   listCustomCommands,
   listModerationActions,
+  listRolePanels,
+  listScheduledAnnouncements,
+  listStickyMessages,
   listRecentTickets,
   listTicketPanels,
+  listTicketCloseRequests,
   listTicketTypes,
   listWarnings,
   saveAntiNukeSettings,
+  saveAntiRoleSettings,
   saveAntiRaidSettings,
+  saveAutoModSettings,
   saveBranding,
   saveGuildSettings,
+  saveSocialPromotionSettings,
   saveWelcomeSettings,
   updateAnnouncement,
   updateCustomCommand,
   updateTicketPanel,
-  updateTicketType
+  updateTicketType,
+  updateRolePanel,
+  updateScheduledAnnouncement,
+  updateStickyMessage
 } from "../database/index.js";
 import { loadDashboardConfig, resolveUploadsPath } from "../shared/config.js";
+import { normalizeDomain } from "../shared/domains.js";
+import { parseDiscordComponentEmoji } from "../shared/discord-components.js";
+import { friendlyDiscordError, logDiscordError } from "../shared/logging.js";
 import { emptyActionConfig, emptyEmbedConfig } from "../shared/types.js";
+import { customCommandNeedsTrustedAccess } from "../shared/security.js";
 import { isValidCommandName, normalizeCommandName } from "../shared/validation.js";
 
 const config = loadDashboardConfig();
 const router = Router();
 const rest = new REST({ version: "10" }).setToken(config.DISCORD_TOKEN);
 const loginAttempts = new Map<string, { count: number; blockedUntil: number }>();
+type DiscordGuildSummary = { id: string; name: string; icon?: string | null };
+let guildCache: { expiresAt: number; guilds: DiscordGuildSummary[] } | null = null;
 const uploadsPath = resolveUploadsPath(config.UPLOADS_DIR);
 fs.mkdirSync(uploadsPath, { recursive: true });
+const docsPath = path.join(config.projectRoot, "docs");
+const docsTopics = [
+  { slug: "quick-start", title: "Quick Start", description: "Install, configure, and launch the bot for the first time.", files: ["QUICK-START.md"] },
+  { slug: "getting-started", title: "Getting Started", description: "Understand the project, its processes, and the first configuration steps.", files: ["GETTING-STARTED.md"] },
+  { slug: "setup", title: "Setup", description: "Discord application, environment variables, database, and command registration.", files: ["SETUP.md"] },
+  { slug: "dashboard-guide", title: "Dashboard Guide", description: "A tour of every current dashboard area and safe testing workflow.", files: ["DASHBOARD-GUIDE.md"] },
+  { slug: "custom-commands", title: "Custom Commands", description: "Build actions, permissions, placeholders, cooldowns, and embeds.", files: ["COMMAND-BUILDER.md", "ACTION-TEMPLATES.md", "VARIABLES.md"] },
+  { slug: "command-builder", title: "Command Builder", description: "Create and validate database-backed commands in Command Studio.", files: ["COMMAND-BUILDER.md"] },
+  { slug: "action-templates", title: "Action Templates", description: "Choose message, role, ticket, channel, moderation, and sequence actions.", files: ["ACTION-TEMPLATES.md"] },
+  { slug: "tickets", title: "Tickets", description: "Ticket types, public panels, close requests, and history.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md", "TICKET-CLOSE.md"] },
+  { slug: "ticket-setup", title: "Ticket Setup", description: "Build a complete ticket workflow in the correct order.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md"] },
+  { slug: "ticket-panels", title: "Ticket Panels", description: "Build the public messages members use to open tickets.", files: ["TICKET-PANELS.md"] },
+  { slug: "ticket-types", title: "Ticket Types", description: "Configure ticket routing, staff, access, lifecycle, and welcome messages.", files: ["TICKET-TYPES.md"] },
+  { slug: "close-requests", title: "Close Requests", description: "Use the ticket button or /close-request staff approval workflow.", files: ["TICKET-CLOSE.md"] },
+  { slug: "staff-access", title: "Staff Access", description: "Give staff dashboard access without sharing bot secrets.", files: ["STAFF-ACCESS.md"] },
+  { slug: "railway-hosting", title: "Railway Hosting", description: "Deploy the long-running bot, dashboard, PostgreSQL, and uploads.", files: ["RAILWAY-HOSTING.md"] },
+  { slug: "modlogs", title: "Modlogs", description: "Configure and read moderation, ticket, and security logs.", files: ["MODLOGS.md", "SECURITY-LOGS.md"] },
+  { slug: "welcome-messages", title: "Welcome Messages", description: "Configure public welcomes, DMs, embeds, and auto-roles.", files: ["WELCOME.md"] },
+  { slug: "security-overview", title: "Security Overview", description: "Understand safe defaults before enabling automated actions.", files: ["SECURITY-OVERVIEW.md"] },
+  { slug: "anti-raid", title: "Anti Raid", description: "Detect suspicious join waves and choose a response.", files: ["ANTI-RAID.md"] },
+  { slug: "anti-nuke", title: "Anti Nuke", description: "Monitor destructive audit-log activity and protect the server.", files: ["ANTI-NUKE.md"] },
+  { slug: "role-protection", title: "Role Protection", description: "Detect dangerous role changes and protected-role assignments.", files: ["ROLE-PROTECTION.md"] },
+  { slug: "auto-mod", title: "Auto Mod", description: "Block invites, suspicious links, caps, spam, and mass mentions.", files: ["AUTO-MOD.md"] },
+  { slug: "role-panels", title: "Role Panels", description: "Let members add or remove approved roles with buttons.", files: ["ROLE-PANELS.md"] },
+  { slug: "sticky-messages", title: "Sticky Messages", description: "Keep an important message at the bottom of a busy channel.", files: ["STICKY-MESSAGES.md"] },
+  { slug: "scheduled-announcements", title: "Scheduled Announcements", description: "Send announcement templates once or on a repeating schedule.", files: ["SCHEDULED-ANNOUNCEMENTS.md"] },
+  { slug: "social-promotion", title: "Social Promotion", description: "Build, preview, and publish a safe directory of community links.", files: ["SOCIAL-PROMOTION.md"] },
+  { slug: "ticket-transcripts", title: "Ticket Transcripts", description: "Export the latest ticket messages when a ticket closes.", files: ["TICKET-TRANSCRIPTS.md"] },
+  { slug: "permissions", title: "Permissions", description: "Discord permissions, role hierarchy, and dashboard access rules.", files: ["PERMISSIONS.md"] },
+  { slug: "troubleshooting", title: "Troubleshooting", description: "Solve common bot, dashboard, upload, database, and hosting problems.", files: ["TROUBLESHOOTING.md"] }
+] as const;
+
+function readDocsMarkdown(files: readonly string[]): string {
+  return files.map((file) => fs.readFileSync(path.join(docsPath, file), "utf8")).join("\n\n---\n\n");
+}
+
+function renderDocsMarkdown(markdown: string): string {
+  return String(marked.parse(markdown, { gfm: true }))
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\son\w+="[^"]*"/gi, "");
+}
 const upload = multer({
   storage: multer.diskStorage({
     destination: uploadsPath,
@@ -142,7 +212,8 @@ const actionSequenceItemSchema = z.object({
   reason: z.string().max(1000).default(""),
   logChannelId: optionalId,
   newName: z.string().max(100).default(""),
-  newCategoryId: optionalId
+  newCategoryId: optionalId,
+  pingType: z.enum(["none", "everyone", "here"]).default("none")
 });
 
 const customCommandSchema = z.object({
@@ -208,6 +279,7 @@ const customCommandSchema = z.object({
     logChannelId: optionalId,
     newName: z.string().max(100).default(""),
     newCategoryId: optionalId,
+    pingType: z.enum(["none", "everyone", "here"]).default("none"),
     actionSequence: z.array(actionSequenceItemSchema).max(10).default([])
   }).default(emptyActionConfig())
 }).superRefine((value, context) => {
@@ -229,7 +301,7 @@ const customCommandSchema = z.object({
   if (value.actionType === "action_sequence" && !value.actionConfig.actionSequence.length) {
     context.addIssue({ code: "custom", path: ["actionConfig", "actionSequence"], message: "Add at least one action to the sequence." });
   }
-  if (["timeout_user", "kick_user", "ban_user", "unban_user", "purge_messages", "add_user_to_channel", "remove_user_from_channel"].includes(value.actionType) && !value.actionConfig.targetUserId) {
+  if (["timeout_user", "kick_user", "ban_user", "unban_user", "add_user_to_channel", "remove_user_from_channel"].includes(value.actionType) && !value.actionConfig.targetUserId) {
     context.addIssue({ code: "custom", path: ["actionConfig", "targetUserId"], message: "Choose a target user." });
   }
   if (["rename_channel", "move_channel"].includes(value.actionType) && !value.actionConfig.newName && !value.actionConfig.newCategoryId) {
@@ -246,12 +318,29 @@ const customCommandSchema = z.object({
   if (value.accessMode === "roles" && value.allowedRoleIds.length === 0) {
     context.addIssue({ code: "custom", path: ["allowedRoleIds"], message: "Select at least one allowed role when access mode is 'Selected roles'." });
   }
+  if (
+    value.accessMode === "everyone"
+    && customCommandNeedsTrustedAccess(value.actionType, value.actionConfig)
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["accessMode"],
+      message: "This high-impact action must be limited to bot admins, staff, or selected roles."
+    });
+  }
 });
 
 const ticketTypeSchema = z.object({
   label: z.string().min(1).max(100),
   description: z.string().max(100),
-  emoji: z.string().max(64),
+  emoji: z.string().max(64).refine((value) => {
+    try {
+      parseDiscordComponentEmoji(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, "Use one Unicode emoji or a Discord custom emoji such as <:help:123456789012345678>."),
   staffRoleIds: idArray,
   pingRoleIds: idArray,
   allowedRoleIds: idArray,
@@ -298,6 +387,12 @@ const ticketPanelSchema = z.object({
   ticketTypeIds: z.array(z.number().int().positive()).max(25).default([]),
   childPanelIds: z.array(z.number().int().positive()).max(25).default([])
 }).superRefine((value, context) => {
+  if (new Set(value.ticketTypeIds).size !== value.ticketTypeIds.length) {
+    context.addIssue({ code: "custom", path: ["ticketTypeIds"], message: "Choose each ticket type only once." });
+  }
+  if (new Set(value.childPanelIds).size !== value.childPanelIds.length) {
+    context.addIssue({ code: "custom", path: ["childPanelIds"], message: "Choose each child panel only once." });
+  }
   if (value.panelKind === "standard" && value.ticketTypeIds.length === 0) {
     context.addIssue({ code: "custom", path: ["ticketTypeIds"], message: "Choose at least one ticket type." });
   }
@@ -311,7 +406,8 @@ const ticketPanelSchema = z.object({
 
 const announcementSchema = z.object({
   name: z.string().min(1).max(100),
-  title: z.string().min(1).max(256),
+  outputMode: z.enum(["embed", "plain"]).default("embed"),
+  title: z.string().max(256).default(""),
   body: z.string().min(1).max(4000),
   color,
   imageUrl: urlOrEmpty,
@@ -319,6 +415,83 @@ const announcementSchema = z.object({
   footer: z.string().max(200),
   targetChannelId: optionalId,
   pingType: z.enum(["none", "everyone", "here"]).default("none")
+}).superRefine((value, context) => {
+  if (value.outputMode === "embed" && !value.title.trim()) {
+    context.addIssue({ code: "custom", path: ["title"], message: "Add a title for an embed announcement." });
+  }
+  const plainLength = [value.title.trim(), value.body.trim(), value.footer.trim()]
+    .filter(Boolean)
+    .join("\n\n")
+    .length;
+  if (value.outputMode === "plain" && plainLength > 2000) {
+    context.addIssue({
+      code: "custom",
+      path: ["body"],
+      message: "Plain-text announcements, including title and footer, must be 2,000 characters or fewer."
+    });
+  }
+});
+
+const socialLinkSchema = z.object({
+  label: z.string().trim().min(1).max(80),
+  url: z.string().transform((value, context) => {
+    try {
+      return safeExternalUrl(value);
+    } catch (error) {
+      context.addIssue({
+        code: "custom",
+        message: error instanceof Error ? error.message : "Enter a valid HTTPS URL."
+      });
+      return z.NEVER;
+    }
+  })
+});
+
+const socialMediaUrlSchema = z.string().transform((value, context) => {
+  if (!value) return "";
+  if (/^\/uploads\/[a-zA-Z0-9._-]+$/.test(value)) return value;
+  try {
+    return safeExternalUrl(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Enter a valid HTTPS image URL."
+    });
+    return z.NEVER;
+  }
+});
+
+const socialPromotionSchema = z.object({
+  outputMode: z.enum(["embed", "plain"]).default("embed"),
+  title: z.string().trim().min(1).max(256),
+  description: z.string().trim().min(1).max(3500),
+  color,
+  thumbnailUrl: socialMediaUrlSchema,
+  imageUrl: socialMediaUrlSchema,
+  targetChannelId: optionalId,
+  links: z.array(socialLinkSchema).max(15).default([]),
+  memberEntries: z.array(socialLinkSchema).max(15).default([])
+}).superRefine((value, context) => {
+  if (!value.links.length && !value.memberEntries.length) {
+    context.addIssue({
+      code: "custom",
+      path: ["links"],
+      message: "Add at least one social or member link."
+    });
+  }
+  const plain = [
+    value.title,
+    value.description,
+    ...value.links.map((link) => `${link.label}: ${link.url}`),
+    ...value.memberEntries.map((link) => `${link.label}: ${link.url}`)
+  ].join("\n\n");
+  if (value.outputMode === "plain" && plain.length > 2000) {
+    context.addIssue({
+      code: "custom",
+      path: ["description"],
+      message: "The plain-text social promotion must be 2,000 characters or fewer."
+    });
+  }
 });
 
 function safeEqual(left: string, right: string): boolean {
@@ -337,6 +510,69 @@ function parseId(value: string): number | null {
 }
 
 type UploadFile = { data: Buffer; name: string };
+
+function publicRequestError(
+  message: string,
+  statusCode = 400,
+  fields?: Record<string, string>
+): Error {
+  return Object.assign(new Error(message), { statusCode, expose: true, fields });
+}
+
+function dashboardComponentEmoji(value: string) {
+  try {
+    return parseDiscordComponentEmoji(value);
+  } catch (error) {
+    throw publicRequestError(error instanceof Error ? error.message : "The ticket emoji is invalid.");
+  }
+}
+
+function safeExternalUrl(value: string): string {
+  if (value.length > 2048) throw new Error("URL must be 2,048 characters or fewer.");
+  const url = new URL(value);
+  const hostname = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  if (url.protocol !== "https:") throw new Error("Use an HTTPS URL.");
+  if (url.username || url.password) throw new Error("URLs with embedded usernames or passwords are not allowed.");
+  if (
+    hostname === "localhost"
+    || hostname.endsWith(".localhost")
+    || hostname.endsWith(".local")
+    || /^127\./.test(hostname)
+    || hostname === "::1"
+    || hostname === "0.0.0.0"
+    || /^10\./.test(hostname)
+    || /^192\.168\./.test(hostname)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname)
+    || /^169\.254\./.test(hostname)
+    || /^100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(hostname)
+    || /^(?:fc|fd|fe[89ab])[a-f0-9]*:/i.test(hostname)
+  ) {
+    throw new Error("Local and private-network URLs are not allowed.");
+  }
+  return url.toString();
+}
+
+async function listDiscordGuilds(force = false): Promise<DiscordGuildSummary[]> {
+  if (!force && guildCache && guildCache.expiresAt > Date.now()) return guildCache.guilds;
+  const guilds = await rest.get(Routes.userGuilds()) as DiscordGuildSummary[];
+  guildCache = {
+    expiresAt: Date.now() + 30_000,
+    guilds: guilds.sort((left, right) => left.name.localeCompare(right.name))
+  };
+  return guildCache.guilds;
+}
+
+async function ensureSelectedGuild(req: Request): Promise<string> {
+  const guilds = await listDiscordGuilds();
+  if (!guilds.length) throw publicRequestError("Odyssey Bot is not installed in any Discord servers.", 503);
+  const selected = req.session.selectedGuildId;
+  if (selected && guilds.some((guild) => guild.id === selected)) return selected;
+  const preferred = config.DISCORD_GUILD_ID && guilds.some((guild) => guild.id === config.DISCORD_GUILD_ID)
+    ? config.DISCORD_GUILD_ID
+    : guilds[0]!.id;
+  req.session.selectedGuildId = preferred;
+  return preferred;
+}
 
 function mediaUrl(value: string, files: UploadFile[]): string | undefined {
   if (!value) return undefined;
@@ -374,17 +610,125 @@ function discordEmbed(input: z.infer<typeof embedSchema>, files: UploadFile[]) {
   return embed;
 }
 
-async function sendDiscordMessage(channelId: string, body: Record<string, unknown>, files: UploadFile[] = []): Promise<void> {
-  await rest.post(Routes.channelMessages(channelId), {
-    body,
-    files
-  });
+async function sendDiscordMessage(
+  guildId: string,
+  channelId: string,
+  body: Record<string, unknown>,
+  files: UploadFile[] = [],
+  action = "Could not send the Discord message."
+): Promise<void> {
+  try {
+    const channel = await rest.get(Routes.channel(channelId)) as { guild_id?: string };
+    if (channel.guild_id !== guildId) {
+      throw publicRequestError("That channel does not belong to the server currently selected in the dashboard.");
+    }
+    await rest.post(Routes.channelMessages(channelId), {
+      body,
+      files
+    });
+  } catch (error) {
+    if (error && typeof error === "object" && "expose" in error && error.expose === true) throw error;
+    logDiscordError(action, error);
+    throw publicRequestError(friendlyDiscordError(error, action), 502);
+  }
+}
+
+async function validateTicketTypeReferences(
+  guildId: string,
+  input: z.infer<typeof ticketTypeSchema>
+): Promise<void> {
+  let channels: Array<{ id: string; name: string; type: number }>;
+  let roles: Array<{ id: string }>;
+  try {
+    [channels, roles] = await Promise.all([
+      rest.get(Routes.guildChannels(guildId)) as Promise<Array<{ id: string; name: string; type: number }>>,
+      rest.get(Routes.guildRoles(guildId)) as Promise<Array<{ id: string }>>
+    ]);
+  } catch (error) {
+    logDiscordError("Ticket type validation could not load Discord resources", error);
+    throw publicRequestError(
+      "Could not verify the selected category and roles with Discord. Check the bot connection and try again.",
+      503
+    );
+  }
+  const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
+  const roleIds = new Set(roles.map((role) => role.id));
+  const selectedRoleIds = [
+    ...input.staffRoleIds,
+    ...input.pingRoleIds,
+    ...input.allowedRoleIds,
+    ...input.blockedRoleIds
+  ];
+
+  if (selectedRoleIds.some((roleId) => !roleIds.has(roleId))) {
+    throw publicRequestError(
+      "A selected ticket role no longer exists in this server. Refresh the page and choose the roles again.",
+      400,
+      {
+        staffRoleIds: "One or more selected roles no longer exist in this server.",
+        pingRoleIds: "Refresh the page and choose current server roles."
+      }
+    );
+  }
+  if (input.categoryId && channelMap.get(input.categoryId)?.type !== 4) {
+    throw publicRequestError(
+      "The selected ticket category is missing or belongs to another server.",
+      400,
+      { categoryId: "Choose a current category from the selected Discord server." }
+    );
+  }
+  if (input.transcriptChannelId && ![0, 5].includes(channelMap.get(input.transcriptChannelId)?.type ?? -1)) {
+    throw publicRequestError(
+      "The selected transcript channel is missing or is not a text channel.",
+      400,
+      { transcriptChannelId: "Choose a text or announcement channel from the selected Discord server." }
+    );
+  }
+}
+
+async function validateTicketPanelReferences(
+  guildId: string,
+  input: z.infer<typeof ticketPanelSchema>,
+  panelId?: number
+): Promise<void> {
+  const [types, panels] = await Promise.all([
+    listTicketTypes(guildId),
+    listTicketPanels(guildId)
+  ]);
+  const typeMap = new Map(types.map((type) => [type.id, type]));
+  const panelMap = new Map(panels.map((panel) => [panel.id, panel]));
+
+  if (input.panelKind === "standard") {
+    if (input.ticketTypeIds.some((id) => !typeMap.has(id))) {
+      throw publicRequestError("One or more selected ticket types do not belong to this server. Refresh the page and choose them again.");
+    }
+    if (input.active && !input.ticketTypeIds.some((id) => typeMap.get(id)?.active)) {
+      throw publicRequestError("An active ticket panel needs at least one active ticket type.");
+    }
+  } else {
+    if (input.childPanelIds.some((id) => id === panelId || !panelMap.has(id))) {
+      throw publicRequestError("One or more selected child panels are invalid for this server.");
+    }
+    if (input.active && !input.childPanelIds.some((id) => panelMap.get(id)?.active)) {
+      throw publicRequestError("An active multi-panel needs at least one active child panel.");
+    }
+  }
+
+  if (input.targetChannelId) {
+    const channel = await rest.get(Routes.channel(input.targetChannelId)) as { guild_id?: string; type?: number };
+    if (channel.guild_id !== guildId) {
+      throw publicRequestError("The selected panel channel does not belong to the server currently selected in the dashboard.");
+    }
+    if (![0, 5, 10, 11, 12].includes(channel.type ?? -1)) {
+      throw publicRequestError("Ticket panels can only be posted in a text, announcement, or thread channel.");
+    }
+  }
 }
 
 router.get("/session", (req, res) => {
   res.json({
     authenticated: Boolean(req.session.authenticated),
-    guildId: req.session.authenticated ? config.DISCORD_GUILD_ID : undefined
+    guildId: req.session.authenticated ? req.session.selectedGuildId : undefined
   });
 });
 
@@ -422,12 +766,63 @@ router.post("/logout", (req, res) => {
   req.session.destroy(() => res.json({ ok: true }));
 });
 
-router.use((req, res, next) => {
+router.use(async (req, res, next) => {
   if (!req.session.authenticated) {
     res.status(401).json({ error: "Authentication required." });
     return;
   }
-  next();
+  try {
+    res.locals.guildId = await ensureSelectedGuild(req);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/guilds", async (req, res) => {
+  const guilds = await listDiscordGuilds();
+  res.json({
+    guilds,
+    selectedGuildId: req.session.selectedGuildId
+  });
+});
+
+router.post("/guilds/select", async (req, res) => {
+  const guildId = z.string().regex(/^\d+$/).parse(req.body?.guildId);
+  const guilds = await listDiscordGuilds(true);
+  if (!guilds.some((guild) => guild.id === guildId)) {
+    res.status(400).json({ error: "Odyssey Bot is not installed in that server." });
+    return;
+  }
+  req.session.selectedGuildId = guildId;
+  res.json({ ok: true });
+});
+
+router.get("/docs", (req, res) => {
+  const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
+  const topics = docsTopics.filter((topic) => {
+    if (!search) return true;
+    const markdown = readDocsMarkdown(topic.files).toLowerCase();
+    return topic.title.toLowerCase().includes(search)
+      || topic.description.toLowerCase().includes(search)
+      || markdown.includes(search);
+  }).map(({ slug, title, description }) => ({ slug, title, description }));
+  res.json(topics);
+});
+
+router.get("/docs/:slug", (req, res) => {
+  const topic = docsTopics.find((candidate) => candidate.slug === req.params.slug);
+  if (!topic) {
+    res.status(404).json({ error: "Documentation topic not found." });
+    return;
+  }
+  const markdown = readDocsMarkdown(topic.files);
+  res.json({
+    slug: topic.slug,
+    title: topic.title,
+    description: topic.description,
+    html: renderDocsMarkdown(markdown)
+  });
 });
 
 router.post("/uploads", upload.single("image"), (req, res) => {
@@ -445,9 +840,9 @@ router.post("/uploads", upload.single("image"), (req, res) => {
 router.get("/discord/resources", async (_req, res, next) => {
   try {
     const [guild, channels, roles] = await Promise.all([
-      rest.get(Routes.guild(config.DISCORD_GUILD_ID)),
-      rest.get(Routes.guildChannels(config.DISCORD_GUILD_ID)),
-      rest.get(Routes.guildRoles(config.DISCORD_GUILD_ID))
+      rest.get(Routes.guild(res.locals.guildId)),
+      rest.get(Routes.guildChannels(res.locals.guildId)),
+      rest.get(Routes.guildRoles(res.locals.guildId))
     ]);
     const guildData = guild as { id: string; name: string; icon?: string | null };
     const channelData = channels as Array<{ id: string; name: string; type: number; parent_id?: string | null }>;
@@ -458,7 +853,7 @@ router.get("/discord/resources", async (_req, res, next) => {
         .filter((channel) => [0, 2, 4, 5, 13, 15, 16].includes(channel.type))
         .sort((a, b) => a.type - b.type || a.name.localeCompare(b.name)),
       roles: roleData
-        .filter((role) => role.id !== config.DISCORD_GUILD_ID && !role.managed)
+        .filter((role) => role.id !== res.locals.guildId && !role.managed)
         .sort((a, b) => b.position - a.position)
     });
   } catch (error) {
@@ -467,35 +862,35 @@ router.get("/discord/resources", async (_req, res, next) => {
 });
 
 router.get("/overview", async (_req, res) => {
-  res.json(await getOverview(config.DISCORD_GUILD_ID));
+  res.json(await getOverview(res.locals.guildId));
 });
 
 router.get("/settings", async (_req, res) => {
-  res.json(await getGuildSettings(config.DISCORD_GUILD_ID));
+  res.json(await getGuildSettings(res.locals.guildId));
 });
 
 router.put("/settings", async (req, res) => {
   const input = settingsSchema.parse(req.body);
-  res.json(await saveGuildSettings({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  res.json(await saveGuildSettings({ guildId: res.locals.guildId, ...input }));
 });
 
 router.get("/branding", async (_req, res) => {
-  res.json(await getBranding(config.DISCORD_GUILD_ID));
+  res.json(await getBranding(res.locals.guildId));
 });
 
 router.put("/branding", async (req, res) => {
   const input = brandingSchema.parse(req.body);
-  res.json(await saveBranding({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  res.json(await saveBranding({ guildId: res.locals.guildId, ...input }));
 });
 
 router.get("/custom-commands", async (_req, res) => {
-  res.json(await listCustomCommands(config.DISCORD_GUILD_ID));
+  res.json(await listCustomCommands(res.locals.guildId));
 });
 
 router.post("/custom-commands", async (req, res) => {
   const input = customCommandSchema.parse(req.body);
   res.status(201).json(await createCustomCommand({
-    guildId: config.DISCORD_GUILD_ID,
+    guildId: res.locals.guildId,
     ...input,
     createdByUserId: "local-dashboard",
     updatedByUserId: "local-dashboard"
@@ -506,7 +901,7 @@ router.put("/custom-commands/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
   const input = customCommandSchema.parse(req.body);
-  const result = await updateCustomCommand(id, config.DISCORD_GUILD_ID, {
+  const result = await updateCustomCommand(id, res.locals.guildId, {
     ...input,
     updatedByUserId: "local-dashboard"
   });
@@ -516,85 +911,161 @@ router.put("/custom-commands/:id", async (req, res) => {
 router.delete("/custom-commands/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  return (await deleteCustomCommand(id, config.DISCORD_GUILD_ID))
+  return (await deleteCustomCommand(id, res.locals.guildId))
     ? res.status(204).end()
     : res.status(404).json({ error: "Custom command not found." });
 });
 
 router.get("/ticket-types", async (_req, res) => {
-  res.json(await listTicketTypes(config.DISCORD_GUILD_ID));
+  res.json(await listTicketTypes(res.locals.guildId));
 });
 
 router.get("/ticket-panels", async (_req, res) => {
-  res.json(await listTicketPanels(config.DISCORD_GUILD_ID));
+  res.json(await listTicketPanels(res.locals.guildId));
 });
 
 router.post("/ticket-panels", async (req, res) => {
   const input = ticketPanelSchema.parse(req.body);
-  res.status(201).json(await createTicketPanel({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  await validateTicketPanelReferences(res.locals.guildId, input);
+  res.status(201).json(await createTicketPanel({ guildId: res.locals.guildId, ...input }));
 });
 
 router.put("/ticket-panels/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  const result = await updateTicketPanel(id, config.DISCORD_GUILD_ID, ticketPanelSchema.parse(req.body));
+  const input = ticketPanelSchema.parse(req.body);
+  await validateTicketPanelReferences(res.locals.guildId, input, id);
+  const result = await updateTicketPanel(id, res.locals.guildId, input);
   return result ? res.json(result) : res.status(404).json({ error: "Ticket panel not found." });
 });
 
 router.delete("/ticket-panels/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  return (await deleteTicketPanel(id, config.DISCORD_GUILD_ID))
+  return (await deleteTicketPanel(id, res.locals.guildId))
     ? res.status(204).end()
     : res.status(404).json({ error: "Ticket panel not found." });
 });
 
 router.post("/ticket-types", async (req, res) => {
   const input = ticketTypeSchema.parse(req.body);
-  res.status(201).json(await createTicketType({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  await validateTicketTypeReferences(res.locals.guildId, input);
+  res.status(201).json(await createTicketType({ guildId: res.locals.guildId, ...input }));
 });
 
 router.put("/ticket-types/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  const result = await updateTicketType(id, config.DISCORD_GUILD_ID, ticketTypeSchema.parse(req.body));
+  const input = ticketTypeSchema.parse(req.body);
+  await validateTicketTypeReferences(res.locals.guildId, input);
+  const result = await updateTicketType(id, res.locals.guildId, input);
   return result ? res.json(result) : res.status(404).json({ error: "Ticket type not found." });
 });
 
 router.delete("/ticket-types/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  return (await deleteTicketType(id, config.DISCORD_GUILD_ID))
+  return (await deleteTicketType(id, res.locals.guildId))
     ? res.status(204).end()
     : res.status(404).json({ error: "Ticket type not found." });
 });
 
 router.get("/tickets", async (_req, res) => {
-  res.json(await listRecentTickets(config.DISCORD_GUILD_ID));
+  res.json(await listRecentTickets(res.locals.guildId));
+});
+
+router.get("/ticket-close-requests", async (_req, res) => {
+  res.json(await listTicketCloseRequests(res.locals.guildId));
 });
 
 router.get("/announcements", async (_req, res) => {
-  res.json(await listAnnouncements(config.DISCORD_GUILD_ID));
+  res.json(await listAnnouncements(res.locals.guildId));
 });
 
 router.post("/announcements", async (req, res) => {
   const input = announcementSchema.parse(req.body);
-  res.status(201).json(await createAnnouncement({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  res.status(201).json(await createAnnouncement({ guildId: res.locals.guildId, ...input }));
 });
 
 router.put("/announcements/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  const result = await updateAnnouncement(id, config.DISCORD_GUILD_ID, announcementSchema.parse(req.body));
+  const result = await updateAnnouncement(id, res.locals.guildId, announcementSchema.parse(req.body));
   return result ? res.json(result) : res.status(404).json({ error: "Announcement not found." });
 });
 
 router.delete("/announcements/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  return (await deleteAnnouncement(id, config.DISCORD_GUILD_ID))
+  return (await deleteAnnouncement(id, res.locals.guildId))
     ? res.status(204).end()
     : res.status(404).json({ error: "Announcement not found." });
+});
+
+router.get("/socials", async (_req, res) => {
+  res.json(await getSocialPromotionSettings(res.locals.guildId));
+});
+
+router.put("/socials", async (req, res) => {
+  const input = socialPromotionSchema.parse(req.body);
+  if (input.targetChannelId) {
+    const channels = await rest.get(Routes.guildChannels(res.locals.guildId)) as Array<{ id: string; type: number }>;
+    const channel = channels.find((item) => item.id === input.targetChannelId);
+    if (!channel || ![0, 5].includes(channel.type)) {
+      throw publicRequestError(
+        "The Social Promotion target channel is missing, is not a text channel, or belongs to another server.",
+        400,
+        { targetChannelId: "Refresh the dashboard and choose a text channel from the selected server." }
+      );
+    }
+  }
+  res.json(await saveSocialPromotionSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+router.post("/socials/send", async (req, res, next) => {
+  try {
+    const saved = await getSocialPromotionSettings(res.locals.guildId);
+    const input = socialPromotionSchema.parse({
+      ...saved,
+      targetChannelId: req.body?.channelId ?? saved.targetChannelId
+    });
+    if (!input.targetChannelId) {
+      throw publicRequestError(
+        "Choose a target channel before sending the social promotion.",
+        400,
+        { targetChannelId: "Choose a text channel from the selected server." }
+      );
+    }
+    const linkLines = input.links.map((link) => `[${link.label}](${link.url})`).join("\n");
+    const memberLines = input.memberEntries.map((link) => `[${link.label}](${link.url})`).join("\n");
+    const files: UploadFile[] = [];
+    const plainContent = [
+      input.title,
+      input.description,
+      ...input.links.map((link) => `${link.label}: ${link.url}`),
+      ...input.memberEntries.map((link) => `${link.label}: ${link.url}`)
+    ].filter(Boolean).join("\n\n");
+    const embedInput = embedSchema.parse({
+      ...emptyEmbedConfig(),
+      title: input.title,
+      description: input.description,
+      color: input.color,
+      thumbnailUrl: input.thumbnailUrl,
+      imageUrl: input.imageUrl,
+      fields: [
+        ...(linkLines ? [{ name: "Official socials", value: linkLines, inline: false }] : []),
+        ...(memberLines ? [{ name: "Community and members", value: memberLines, inline: false }] : [])
+      ]
+    });
+    await sendDiscordMessage(res.locals.guildId, input.targetChannelId, {
+      content: input.outputMode === "plain" ? plainContent : undefined,
+      embeds: input.outputMode === "embed" ? [discordEmbed(embedInput, files)] : undefined,
+      allowed_mentions: { parse: [] }
+    }, files, "Could not send the social promotion.");
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.post("/test/embed", async (req, res, next) => {
@@ -610,7 +1081,7 @@ router.post("/test/embed", async (req, res, next) => {
       || input.embed.imageUrl || input.embed.thumbnailUrl || input.embed.footerText
       || input.embed.fields.length
     );
-    await sendDiscordMessage(input.channelId, {
+    await sendDiscordMessage(res.locals.guildId, input.channelId, {
       content: input.content || input.embed.content || undefined,
       embeds: hasEmbed ? [discordEmbed(input.embed, files)] : undefined
     }, files);
@@ -626,9 +1097,13 @@ router.post("/test/ticket-panel", async (req, res, next) => {
       panelId: z.number().int().positive(),
       channelId: z.string().regex(/^\d+$/).nullable().optional()
     }).parse(req.body);
-    const panel = await getTicketPanel(input.panelId, config.DISCORD_GUILD_ID);
+    const panel = await getTicketPanel(input.panelId, res.locals.guildId);
     if (!panel) {
       res.status(404).json({ error: "Ticket panel not found." });
+      return;
+    }
+    if (!panel.active) {
+      res.status(400).json({ error: "Enable this ticket panel before sending it." });
       return;
     }
     const channelId = input.channelId ?? panel.targetChannelId;
@@ -650,9 +1125,12 @@ router.post("/test/ticket-panel", async (req, res, next) => {
     const components: Array<Record<string, unknown>> = [];
     if (panel.panelKind === "multi") {
       const childPanels = (await Promise.all(panel.childPanelIds
-        .map((id) => getTicketPanel(id, config.DISCORD_GUILD_ID))))
-        .filter((item) => Boolean(item))
+        .map((id) => getTicketPanel(id, res.locals.guildId))))
+        .filter((item) => Boolean(item?.active))
         .slice(0, 25);
+      if (!childPanels.length) {
+        throw publicRequestError("This multi-panel has no active child panels. Edit it and select at least one active panel.");
+      }
       components.push({
         type: 1,
         components: [{
@@ -667,8 +1145,14 @@ router.post("/test/ticket-panel", async (req, res, next) => {
         }]
       });
     } else {
-      const typeMap = new Map((await listTicketTypes(config.DISCORD_GUILD_ID)).map((type) => [type.id, type]));
-      const types = panel.ticketTypeIds.map((id) => typeMap.get(id)).filter(Boolean).slice(0, 25);
+      const typeMap = new Map((await listTicketTypes(res.locals.guildId)).map((type) => [type.id, type]));
+      const types = panel.ticketTypeIds
+        .map((id) => typeMap.get(id))
+        .filter((type) => Boolean(type?.active))
+        .slice(0, 25);
+      if (!types.length) {
+        throw publicRequestError("This panel has no active ticket types. Edit it and select at least one active ticket type.");
+      }
       if (panel.displayMode === "buttons") {
         for (let index = 0; index < types.length; index += 5) {
           components.push({
@@ -678,7 +1162,7 @@ router.post("/test/ticket-panel", async (req, res, next) => {
               style: 2,
               custom_id: `ticket:create-button:${panel.id}:${type!.id}`,
               label: type!.label,
-              emoji: type!.emoji ? { name: type!.emoji } : undefined
+              emoji: dashboardComponentEmoji(type!.emoji)
             }))
           });
         }
@@ -693,16 +1177,16 @@ router.post("/test/ticket-panel", async (req, res, next) => {
               label: type!.label,
               description: type!.description || undefined,
               value: String(type!.id),
-              emoji: type!.emoji ? { name: type!.emoji } : undefined
+              emoji: dashboardComponentEmoji(type!.emoji)
             }))
           }]
         });
       }
     }
-    await sendDiscordMessage(channelId, {
+    await sendDiscordMessage(res.locals.guildId, channelId, {
       embeds: [discordEmbed(embedInput, files)],
       components
-    }, files);
+    }, files, `Could not post ticket panel "${panel.name}".`);
     res.json({ ok: true });
   } catch (error) {
     next(error);
@@ -711,8 +1195,8 @@ router.post("/test/ticket-panel", async (req, res, next) => {
 
 router.get("/moderation", async (_req, res) => {
   const [warnings, actions] = await Promise.all([
-    listWarnings(config.DISCORD_GUILD_ID, undefined, 100),
-    listModerationActions(config.DISCORD_GUILD_ID, 100)
+    listWarnings(res.locals.guildId, undefined, 100),
+    listModerationActions(res.locals.guildId, 100)
   ]);
   res.json({
     warnings,
@@ -737,12 +1221,12 @@ const welcomeSchema = z.object({
 });
 
 router.get("/welcome", async (_req, res) => {
-  res.json(await getWelcomeSettings(config.DISCORD_GUILD_ID));
+  res.json(await getWelcomeSettings(res.locals.guildId));
 });
 
 router.put("/welcome", async (req, res) => {
   const input = welcomeSchema.parse(req.body);
-  res.json(await saveWelcomeSettings({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  res.json(await saveWelcomeSettings({ guildId: res.locals.guildId, ...input }));
 });
 
 const antiRaidSchema = z.object({
@@ -760,12 +1244,12 @@ const antiRaidSchema = z.object({
 });
 
 router.get("/anti-raid", async (_req, res) => {
-  res.json(await getAntiRaidSettings(config.DISCORD_GUILD_ID));
+  res.json(await getAntiRaidSettings(res.locals.guildId));
 });
 
 router.put("/anti-raid", async (req, res) => {
   const input = antiRaidSchema.parse(req.body);
-  res.json(await saveAntiRaidSettings({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  res.json(await saveAntiRaidSettings({ guildId: res.locals.guildId, ...input }));
 });
 
 const antiNukeSchema = z.object({
@@ -787,12 +1271,386 @@ const antiNukeSchema = z.object({
 });
 
 router.get("/anti-nuke", async (_req, res) => {
-  res.json(await getAntiNukeSettings(config.DISCORD_GUILD_ID));
+  res.json(await getAntiNukeSettings(res.locals.guildId));
 });
 
 router.put("/anti-nuke", async (req, res) => {
   const input = antiNukeSchema.parse(req.body);
-  res.json(await saveAntiNukeSettings({ guildId: config.DISCORD_GUILD_ID, ...input }));
+  res.json(await saveAntiNukeSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+const antiRoleSchema = z.object({
+  enabled: z.boolean().default(false),
+  protectedRoleIds: idArray,
+  trustedUserIds: idArray,
+  trustedRoleIds: idArray,
+  action: z.enum(["log", "remove_permission", "remove_role", "timeout", "kick", "ban"]).default("log"),
+  massChangeThreshold: z.coerce.number().int().min(2).max(100).default(4),
+  timeWindowSeconds: z.coerce.number().int().min(2).max(3600).default(20),
+  logChannelId: optionalId
+}).superRefine((value, context) => {
+  if (value.action === "remove_role" && value.protectedRoleIds.length === 0) {
+    context.addIssue({
+      code: "custom",
+      path: ["protectedRoleIds"],
+      message: "Choose at least one protected role before using Remove assigned role."
+    });
+  }
+});
+
+router.get("/anti-role", async (_req, res) => {
+  res.json(await getAntiRoleSettings(res.locals.guildId));
+});
+
+router.put("/anti-role", async (req, res) => {
+  const input = antiRoleSchema.parse(req.body);
+  res.json(await saveAntiRoleSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+const autoModSchema = z.object({
+  enabled: z.boolean().default(false),
+  blockInvites: z.boolean().default(false),
+  blockSuspiciousLinks: z.boolean().default(false),
+  blockCaps: z.boolean().default(false),
+  blockSpam: z.boolean().default(false),
+  blockMassMentions: z.boolean().default(false),
+  capsPercentage: z.coerce.number().int().min(50).max(100).default(75),
+  spamThreshold: z.coerce.number().int().min(2).max(20).default(4),
+  mentionThreshold: z.coerce.number().int().min(2).max(50).default(5),
+  action: z.enum(["delete", "warn", "timeout", "log"]).default("delete"),
+  timeoutMinutes: z.coerce.number().int().min(1).max(40320).default(10),
+  alwaysBlockDiscordInvites: z.boolean().default(true),
+  linkChannelRules: z.array(z.object({
+    channelId: z.string().regex(/^\d+$/, "Choose a valid Discord channel."),
+    allowedDomains: z.array(z.string()).max(50).transform((domains, context) => {
+      try {
+        return [...new Set(domains.map(normalizeDomain))];
+      } catch (error) {
+        context.addIssue({
+          code: "custom",
+          message: error instanceof Error ? error.message : "Invalid allowed domain."
+        });
+        return z.NEVER;
+      }
+    }),
+    blockedDomains: z.array(z.string()).max(50).transform((domains, context) => {
+      try {
+        return [...new Set(domains.map(normalizeDomain))];
+      } catch (error) {
+        context.addIssue({
+          code: "custom",
+          message: error instanceof Error ? error.message : "Invalid blocked domain."
+        });
+        return z.NEVER;
+      }
+    })
+  })).max(50).default([]),
+  ignoredChannelIds: idArray,
+  ignoredRoleIds: idArray,
+  ignoredUserIds: idArray,
+  logChannelId: optionalId
+}).superRefine((value, context) => {
+  if (value.enabled && ![
+    value.blockInvites,
+    value.blockSuspiciousLinks,
+    value.blockCaps,
+    value.blockSpam,
+    value.blockMassMentions
+  ].some(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["blockInvites"],
+      message: "Turn on at least one Auto Mod rule before enabling Auto Mod."
+    });
+  }
+  value.linkChannelRules.forEach((rule, index) => {
+    const conflicts = rule.allowedDomains.filter((domain) => rule.blockedDomains.includes(domain));
+    if (conflicts.length) {
+      context.addIssue({
+        code: "custom",
+        path: ["linkChannelRules", index, "blockedDomains"],
+        message: `${conflicts.join(", ")} cannot be both allowed and blocked.`
+      });
+    }
+    if (value.linkChannelRules.findIndex((item) => item.channelId === rule.channelId) !== index) {
+      context.addIssue({
+        code: "custom",
+        path: ["linkChannelRules", index, "channelId"],
+        message: "Use one link rule per channel."
+      });
+    }
+  });
+});
+
+router.get("/auto-mod", async (_req, res) => {
+  res.json(await getAutoModSettings(res.locals.guildId));
+});
+
+router.put("/auto-mod", async (req, res) => {
+  const input = autoModSchema.parse(req.body);
+  const channels = await rest.get(Routes.guildChannels(res.locals.guildId)) as Array<{ id: string; type: number }>;
+  const textChannelIds = new Set(channels.filter((channel) => [0, 5].includes(channel.type)).map((channel) => channel.id));
+  const invalidRule = input.linkChannelRules.find((rule) => !textChannelIds.has(rule.channelId));
+  if (invalidRule) {
+    throw publicRequestError(
+      "One of the Auto Mod link rules uses a missing channel or a channel from another server.",
+      400,
+      { linkChannelRules: "Refresh the dashboard and choose a text channel from the selected server." }
+    );
+  }
+  res.json(await saveAutoModSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+const rolePanelSchema = z.object({
+  name: z.string().min(1).max(100),
+  channelId: optionalId,
+  title: z.string().min(1).max(256),
+  description: z.string().max(4000).default(""),
+  color,
+  active: z.boolean().default(true),
+  roleIds: idArray.refine((roles) => roles.length > 0, "Choose at least one role.").refine((roles) => roles.length <= 25, "Role panels support up to 25 roles.")
+});
+
+async function getRolePanelSafetyIssue(guildId: string, roleIds: string[]): Promise<string | null> {
+  const [roles, botMember] = await Promise.all([
+    rest.get(Routes.guildRoles(guildId)) as Promise<Array<{
+      id: string;
+      name: string;
+      managed: boolean;
+      permissions: string;
+      position: number;
+    }>>,
+    rest.get(Routes.guildMember(guildId, config.DISCORD_CLIENT_ID)) as Promise<{
+      roles: string[];
+    }>
+  ]);
+  const roleMap = new Map(roles.map((role) => [role.id, role]));
+  const botHighestPosition = Math.max(
+    0,
+    ...botMember.roles.map((roleId) => roleMap.get(roleId)?.position ?? 0)
+  );
+  const dangerousBits = [
+    PermissionFlagsBits.Administrator,
+    PermissionFlagsBits.ManageGuild,
+    PermissionFlagsBits.ManageRoles,
+    PermissionFlagsBits.ManageChannels,
+    PermissionFlagsBits.BanMembers,
+    PermissionFlagsBits.KickMembers,
+    PermissionFlagsBits.ManageWebhooks,
+    PermissionFlagsBits.MentionEveryone
+  ].reduce((bits, permission) => bits | permission, 0n);
+
+  for (const roleId of roleIds) {
+    const role = roleMap.get(roleId);
+    if (!role) return `Role ${roleId} no longer exists. Refresh the page and choose another role.`;
+    if (role.managed) return `${role.name} is managed by Discord or an integration and cannot be self-assigned.`;
+    if ((BigInt(role.permissions) & dangerousBits) !== 0n) {
+      return `${role.name} has administrative permissions and cannot be used in a self-service role panel.`;
+    }
+    if (role.position >= botHighestPosition) {
+      return `${role.name} is at or above the bot's highest role. Move the bot role above it first.`;
+    }
+  }
+  return null;
+}
+
+router.get("/role-panels", async (_req, res) => {
+  res.json(await listRolePanels(res.locals.guildId));
+});
+
+router.post("/role-panels", async (req, res) => {
+  const input = rolePanelSchema.parse(req.body);
+  const safetyIssue = await getRolePanelSafetyIssue(res.locals.guildId, input.roleIds);
+  if (safetyIssue) return res.status(400).json({ error: safetyIssue, fields: { roleIds: safetyIssue } });
+  res.status(201).json(await createRolePanel({ guildId: res.locals.guildId, ...input }));
+});
+
+router.put("/role-panels/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const input = rolePanelSchema.parse(req.body);
+  const safetyIssue = await getRolePanelSafetyIssue(res.locals.guildId, input.roleIds);
+  if (safetyIssue) return res.status(400).json({ error: safetyIssue, fields: { roleIds: safetyIssue } });
+  const result = await updateRolePanel(id, res.locals.guildId, input);
+  return result ? res.json(result) : res.status(404).json({ error: "Role panel not found." });
+});
+
+router.delete("/role-panels/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  return (await deleteRolePanel(id, res.locals.guildId))
+    ? res.status(204).end()
+    : res.status(404).json({ error: "Role panel not found." });
+});
+
+router.post("/role-panels/:id/post", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    const panel = await getRolePanel(id, res.locals.guildId);
+    if (!panel?.active) return res.status(404).json({ error: "Role panel not found or inactive." });
+    const input = z.object({ channelId: optionalId }).parse(req.body);
+    const channelId = input.channelId ?? panel.channelId;
+    if (!channelId) return res.status(400).json({ error: "Choose a channel or save a default channel on the panel." });
+    const roles = await rest.get(Routes.guildRoles(res.locals.guildId)) as Array<{ id: string; name: string }>;
+    const roleMap = new Map(roles.map((role) => [role.id, role]));
+    const selected = panel.roleIds.map((roleId) => roleMap.get(roleId)).filter(Boolean).slice(0, 25);
+    if (!selected.length) return res.status(400).json({ error: "None of this panel's roles still exist." });
+    const components = [];
+    for (let index = 0; index < selected.length; index += 5) {
+      components.push({
+        type: 1,
+        components: selected.slice(index, index + 5).map((role) => ({
+          type: 2,
+          style: 2,
+          custom_id: `role-panel:toggle:${panel.id}:${role!.id}`,
+          label: role!.name.slice(0, 80)
+        }))
+      });
+    }
+    await sendDiscordMessage(res.locals.guildId, channelId, {
+      embeds: [{
+        title: panel.title,
+        description: panel.description || "Choose a role below.",
+        color: Number.parseInt(panel.color.slice(1), 16)
+      }],
+      components
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const stickySchema = z.object({
+  channelId: z.string().regex(/^\d+$/, "Choose a channel."),
+  content: z.string().min(1).max(2000),
+  enabled: z.boolean().default(true),
+  minIntervalSeconds: z.coerce.number().int().min(10).max(3600).default(30)
+});
+
+router.get("/sticky-messages", async (_req, res) => {
+  res.json(await listStickyMessages(res.locals.guildId));
+});
+
+router.post("/sticky-messages", async (req, res) => {
+  const input = stickySchema.parse(req.body);
+  res.status(201).json(await createStickyMessage({ guildId: res.locals.guildId, ...input }));
+});
+
+router.put("/sticky-messages/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const result = await updateStickyMessage(id, res.locals.guildId, stickySchema.parse(req.body));
+  return result ? res.json(result) : res.status(404).json({ error: "Sticky message not found." });
+});
+
+router.delete("/sticky-messages/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  return (await deleteStickyMessage(id, res.locals.guildId))
+    ? res.status(204).end()
+    : res.status(404).json({ error: "Sticky message not found." });
+});
+
+router.post("/sticky-messages/:id/test", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    const sticky = (await listStickyMessages(res.locals.guildId)).find((item) => item.id === id);
+    if (!sticky) return res.status(404).json({ error: "Sticky message not found." });
+    await sendDiscordMessage(res.locals.guildId, sticky.channelId, {
+      content: `[Sticky preview]\n${sticky.content}`,
+      allowed_mentions: { parse: [] }
+    });
+    return res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
+const scheduledAnnouncementSchema = z.object({
+  name: z.string().min(1).max(100),
+  announcementTemplateId: z.coerce.number().int().positive(),
+  channelId: z.string().regex(/^\d+$/, "Choose a channel."),
+  pingType: z.enum(["none", "everyone", "here"]).default("none"),
+  scheduleType: z.enum(["once", "repeat"]).default("once"),
+  nextRunAt: z.string().datetime(),
+  intervalMinutes: z.coerce.number().int().min(5).max(525600).nullable().default(null),
+  enabled: z.boolean().default(true)
+}).superRefine((value, context) => {
+  if (value.scheduleType === "repeat" && !value.intervalMinutes) {
+    context.addIssue({
+      code: "custom",
+      path: ["intervalMinutes"],
+      message: "Enter a repeat interval of at least 5 minutes."
+    });
+  }
+});
+
+router.get("/scheduled-announcements", async (_req, res) => {
+  res.json(await listScheduledAnnouncements(res.locals.guildId));
+});
+
+router.post("/scheduled-announcements", async (req, res) => {
+  const input = scheduledAnnouncementSchema.parse(req.body);
+  res.status(201).json(await createScheduledAnnouncement({ guildId: res.locals.guildId, ...input }));
+});
+
+router.put("/scheduled-announcements/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const result = await updateScheduledAnnouncement(
+    id,
+    res.locals.guildId,
+    scheduledAnnouncementSchema.parse(req.body)
+  );
+  return result ? res.json(result) : res.status(404).json({ error: "Scheduled announcement not found." });
+});
+
+router.delete("/scheduled-announcements/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  return (await deleteScheduledAnnouncement(id, res.locals.guildId))
+    ? res.status(204).end()
+    : res.status(404).json({ error: "Scheduled announcement not found." });
+});
+
+router.post("/scheduled-announcements/:id/test", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    const schedule = await getScheduledAnnouncement(id, res.locals.guildId);
+    if (!schedule) return res.status(404).json({ error: "Scheduled announcement not found." });
+    const template = await getAnnouncement(schedule.announcementTemplateId, res.locals.guildId);
+    if (!template) return res.status(400).json({ error: "The saved announcement template no longer exists." });
+    const files: UploadFile[] = [];
+    const plainContent = [template.title.trim(), template.body.trim(), template.footer.trim()]
+      .filter(Boolean)
+      .join("\n\n");
+    const embed = template.outputMode === "embed"
+      ? embedSchema.parse({
+        ...emptyEmbedConfig(),
+        title: template.title,
+        description: template.body,
+        color: template.color,
+        imageUrl: template.imageUrl,
+        thumbnailUrl: template.thumbnailUrl,
+        footerText: template.footer
+      })
+      : null;
+    await sendDiscordMessage(res.locals.guildId, schedule.channelId, {
+      content: [
+        "**Scheduled preview (pings disabled)**",
+        template.outputMode === "plain" ? plainContent : ""
+      ].filter(Boolean).join("\n\n"),
+      embeds: embed ? [discordEmbed(embed, files)] : undefined,
+      allowed_mentions: { parse: [] }
+    }, files);
+    return res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 export const dashboardApi = router;

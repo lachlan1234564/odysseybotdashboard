@@ -8,7 +8,7 @@ import {
   TextChannel
 } from "discord.js";
 import { getAntiNukeSettings, listAntiNukeTrusted, recordModerationAction } from "../database/index.js";
-import { asColor, sendGuildLog } from "./utils.js";
+import { asColor, buildActionLogEmbed, sendGuildLog } from "./utils.js";
 
 interface ActionEntry {
   executorId: string;
@@ -40,13 +40,10 @@ function addEntry(guildId: string, executorId: string, targetId?: string): void 
 
 async function isTrusted(guildId: string, executorId: string, member?: GuildMember | null): Promise<boolean> {
   if (!member) return false;
-  if (guildId === executorId) return true; // server owner id pattern? no, we check ownership below
-  if (member.id === guildId) return false; // not valid
-  if (member.user.bot) return true; // skip bots for anti-nuke? Some want to monitor bots. Let's monitor but whitelist explicitly via trusted list.
+  if (member.id === member.guild.ownerId) return true;
   const trusted = await listAntiNukeTrusted(guildId);
   if (trusted.some((t) => t.userId === executorId)) return true;
   if (member.roles.cache.some((r) => trusted.some((t) => t.roleId === r.id))) return true;
-  if (member.id === member.guild.ownerId) return true;
   return false;
 }
 
@@ -58,43 +55,65 @@ async function sendAlert(guild: Guild, channelId: string | null, embed: EmbedBui
   }
 }
 
-async function takeAction(guild: Guild, executor: GuildMember, settings: ReturnType<typeof getAntiNukeSettings> extends Promise<infer T> ? T : never, reason: string): Promise<void> {
+async function takeAction(
+  guild: Guild,
+  executor: GuildMember,
+  settings: ReturnType<typeof getAntiNukeSettings> extends Promise<infer T> ? T : never,
+  reason: string,
+  eventType: string,
+  targetId?: string
+): Promise<void> {
   const action = settings.action;
-  if (action === "alert") {
-    await sendAlert(guild, settings.alertChannelId ?? settings.logChannelId, new EmbedBuilder()
-      .setColor(asColor("#ED4245")).setTitle("Anti-nuke: Alert").setDescription(`<@${executor.id}> \`${executor.id}\` ${reason}`).setTimestamp());
-    return;
-  }
+  let status = action === "alert" ? "Alerted" : "Completed";
 
   if (action === "remove_roles") {
-    if (executor.id === executor.guild.ownerId) return;
+    if (executor.id === executor.guild.ownerId) status = "Skipped: server owner";
     const me = executor.guild.members.me;
     const manageable = executor.roles.cache.filter((r) => r.id !== r.guild.id && me && me.roles.highest.comparePositionTo(r) > 0);
-    if (manageable.size > 0) {
-      await executor.roles.remove(manageable, `Anti-nuke: ${reason}`).catch(() => undefined);
+    if (status === "Completed" && manageable.size > 0) {
+      status = await executor.roles.remove(manageable, `Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed");
+    } else if (status === "Completed") {
+      status = "Failed: no manageable roles";
     }
   }
 
   if (action === "timeout_executor") {
     if (executor.moderatable) {
-      await executor.timeout(60 * 60_000, `Anti-nuke: ${reason}`).catch(() => undefined);
+      status = await executor.timeout(60 * 60_000, `Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed");
+    } else {
+      status = "Failed: executor is not moderatable";
     }
   }
 
   if (action === "kick_executor") {
     if (executor.kickable) {
-      await executor.kick(`Anti-nuke: ${reason}`).catch(() => undefined);
+      status = await executor.kick(`Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed");
+    } else {
+      status = "Failed: executor is not kickable";
     }
   }
 
   if (action === "ban_executor") {
     if (executor.bannable) {
-      await executor.ban({ deleteMessageSeconds: 0, reason: `Anti-nuke: ${reason}` }).catch(() => undefined);
+      status = await executor.ban({ deleteMessageSeconds: 0, reason: `Anti-nuke: ${reason}` }).then(() => "Completed").catch(() => "Failed");
+    } else {
+      status = "Failed: executor is not bannable";
     }
   }
 
-  await sendAlert(guild, settings.alertChannelId ?? settings.logChannelId, new EmbedBuilder()
-    .setColor(asColor("#ED4245")).setTitle(`Anti-nuke: ${action}`).setDescription(`<@${executor.id}> \`${executor.id}\` — ${reason}`).setTimestamp());
+  const embed = buildActionLogEmbed({
+    title: `Anti-nuke: ${action}`,
+    action: eventType,
+    status,
+    reason,
+    affectedUserId: executor.id,
+    executorId: executor.id,
+    details: targetId ? `Affected Discord object ID: \`${targetId}\`` : undefined
+  });
+  await sendAlert(guild, settings.alertChannelId ?? settings.logChannelId, embed);
+  if (settings.logChannelId && settings.logChannelId !== settings.alertChannelId) {
+    await sendGuildLog(guild.id, settings.logChannelId, (id) => guild.channels.fetch(id), embed);
+  }
 
   await recordModerationAction({
     guildId: guild.id,
@@ -141,7 +160,7 @@ export async function checkEvent(guild: Guild, executorId: string, eventType: st
   });
 
   if (count >= threshold) {
-    if (member) await takeAction(guild, member, settings, reason);
+    if (member) await takeAction(guild, member, settings, reason, eventType, targetId);
     else {
       await sendAlert(guild, settings.alertChannelId ?? settings.logChannelId, new EmbedBuilder()
         .setColor(asColor("#ED4245")).setTitle("Anti-nuke: Threshold reached")

@@ -14,7 +14,7 @@ Action: **Send a saved announcement**. Access: Bot admins only.
 
 ## Ticket + auto-close workflow
 
-Create a ticket type with **Close requests** enabled and an **Auto-close** timer. Members request closure; staff approve; inactive tickets close automatically.
+Create a ticket type with the **Close request button** enabled and an **Auto-close** timer. The opener/community can ask staff to close, staff can use `/close-request` to ask the opener, and inactive tickets close automatically.
 
 ## Moderation action sequence
 

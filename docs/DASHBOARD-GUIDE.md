@@ -11,11 +11,12 @@ This guide explains what each dashboard page does and walks through common setup
 3. [Custom Commands](#custom-commands)
 4. [Tickets](#tickets)
 5. [Announcements](#announcements)
-6. [Moderation](#moderation)
-7. [Server Settings](#server-settings)
-8. [Appearance](#appearance)
-9. [Image URLs and Uploads](#image-urls-and-uploads)
-10. [Testing Safely](#testing-safely)
+6. [Social Promotion](#social-promotion)
+7. [Moderation](#moderation)
+8. [Server Settings](#server-settings)
+9. [Appearance](#appearance)
+10. [Image URLs and Uploads](#image-urls-and-uploads)
+11. [Testing Safely](#testing-safely)
 
 ---
 
@@ -55,6 +56,8 @@ The first page you see after logging in. It shows counts for:
 
 It also includes a **Launch checklist** with shortcuts to the most important setup steps.
 
+The **Recent dashboard activity** card shows the last successful saves, tests, uploads, posts, and deletions from your current browser session. This is the quickest way to confirm that a button actually worked.
+
 ### Command Studio
 
 Build custom actions that members run through:
@@ -67,17 +70,24 @@ The builder includes identity, action type, embed design, permissions, cooldowns
 
 ### Ticket Studio
 
-Contains three tabs:
+The **Tickets** sidebar group contains four pages:
 
 - **Panels:** Reusable public ticket entry messages (dropdowns or buttons).
 - **Ticket types:** Routing, permissions, welcome messages, and lifecycle rules.
 - **History:** Recent ticket records with status, user, and claim information.
+- **Close Requests:** Pending, approved, and denied ticket closure requests.
+
+Staff can claim tickets and set their priority to low, normal, high, or urgent inside the ticket channel. When a ticket closes, the bot exports the newest 100 messages if a transcript channel is configured.
 
 **Important:** Create ticket types **before** panels, because a panel must contain one or more saved ticket types.
 
 ### Announcements
 
-Save reusable announcement templates with a title, body, color, image, thumbnail, footer, and target channel. In Discord, `/announce` shows an ephemeral preview and asks for confirmation before posting.
+Save reusable embed or plain-text announcement templates. Embed mode supports title, color, image, thumbnail, and footer; plain mode sends a normal Discord message with no embed. In Discord, `/announce` shows an ephemeral preview and asks for confirmation before posting.
+
+### Social Promotion
+
+Save one embed or plain-text directory of official and member social links for the active server. The page includes image uploads, a live preview, HTTPS URL validation, and a button that publishes the saved version.
 
 ### Moderation
 
@@ -108,9 +118,31 @@ Set fallback branding:
 
 New ticket panels and types also have their own visual settings that override these defaults.
 
-### Documentation
+### Docs / Help
 
-The built-in help page inside the dashboard. It mirrors much of this guide.
+The authenticated help center at `/docs`. It has separate searchable topics and copy buttons on command blocks.
+
+### Security
+
+The Security dropdown contains:
+
+- **Anti Raid:** watches unusual join waves.
+- **Anti Nuke:** watches bursts of destructive administrative actions.
+- **Role Protection:** watches role permissions, protected-role assignments, renames, deletions, and mass role changes.
+- **Verification:** creates privacy-conscious Discord OAuth links that can confirm user ID, account age, and server membership. Optional VPN/proxy checks stay disabled until a provider is configured.
+
+Use alert or log-only actions first.
+
+### Automation
+
+The Automation dropdown contains:
+
+- **Auto Mod:** checks invites, suspicious links, caps, spam, and mass mentions. Channel-specific link rows can allow or block domains without exempting the entire channel.
+- **Role Panels:** publishes buttons for safe self-service roles.
+- **Sticky Messages:** keeps a notice near the bottom of a channel.
+- **Scheduled:** sends saved announcement templates once or repeatedly.
+
+Each page has a button that opens the matching Help topic.
 
 ---
 
@@ -214,6 +246,13 @@ Use these variables in message and embed text:
 | `{text}` | Optional `/custom` `text` input |
 | `{reason}` | Optional `/custom` `reason` input |
 | `{target}` | Optional `/custom` target member, otherwise the caller |
+| `{server_name}` / `{server_id}` | Server name and ID |
+| `{server_member_count}` | Approximate server member count |
+| `{server_created_at}` / `{server_icon}` | Server creation time and icon URL |
+| `{channel_name}` / `{channel_id}` | Current channel name and ID |
+| `{user_name}` / `{user_id}` / `{user_avatar}` | Current user's details |
+| `{ticket_id}` / `{ticket_category}` | Ticket number and type when used inside a ticket |
+| `{created_at}` / `{closed_at}` | Ticket or event creation and closure times |
 
 **Example command text:**
 
@@ -289,7 +328,7 @@ A ticket type defines routing, permissions, and the welcome message.
 | **Staff roles** | Can view, write, claim, and close. | `@Support Team` |
 | **Ping roles on open** | Mentioned in the first message. | `@On-Call Staff` |
 | **Welcome message** | First embed inside the ticket channel. | `Thanks for contacting us...` |
-| **Allowed roles** | Optional allowlist for opening this type. | (leave empty for everyone) |
+| **Allowed / community roles** | Optional allowlist for opening this type. These members can also answer a staff close request when they can see the ticket. | `@Community` |
 | **Blocked roles** | Always denied. | `@Banned` |
 | **Max open per user** | Separate limit for this type. | `1` |
 | **Auto-close after inactivity** | Hours before automatic close. `0` disables. | `24` |
@@ -297,6 +336,7 @@ A ticket type defines routing, permissions, and the welcome message.
 | **Claim button** | Staff can take ownership. | ✅ |
 | **Close button** | Creator and staff can close. | ✅ |
 | **Require close reason** | Shows a modal before closing. | (optional) |
+| **Close request button** | Lets the opener/community ask staff to close. Staff use `/close-request` to ask the opener/community. | ✅ |
 
 3. Click **Save ticket type**.
 
@@ -366,11 +406,19 @@ When a member opens a ticket:
 6. It sends the welcome embed and optional role mentions.
 7. It logs the open event.
 
-Staff can **claim** a ticket. The creator or staff can **close** it. If a close reason is required, Discord displays a modal. The channel is deleted **five seconds** after closing.
+Staff can **claim** a ticket. The creator or staff can **close** it directly when direct close is enabled.
+
+With the close-request button enabled:
+
+1. The opener or an Allowed / community-role member clicks **Request Staff Close**.
+2. Staff accept or deny the request.
+3. Staff can instead run `/close-request` to ask the opener/community to accept or deny.
+4. The person who starts the request cannot review their own request.
+5. An accepted request saves the transcript and removes the channel after the configured delay.
 
 Auto-close checks run approximately every 15 minutes.
 
-> **Note:** Ticket logging records events (open, claim, close), but a full message transcript exporter is not implemented yet.
+The transcript exporter saves the newest 100 messages and posts a **Ticket Transcript Saved** card with archive details and a download button when a transcript channel is configured.
 
 ---
 
@@ -385,10 +433,11 @@ Announcement templates let you prepare consistent broadcast messages in the dash
 1. Open **Announcements**.
 2. Enter a **template name** (for your reference).
 3. Select a **target channel**.
-4. Fill in the **title** and **body**.
-5. Choose a **color**.
-6. Optionally add an **image**, **thumbnail**, and **footer**.
-7. Click **Save announcement**.
+4. Choose **Embed (default)** or **Plain text / no embed**.
+5. Fill in the **body**. Embed mode also requires a **title**.
+6. For embed mode, choose a color and optionally add an image, thumbnail, and footer.
+7. For plain mode, the optional title and footer are sent as normal text; embed-only media is ignored.
+8. Click **Save announcement**.
 
 ### How to Send an Announcement
 
@@ -403,6 +452,24 @@ Announcement templates let you prepare consistent broadcast messages in the dash
 
 Only members with **Manage Server** or a configured bot admin role can use `/announce`.
 
+### Switching Servers
+
+Use **Active server** in the dashboard sidebar to choose which Discord server you are editing. Settings and saved content are loaded by guild ID, so changes in one server do not overwrite another server.
+
+---
+
+## Social Promotion
+
+1. Open **Social Promotion**.
+2. Choose a target text channel and message format.
+3. Add the title, description, color, and optional images.
+4. Add at least one official or member link using an HTTPS URL.
+5. Check the live preview.
+6. Click **Save Socials**.
+7. Click **Send socials embed** to publish the saved version.
+
+The send action uses saved settings, so save again after editing. Uploaded images use the same `/uploads` storage as other dashboard builders.
+
 ---
 
 ## Moderation
@@ -415,6 +482,9 @@ The bot records warnings and moderation actions in the database. You can view th
 
 | Command | Permission Required | What It Does |
 |---------|---------------------|--------------|
+| `/help` | Everyone | Lists commands by category and shows permission requirements |
+| `/reaction-roles panel [channel]` | Bot admin | Posts a saved self-service button role panel |
+| `/close-request [reason]` | Ticket staff | Asks the opener/community to accept or deny ticket closure |
 | `/warn member reason` | Moderate Members | Stores a warning |
 | `/warnings member` | Moderate Members | Shows recent warnings |
 | `/timeout member minutes [reason]` | Moderate Members | Times out a member |

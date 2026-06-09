@@ -1,0 +1,46 @@
+# Verification and Privacy
+
+## Discord fingerprint or alt detection
+
+Odyssey Bot does **not** fingerprint browsers or claim to detect alternate accounts.
+
+A website cannot reliably prove that two Discord accounts belong to the same person. Browser fingerprints, IP addresses, VPN checks, and similar signals are invasive, can be inaccurate, and can punish people who share devices or networks.
+
+## Current privacy-respecting verification
+
+Odyssey Bot now includes an optional Discord OAuth2 verification page. It collects only:
+
+- The Discord user ID from the `identify` scope.
+- Basic account creation age calculated from the Discord ID.
+- Optional membership in the selected server, checked by the bot.
+- Verification time and status.
+- A short pass/fail reason and an expiry time.
+
+It does not create browser fingerprints or store device identifiers, advertising IDs, or raw IP addresses. Verification records expire after the configured retention period.
+
+## Configure Discord OAuth
+
+1. Open Discord Developer Portal and select the Odyssey Bot application.
+2. Add this redirect URL under OAuth2:
+
+   `https://YOUR-DOMAIN/api/verify/callback`
+
+3. Set `DISCORD_CLIENT_SECRET` to the application's OAuth client secret.
+4. Set `DISCORD_OAUTH_REDIRECT_URI` to the exact redirect URL from step 2.
+5. Set `PUBLIC_BASE_URL` to the hosted dashboard URL.
+6. Restart the dashboard.
+7. Open **Security > Verification**, enable the checks you need, and save.
+8. Click **Create link**, then share only that verification link.
+
+The OAuth request uses the `identify` scope. Server membership is checked through the bot, so the user is not asked to grant broad account access.
+
+## Optional VPN/proxy provider
+
+VPN/proxy checks are off unless both `VPN_CHECK_URL_TEMPLATE` and `VPN_CHECK_API_KEY` are configured and the dashboard toggle is enabled.
+
+- The provider receives the current request IP because that is required to perform the check.
+- Odyssey Bot does not store the raw IP.
+- Leave **Fail if provider is unavailable** disabled unless your community explicitly needs strict enforcement.
+- Provider results can be wrong for shared networks, mobile carriers, privacy relays, and corporate connections.
+
+VPN checks are a risk signal, not proof of an alternate account.

@@ -6,7 +6,7 @@ Every custom command picks one action type. Here is the full list:
 
 - **Reply with a plain message** — Sends text back in the channel where the command ran.
 - **Reply with an embed** — Sends a rich embed with optional fields, images, and timestamps.
-- **Send a message/embed to a channel** — Posts to a different channel than where the command ran.
+- **Send a message/embed to a channel** — Posts to a different channel than where the command ran. Choose no ping, `@everyone`, or `@here`.
 - **Send an ephemeral reply** — Visible only to the command user. Good for sensitive info.
 - **Send a DM to a user** — Direct messages the configured target user.
 
@@ -19,7 +19,7 @@ Every custom command picks one action type. Here is the full list:
 
 - **Post a saved ticket panel** — Sends a ticket panel into the current channel.
 - **Create a ticket channel** — Creates a private ticket channel with permissions.
-- **Request to close the ticket** — Submits a close request for staff review.
+- **Request to close the ticket** — Uses the community flow: the opener or an Allowed / community role asks ticket staff to accept or deny closure. Staff use the dedicated `/close-request` command for the reverse flow.
 
 ## Channel management
 
@@ -42,5 +42,7 @@ Every custom command picks one action type. Here is the full list:
 
 ## Advanced
 
-- **Send a saved announcement** — Posts a pre-built announcement template.
+- **Send a saved announcement** — Posts a pre-built announcement template. Its custom-command ping selector controls whether the custom action pings.
+
+Pings are sent as normal message content outside the embed. Dashboard previews and test messages never ping. Real pings require the bot's **Mention @everyone, @here, and All Roles** permission in the destination channel.
 - **Run multiple actions in sequence** — Chains up to 10 actions in order.
