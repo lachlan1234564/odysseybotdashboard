@@ -20,7 +20,9 @@ const sessionSecret = crypto
   .digest("hex");
 
 app.disable("x-powered-by");
-if (config.NODE_ENV === "production") app.set("trust proxy", 1);
+if (config.NODE_ENV === "production" || config.TRUST_PROXY === "true") {
+  app.set("trust proxy", 1);
+}
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {

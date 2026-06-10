@@ -834,14 +834,49 @@ async function loadSecurity() {
     if (field.type === "checkbox") field.checked = Boolean(value);
     else field.value = value ?? "";
   });
-  const oauthStatus = verification.oauthConfigured
-    ? "Discord OAuth is configured and ready."
-    : "Discord OAuth is not configured. Add DISCORD_CLIENT_SECRET and the redirect URL to .env before enabling verification.";
-  const vpnStatus = verification.vpnProviderConfigured
-    ? "VPN/proxy provider is configured."
-    : "VPN/proxy checks are unavailable until provider env vars are set.";
-  document.querySelector("#verification-provider-status").innerHTML =
-    `<strong>Provider status</strong><p>${escapeHtml(oauthStatus)} ${escapeHtml(vpnStatus)}</p>`;
+  const cards = [
+    {
+      label: "Discord OAuth",
+      ok: verification.oauthConfigured,
+      detail: verification.oauthConfigured
+        ? (verification.oauthRedirectConfigured ? "Client secret and redirect URI configured" : "Client secret set; add DISCORD_OAUTH_REDIRECT_URI for production")
+        : "Not configured — add DISCORD_CLIENT_SECRET to .env"
+    },
+    {
+      label: "Public verification URL",
+      ok: verification.verifyPublicUrlConfigured || verification.publicUrlConfigured,
+      detail: verification.verifyPublicUrlConfigured
+        ? "VERIFY_PUBLIC_BASE_URL set"
+        : verification.publicUrlConfigured
+          ? "PUBLIC_BASE_URL set"
+          : "Not set — verification links will use the request hostname"
+    },
+    {
+      label: "VPN / proxy provider",
+      ok: verification.vpnProviderConfigured,
+      detail: verification.vpnProviderConfigured
+        ? "Provider API key and URL template configured"
+        : "Not configured — VPN checks will be skipped"
+    },
+    {
+      label: "Proxy / Cloudflare Tunnel",
+      ok: verification.trustProxyEnabled,
+      detail: verification.trustProxyEnabled
+        ? "TRUST_PROXY=true — X-Forwarded-For headers trusted"
+        : "TRUST_PROXY not set — set to true when running behind Cloudflare Tunnel or a reverse proxy"
+    }
+  ];
+
+  document.querySelector("#verification-provider-status").innerHTML = cards.map((card) =>
+    `<div class="provider-card ${card.ok ? "ok" : "warn"}">
+      <div class="provider-card-icon">${card.ok ? "&#10003;" : "!"}</div>
+      <div class="provider-card-body">
+        <strong>${escapeHtml(card.label)}</strong>
+        <span>${escapeHtml(card.detail)}</span>
+      </div>
+    </div>`
+  ).join("");
+
   document.querySelector("#verification-records").innerHTML = table(
     ["User", "Result", "Reasons", "Risk", "VPN", "Device", "Verified", "Expires"],
     verification.records.map((record) => `<tr>

@@ -13,7 +13,8 @@ const baseSchema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).optional(),
   DASHBOARD_HOST: z.string().default("127.0.0.1"),
   UPLOADS_DIR: z.string().default("./uploads"),
-  NODE_ENV: z.enum(["development", "test", "production"]).default("development")
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  TRUST_PROXY: z.enum(["true", "false"]).default("false")
 });
 
 const discordSchema = baseSchema.extend({
@@ -27,6 +28,7 @@ const dashboardSchema = discordSchema.extend({
   DISCORD_CLIENT_SECRET: z.string().min(1).optional(),
   DISCORD_OAUTH_REDIRECT_URI: z.string().url().optional(),
   PUBLIC_BASE_URL: z.string().url().optional(),
+  VERIFY_PUBLIC_BASE_URL: z.string().url().optional(),
   VPN_CHECK_URL_TEMPLATE: z.string().min(1).optional(),
   VPN_CHECK_API_KEY: z.string().min(1).optional()
 });

@@ -151,7 +151,30 @@ export const commandBuilders = [
     .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages)
     .addIntegerOption((option) =>
       option.setName("amount").setDescription("Messages to delete").setRequired(true).setMinValue(1).setMaxValue(100)
-    )
+    ),
+  new SlashCommandBuilder()
+    .setName("lockdown")
+    .setDescription("Lock all text channels — prevents @everyone from sending messages.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addChannelOption((option) =>
+      option
+        .setName("channel")
+        .setDescription("Lock only this channel instead of all channels")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    ),
+  new SlashCommandBuilder()
+    .setName("unlockdown")
+    .setDescription("Unlock channels after a lockdown — restores @everyone send permissions.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .addChannelOption((option) =>
+      option
+        .setName("channel")
+        .setDescription("Unlock only this channel instead of all channels")
+        .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+    ),
+  new SlashCommandBuilder()
+    .setName("bot-status")
+    .setDescription("View bot uptime, latency, memory usage, and server count.")
 ] as const;
 
 export const commandData = commandBuilders.map((command) => command.toJSON());

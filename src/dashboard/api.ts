@@ -821,7 +821,7 @@ router.get("/verify/:token/start", async (req, res, next) => {
     req.session.verificationTokenHash = tokenHash;
     req.session.verificationOAuthState = state;
     const redirectUri = config.DISCORD_OAUTH_REDIRECT_URI
-      ?? `${config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+      ?? `${config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
     const authorization = new URL("https://discord.com/oauth2/authorize");
     authorization.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
     authorization.searchParams.set("response_type", "code");
@@ -853,7 +853,7 @@ router.get("/verify/callback", async (req, res, next) => {
     }
 
     const redirectUri = config.DISCORD_OAUTH_REDIRECT_URI
-      ?? `${config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+      ?? `${config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
     const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -1639,7 +1639,11 @@ router.get("/verification", async (_req, res) => {
     settings,
     records,
     oauthConfigured: Boolean(config.DISCORD_CLIENT_SECRET),
-    vpnProviderConfigured: Boolean(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY)
+    oauthRedirectConfigured: Boolean(config.DISCORD_OAUTH_REDIRECT_URI),
+    vpnProviderConfigured: Boolean(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY),
+    verifyPublicUrlConfigured: Boolean(config.VERIFY_PUBLIC_BASE_URL),
+    publicUrlConfigured: Boolean(config.PUBLIC_BASE_URL),
+    trustProxyEnabled: config.TRUST_PROXY === "true"
   });
 });
 
@@ -1669,7 +1673,7 @@ router.post("/verification/link", async (req, res) => {
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 24 * 3_600_000).toISOString();
   await createVerificationLink(res.locals.guildId, hashVerificationToken(token), expiresAt);
-  const baseUrl = (config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  const baseUrl = (config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
   res.status(201).json({
     url: `${baseUrl}/verify/${token}`,
     expiresAt

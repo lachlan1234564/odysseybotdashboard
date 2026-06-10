@@ -62,6 +62,11 @@ import {
   handleAutomodStatus,
   handleSocialsPost
 } from "./info-commands.js";
+import {
+  handleLockdown,
+  handleUnlockdown,
+  handleBotStatus
+} from "./admin-commands.js";
 import { logError } from "../shared/logging.js";
 
 const config = loadDiscordConfig();
@@ -324,6 +329,21 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 
   if (interaction.commandName === "socials-post") {
     await handleSocialsPost(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "lockdown") {
+    await handleLockdown(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "unlockdown") {
+    await handleUnlockdown(interaction);
+    return;
+  }
+
+  if (interaction.commandName === "bot-status") {
+    await handleBotStatus(interaction);
     return;
   }
 

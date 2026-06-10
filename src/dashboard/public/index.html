@@ -654,6 +654,7 @@
                     <strong>Privacy-first design</strong>
                     <p>Odyssey Bot checks Discord account age, server membership, and optional network risk signals. Only salted risk records with reason codes are stored. Raw technical data is never shown to server staff. All records expire automatically.</p>
                   </div>
+                  <div id="verification-provider-status" class="provider-status-grid"></div>
                   <div class="form-grid">
                     <label class="field">Verified role<select name="verifiedRoleId" data-role-select></select><small>Assigned after verification passes. Leave blank to skip auto-role assignment.</small></label>
                     <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select></label>
@@ -667,7 +668,6 @@
                     <label class="check-card"><input name="deviceCheckEnabled" type="checkbox"><span><strong>Device consistency check</strong><small>Flags if the same device hash appears for another account in this server. Only a salted hash is stored, never raw device data.</small></span></label>
                     <label class="field">Record retention (hours)<input name="recordRetentionHours" type="number" min="1" max="8760" value="168"></label>
                   </div>
-                  <div id="verification-provider-status" class="inline-alert"></div>
                 </section>
                 <div class="sticky-actions"><button type="submit">Save verification settings</button></div>
               </form>
