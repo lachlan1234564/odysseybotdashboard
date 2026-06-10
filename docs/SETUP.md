@@ -200,10 +200,12 @@ NODE_ENV=development
 | `DASHBOARD_HOST` | No | The network address the dashboard binds to. `127.0.0.1` means only your computer. | `127.0.0.1` |
 | `UPLOADS_DIR` | No | Where uploaded images are stored. | `./uploads` |
 | `NODE_ENV` | No | `development` locally, `production` on Railway. | `development` |
-| `PUBLIC_BASE_URL` | Hosted verification only | Public HTTPS dashboard URL used when creating verification links. | `https://bot.example` |
+| `PUBLIC_BASE_URL` | No | Admin dashboard URL used for documentation links and fallback verification URLs. | `https://admin.YOUR_DOMAIN.com` |
+| `VERIFY_PUBLIC_BASE_URL` | No | Public URL used when creating verification links in Cloudflare Tunnel split-hostname setups. Falls back to `PUBLIC_BASE_URL`. | `https://verify.YOUR_DOMAIN.com` |
 | `VPN_CHECK_URL_TEMPLATE` | No | Optional provider endpoint with `{ip}` placeholder. Leave unset to disable VPN checks. | `https://provider.example/check/{ip}` |
 | `VPN_CHECK_API_KEY` | No | Secret key for the optional VPN/proxy provider. | — |
-| `PORT` | Railway only | Supplied automatically by Railway. **Do not set this locally.** | — |
+| `TRUST_PROXY` | No | Set to `true` when running behind Cloudflare Tunnel, nginx, or any reverse proxy. Required for correct IP logging and VPN checks. | `true` |
+| `PORT` | Railway only | Supplied automatically by Railway. **Do not set this locally.** When set, the server binds to `0.0.0.0` instead of `DASHBOARD_HOST`. | — |
 
 ### What Should NOT Go in `.env`
 
@@ -346,10 +348,13 @@ UPLOADS_DIR=/app/uploads
 # Required only when member verification is enabled:
 # DISCORD_CLIENT_SECRET=your_oauth_client_secret
 # DISCORD_OAUTH_REDIRECT_URI=https://your-railway-domain/api/verify/callback
+# VERIFY_PUBLIC_BASE_URL=https://verify.YOUR_DOMAIN.com
 # PUBLIC_BASE_URL=https://your-railway-domain
 # Optional VPN/proxy provider:
 # VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
 # VPN_CHECK_API_KEY=your_provider_api_key
+# Optional Cloudflare Tunnel / reverse proxy:
+# TRUST_PROXY=true
 ```
 
 - **Do not set `PORT`**—Railway injects it automatically.

@@ -23,16 +23,17 @@ It does not create browser fingerprints or store device identifiers, advertising
 1. Open Discord Developer Portal and select the Odyssey Bot application.
 2. Add this redirect URL under OAuth2:
 
-   `https://YOUR-DOMAIN/api/verify/callback`
+   `https://verify.YOUR_DOMAIN.com/api/verify/callback`
 
 3. Set `DISCORD_CLIENT_SECRET` to the application's OAuth client secret.
 4. Set `DISCORD_OAUTH_REDIRECT_URI` to the exact redirect URL from step 2.
-5. Set `PUBLIC_BASE_URL` to the hosted dashboard URL.
-6. Restart the dashboard.
-7. Open **Security > Verification**, enable the checks you need, and save.
-8. Click **Create link**, then share only that verification link.
+5. Set `VERIFY_PUBLIC_BASE_URL` to `https://verify.YOUR_DOMAIN.com` (or `PUBLIC_BASE_URL` if using a single hostname).
+6. If behind Cloudflare Tunnel or a reverse proxy, set `TRUST_PROXY=true`.
+7. Restart the dashboard.
+8. Open **Security > Verification**, enable the checks you need, and save.
+9. Click **Create link**, then share only that verification link.
 
-The OAuth request uses the `identify` scope. Server membership is checked through the bot, so the user is not asked to grant broad account access.
+The OAuth request uses the `identify` and `guilds.members.read` scopes. Server membership is checked through the bot, so the user is not asked to grant broad account access.
 
 ## Optional VPN/proxy provider
 

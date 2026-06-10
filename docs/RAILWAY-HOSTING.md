@@ -26,10 +26,13 @@ NODE_ENV=production
 # Required only for Security > Verification:
 # DISCORD_CLIENT_SECRET=your-oauth-client-secret
 # DISCORD_OAUTH_REDIRECT_URI=https://your-railway-domain/api/verify/callback
+# VERIFY_PUBLIC_BASE_URL=https://verify.YOUR_DOMAIN.com
 # PUBLIC_BASE_URL=https://your-railway-domain
 # Optional VPN/proxy provider:
 # VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
 # VPN_CHECK_API_KEY=your-provider-key
+# Optional Cloudflare Tunnel / reverse proxy:
+# TRUST_PROXY=true
 ```
 
 Railway supplies `PORT` automatically. Do not hardcode it. The app detects `PORT` and listens on `0.0.0.0`.

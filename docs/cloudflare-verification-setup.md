@@ -119,16 +119,23 @@ DATABASE_URL=file:./data/bot.db
 DISCORD_CLIENT_SECRET=your_oauth_client_secret_here
 DISCORD_OAUTH_REDIRECT_URI=https://verify.YOUR_DOMAIN.com/api/verify/callback
 VERIFY_PUBLIC_BASE_URL=https://verify.YOUR_DOMAIN.com
+# Optional admin dashboard URL:
+# PUBLIC_BASE_URL=https://admin.YOUR_DOMAIN.com
+
+# --- Required for Cloudflare Tunnel ---
+TRUST_PROXY=true
 
 # --- Optional: VPN/proxy risk provider ---
 # VPN_CHECK_URL_TEMPLATE=https://pro.ip-api.com/json/{ip}?fields=proxy,hosting
 # VPN_CHECK_API_KEY=your_provider_api_key_here
 
-# --- Optional: run on a single port (3210) behind the tunnel ---
+# --- Required: listen on 0.0.0.0 for the tunnel ---
 PORT=3210
 ```
 
-> **Why `PORT=3210`?** When `PORT` is set, the dashboard listens on `0.0.0.0:3210` instead of `127.0.0.1:3210`, which Cloudflare Tunnel needs to reach it.
+> **Why `PORT=3210`?** When `PORT` is set, the dashboard listens on `0.0.0.0:3210` instead of `127.0.0.1:3210`, which Cloudflare Tunnel needs to reach it. Alternatively, set `DASHBOARD_HOST=0.0.0.0` instead of `PORT`.
+>
+> **Why `TRUST_PROXY=true`?** Without it, Express ignores `X-Forwarded-For` headers from Cloudflare. The bot will see Cloudflare's IP instead of the real user IP, breaking VPN checks and IP-based logging.
 
 ---
 
@@ -176,8 +183,9 @@ For local dev without a tunnel (no OAuth testing), leave `DISCORD_CLIENT_SECRET`
 | Wrong redirect URI in Discord Portal | OAuth returns "Invalid redirect_uri" | Must be `https://verify.DOMAIN.com/api/verify/callback` exactly |
 | Protecting verify hostname with Access | "Cloudflare Access" login shown to Discord servers, OAuth fails | Remove Access policy from `verify.DOMAIN.com` |
 | Using bot token as `DISCORD_CLIENT_SECRET` | OAuth token exchange fails | Bot token ≠ Client Secret. Find the secret under OAuth2 → Client Secret |
-| Not setting `PORT=3210` | Tunnel can't reach `127.0.0.1` (only `0.0.0.0`) | Set `PORT=3210` in `.env` |
-| `VERIFY_PUBLIC_BASE_URL` points to admin domain | Verification link shown to admin opens wrong URL | Must use `https://verify.DOMAIN.com` |
+| Not setting `PORT=3210` or `DASHBOARD_HOST=0.0.0.0` | Tunnel can't reach `127.0.0.1` | Set `PORT=3210` or `DASHBOARD_HOST=0.0.0.0` in `.env` |
+| Not setting `TRUST_PROXY=true` | VPN checks see Cloudflare's IP, not the real user IP | Set `TRUST_PROXY=true` in `.env` |
+| `VERIFY_PUBLIC_BASE_URL` points to admin domain | Verification links and OAuth callbacks use wrong hostname | Must use `https://verify.DOMAIN.com` |
 | Exposing dashboard publicly without Access | Anyone at `admin.DOMAIN.com` can brute-force the dashboard password | Always protect with Cloudflare Access |
 | Tunnel not running | Both sites return 502 | Keep `cloudflared tunnel run` running |
 | CSP blocks Cloudflare scripts | Dashboard layout broken | The CSP is set to `'self'` only; if you use Turnstile or Cloudflare widgets, you will need to allow their domains |

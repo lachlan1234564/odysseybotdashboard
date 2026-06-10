@@ -60,11 +60,19 @@ The bot and dashboard share the same TypeScript config and database layer.
 |---------|----------------|--------------|
 | `/ping` | Everyone | Confirm the bot is online and show gateway latency |
 | `/help` | Everyone | List commands by category with permission labels |
+| `/bot-help` | Everyone | List all commands grouped by category |
+| `/server-info` | Everyone | View server stats and bot setup overview |
+| `/user-info member` | Everyone | View account age, join date, roles, and warnings |
+| `/automod-status` | Everyone | View current Auto Mod rules and link settings |
+| `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |
+| `/bot-status` | Everyone | View bot uptime, latency, memory, and server count |
 | `/custom name [text] [reason] [target]` | Configurable per command | Run a dashboard-created command |
 | `/ticket-panel [panel] [channel]` | Bot admins | Post a saved ticket panel |
 | `/reaction-roles panel [channel]` | Bot admins | Post a saved self-service role panel |
 | `/announce template [channel]` | Bot admins | Preview and confirm an announcement |
 | `/close-request [reason]` | Ticket staff | Ask the ticket opener/community to approve closure |
+| `/lockdown [channel]` | Administrator | Lock text channels — prevent @everyone from sending messages |
+| `/unlockdown [channel]` | Administrator | Unlock channels after a lockdown |
 | `/warn member reason` | Moderate Members | Store a warning |
 | `/warnings member` | Moderate Members | Show recent warnings |
 | `/timeout member minutes [reason]` | Moderate Members | Time out a member |
@@ -116,7 +124,9 @@ DISCORD_TOKEN=your_bot_token
 DISCORD_CLIENT_ID=your_application_id
 # Optional member verification:
 # DISCORD_CLIENT_SECRET=your_oauth_client_secret
-# DISCORD_OAUTH_REDIRECT_URI=https://your-domain.example/api/verify/callback
+# DISCORD_OAUTH_REDIRECT_URI=https://verify.YOUR_DOMAIN.com/api/verify/callback
+# VERIFY_PUBLIC_BASE_URL=https://verify.YOUR_DOMAIN.com
+# PUBLIC_BASE_URL=https://admin.YOUR_DOMAIN.com
 # Optional preferred dashboard server:
 DISCORD_GUILD_ID=your_server_id
 DASHBOARD_PASSWORD=use_a_long_random_password
@@ -126,7 +136,7 @@ DASHBOARD_PORT=3210
 DASHBOARD_HOST=127.0.0.1
 UPLOADS_DIR=./uploads
 NODE_ENV=development
-# PUBLIC_BASE_URL=https://your-domain.example
+# TRUST_PROXY=true  # enable behind Cloudflare Tunnel or reverse proxy
 # VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
 # VPN_CHECK_API_KEY=your_provider_api_key
 ```

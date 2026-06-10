@@ -482,9 +482,21 @@ The bot records warnings and moderation actions in the database. You can view th
 
 | Command | Permission Required | What It Does |
 |---------|---------------------|--------------|
-| `/help` | Everyone | Lists commands by category and shows permission requirements |
-| `/reaction-roles panel [channel]` | Bot admin | Posts a saved self-service button role panel |
+| `/ping` | Everyone | Confirm the bot is online and show gateway latency |
+| `/help` | Everyone | List commands by category with permission labels |
+| `/bot-help` | Everyone | List all commands grouped by category |
+| `/server-info` | Everyone | View server stats and bot setup overview |
+| `/user-info member` | Everyone | View account age, join date, roles, and warnings |
+| `/automod-status` | Everyone | View current Auto Mod rules and link settings |
+| `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |
+| `/bot-status` | Everyone | View bot uptime, latency, memory, and server count |
+| `/reaction-roles panel [channel]` | Bot admins | Posts a saved self-service button role panel |
+| `/ticket-panel [panel] [channel]` | Bot admins | Post a saved ticket panel |
+| `/announce template [channel]` | Bot admins | Preview and confirm an announcement |
 | `/close-request [reason]` | Ticket staff | Asks the opener/community to accept or deny ticket closure |
+| `/lockdown [channel]` | Administrator | Lock text channels — prevent @everyone from sending messages |
+| `/unlockdown [channel]` | Administrator | Unlock channels after a lockdown |
+| `/custom name [text] [reason] [target]` | Configurable per command | Run a dashboard-created command |
 | `/warn member reason` | Moderate Members | Stores a warning |
 | `/warnings member` | Moderate Members | Shows recent warnings |
 | `/timeout member minutes [reason]` | Moderate Members | Times out a member |
@@ -492,7 +504,7 @@ The bot records warnings and moderation actions in the database. You can view th
 | `/ban member [delete_days] [reason]` | Ban Members | Bans a member |
 | `/clear amount` | Manage Messages | Deletes recent messages |
 
-All moderation actions are logged to the configured **mod log channel** in **Server Settings**.
+All moderation actions are logged to the configured **mod log channel** in **Server Settings**. Run `pnpm deploy:commands` after adding or changing commands.
 
 ---
 

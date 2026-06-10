@@ -57,11 +57,12 @@ Start with the exact error shown in the dashboard. Save and test errors now incl
 
 ## Verification cannot be enabled
 
-- Set `DISCORD_CLIENT_SECRET`.
-- Register the exact callback URL in Discord Developer Portal.
+- Set `DISCORD_CLIENT_SECRET` in `.env` (the OAuth client secret, not the bot token).
+- Register the exact callback URL in Discord Developer Portal → OAuth2 → Redirects.
 - Set `DISCORD_OAUTH_REDIRECT_URI` to that same URL.
-- Set `PUBLIC_BASE_URL` to the hosted HTTPS dashboard URL.
-- Configure both VPN provider variables before enabling the optional VPN/proxy toggle.
+- Set `VERIFY_PUBLIC_BASE_URL` (or `PUBLIC_BASE_URL`) to the hosted verification URL.
+- If behind Cloudflare Tunnel or a reverse proxy, set `TRUST_PROXY=true` so `X-Forwarded-For` headers are trusted for proper IP logging and VPN checks.
+- Configure both VPN provider variables (`VPN_CHECK_URL_TEMPLATE` and `VPN_CHECK_API_KEY`) before enabling the optional VPN/proxy toggle.
 
 ## A role panel button fails
 
