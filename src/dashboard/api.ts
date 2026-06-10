@@ -113,7 +113,10 @@ const docsTopics = [
   { slug: "social-promotion", title: "Social Promotion", description: "Build, preview, and publish a safe directory of community links.", files: ["SOCIAL-PROMOTION.md"] },
   { slug: "ticket-transcripts", title: "Ticket Transcripts", description: "Export the latest ticket messages when a ticket closes.", files: ["TICKET-TRANSCRIPTS.md"] },
   { slug: "permissions", title: "Permissions", description: "Discord permissions, role hierarchy, and dashboard access rules.", files: ["PERMISSIONS.md"] },
-  { slug: "troubleshooting", title: "Troubleshooting", description: "Solve common bot, dashboard, upload, database, and hosting problems.", files: ["TROUBLESHOOTING.md"] }
+  { slug: "troubleshooting", title: "Troubleshooting", description: "Solve common bot, dashboard, upload, database, and hosting problems.", files: ["TROUBLESHOOTING.md"] },
+  { slug: "cloudflare-verification-setup", title: "Cloudflare Verification Setup", description: "Set up Cloudflare Tunnel with separate verify/admin hostnames and OAuth.", files: ["cloudflare-verification-setup.md"] },
+  { slug: "verification-process", title: "Verification Process", description: "How the transparent anti-alt verification flow works for admins and members.", files: ["verification-process.md"] },
+  { slug: "command-studio-variables", title: "Command Studio Variables", description: "All available placeholders for custom commands, tickets, and templates.", files: ["command-studio-variables.md"] }
 ] as const;
 
 function readDocsMarkdown(files: readonly string[]): string {
