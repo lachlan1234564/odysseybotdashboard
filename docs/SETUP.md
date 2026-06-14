@@ -42,7 +42,12 @@ pnpm --version
 You should see version numbers like `v20.x.x` and `10.x.x`. If either command is not found, install them first:
 
 - **Node.js**: Download from [https://nodejs.org](https://nodejs.org) (choose the LTS version).
-- **pnpm**: Run `npm install -g pnpm` after installing Node.js.
+- **pnpm**: Enable the Node.js package manager shim, then activate the version used by this project:
+
+```bash
+corepack enable
+corepack prepare pnpm@10.34.1 --activate
+```
 
 ---
 

@@ -35,8 +35,7 @@ import {
   listInactiveTickets,
   listTicketPanels,
   listTicketTypes,
-  resolveCloseRequest,
-  updateTicketPriority
+  resolveCloseRequest
 } from "../database/index.js";
 import type { TicketRecord } from "../database/index.js";
 import type { TicketCloseRequest, TicketPanel, TicketType } from "../shared/types.js";
@@ -84,6 +83,12 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel, channel?: Se
     guild,
     channel: channel?.id ? { id: channel.id, name: channel.name } : null
   }));
+  const branding = await getBranding(guild.id);
+  const panelButtonStyle = branding.ticketButtonStyle === "primary"
+    ? ButtonStyle.Primary
+    : branding.ticketButtonStyle === "success"
+      ? ButtonStyle.Success
+      : ButtonStyle.Secondary;
   const components: ActionRowBuilder<any>[] = [];
 
   if (panel.panelKind === "multi") {
@@ -122,7 +127,7 @@ async function ticketPanelMessage(guild: Guild, panel: TicketPanel, channel?: Se
           .setCustomId(`ticket:create-button:${panel.id}:${type.id}`)
           .setLabel(type.label.slice(0, 80))
           .setEmoji(parseDiscordComponentEmoji(type.emoji || "🎫")!)
-          .setStyle(ButtonStyle.Secondary)
+          .setStyle(panelButtonStyle)
       ));
       components.push(row);
     }
@@ -180,7 +185,6 @@ function ticketButtons(type: TicketType): ActionRowBuilder<ButtonBuilder>[] {
   if (type.claimButtonEnabled) {
     buttons.push(new ButtonBuilder().setCustomId("ticket:claim").setLabel("Claim Ticket").setStyle(ButtonStyle.Primary));
   }
-  buttons.push(new ButtonBuilder().setCustomId("ticket:priority").setLabel("Set Priority").setStyle(ButtonStyle.Secondary));
   if (type.closeButtonEnabled && !type.requestCloseEnabled) {
     buttons.push(new ButtonBuilder().setCustomId("ticket:close").setLabel("Close Ticket").setStyle(ButtonStyle.Danger));
   }
@@ -792,24 +796,6 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     return;
   }
 
-  if (interaction.customId === "ticket:priority") {
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId("ticket:set-priority")
-      .setPlaceholder(`Current priority: ${ticket.priority}`)
-      .addOptions(
-        { label: "Low", value: "low", description: "Can wait behind normal requests" },
-        { label: "Normal", value: "normal", description: "Default ticket priority" },
-        { label: "High", value: "high", description: "Needs prompt staff attention" },
-        { label: "Urgent", value: "urgent", description: "Time-sensitive or critical" }
-      );
-    await interaction.reply({
-      content: "Choose the priority for this ticket.",
-      components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)],
-      ephemeral: true
-    });
-    return;
-  }
-
   if (interaction.customId === "ticket:close" && type?.closeReasonRequired) {
     const modal = new ModalBuilder().setCustomId("ticket:close-reason").setTitle("Close ticket");
     modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -832,35 +818,6 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     return;
   }
 
-}
-
-export async function handleTicketPrioritySelect(interaction: StringSelectMenuInteraction): Promise<void> {
-  if (!interaction.guild || !interaction.guildId || !(interaction.channel instanceof TextChannel)) return;
-  const allowed = await canManageTicket(interaction as unknown as ButtonInteraction, false);
-  if (!allowed) {
-    await interaction.reply({ content: "Only ticket staff can change priority.", ephemeral: true });
-    return;
-  }
-  const priority = interaction.values[0] as "low" | "normal" | "high" | "urgent";
-  if (!["low", "normal", "high", "urgent"].includes(priority)) {
-    await interaction.reply({ content: "That priority is invalid.", ephemeral: true });
-    return;
-  }
-  const changed = await updateTicketPriority(interaction.guildId, interaction.channelId, priority);
-  await interaction.update({
-    content: changed ? `Ticket priority changed to **${priority}**.` : "This ticket is no longer active.",
-    components: []
-  });
-  if (changed) {
-    const ticket = await getTicketByChannel(interaction.guildId, interaction.channelId);
-    const type = ticket?.ticketTypeId ? await getTicketType(ticket.ticketTypeId, interaction.guildId) : null;
-    await sendTicketLog(
-      interaction.guild,
-      type,
-      "Ticket priority changed",
-      `Channel: ${interaction.channel} \`${interaction.channel.id}\` | Priority: **${priority}** | Changed by: <@${interaction.user.id}> \`${interaction.user.id}\``
-    );
-  }
 }
 
 export async function handleTicketCloseModal(interaction: ModalSubmitInteraction): Promise<void> {

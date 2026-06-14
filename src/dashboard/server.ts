@@ -54,6 +54,10 @@ app.get(["/docs", "/docs/:topic", "/help"], (req, res) => {
     res.redirect("/login");
     return;
   }
+  if (!req.session.selectedGuildId) {
+    res.redirect("/servers");
+    return;
+  }
   res.sendFile(path.join(publicPath, "index.html"));
 });
 app.get("/verify/:token", (_req, res) => {
@@ -66,10 +70,26 @@ app.use("/uploads", express.static(uploadsPath, {
   immutable: true,
   maxAge: "1d"
 }));
-app.use(express.static(publicPath, { extensions: ["html"] }));
-
-app.get("/", (_req, res) => res.sendFile(path.join(publicPath, "index.html")));
-app.get("/login", (_req, res) => res.sendFile(path.join(publicPath, "login.html")));
+app.get(["/login", "/login.html"], (_req, res) => res.sendFile(path.join(publicPath, "login.html")));
+app.get(["/servers", "/servers.html"], (req, res) => {
+  if (!req.session.authenticated) {
+    res.redirect("/login");
+    return;
+  }
+  res.sendFile(path.join(publicPath, "servers.html"));
+});
+app.get(["/", "/index.html"], (req, res) => {
+  if (!req.session.authenticated) {
+    res.redirect("/login");
+    return;
+  }
+  if (!req.session.selectedGuildId) {
+    res.redirect("/servers");
+    return;
+  }
+  res.sendFile(path.join(publicPath, "index.html"));
+});
+app.use(express.static(publicPath, { extensions: ["html"], index: false }));
 
 app.use((error: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   if (error instanceof ZodError) {
@@ -100,6 +120,17 @@ app.use((error: unknown, req: express.Request, res: express.Response, _next: exp
     res.status(error.statusCode).json({ error: error.message, fields });
     return;
   }
+  const errorCode = error && typeof error === "object" && "code" in error
+    ? String(error.code)
+    : "";
+  const errorName = error instanceof Error ? error.name : "";
+  if (errorCode === "UND_ERR_CONNECT_TIMEOUT" || errorName === "ConnectTimeoutError") {
+    logError(`Dashboard external request timed out (${req.method} ${req.path})`, error);
+    res.status(503).json({
+      error: "Discord did not respond in time. Your dashboard data is safe; wait a moment and retry."
+    });
+    return;
+  }
   logErrorStack(`Dashboard request failed (${req.method} ${req.path})`, error);
   res.status(500).json({
     error: "The dashboard could not complete that request. Check the dashboard terminal for details."
@@ -110,9 +141,21 @@ const port = config.PORT ?? config.DASHBOARD_PORT;
 const host = config.PORT ? "0.0.0.0" : config.DASHBOARD_HOST;
 const displayHost = host === "0.0.0.0" ? "localhost" : host;
 const url = `http://${displayHost}:${port}`;
-app.listen(port, host, async () => {
+const server = app.listen(port, host, async () => {
   console.log(`Odyssey Bot dashboard listening on ${host}:${port}`);
   if (process.argv.includes("--open") && config.NODE_ENV !== "production") {
     await open(url).catch((error) => logError("Could not open the browser", error));
   }
+});
+server.on("error", (error: NodeJS.ErrnoException) => {
+  if (error.code === "EADDRINUSE") {
+    console.error(
+      `[Dashboard] Could not start on ${host}:${port}: the port is already in use. `
+      + "Stop the older dashboard process before running pnpm dev again."
+    );
+    process.exitCode = 1;
+    return;
+  }
+  logErrorStack("Dashboard server failed", error);
+  process.exitCode = 1;
 });

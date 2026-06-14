@@ -12,9 +12,6 @@ export const commandBuilders = [
     .setName("help")
     .setDescription("List every Odyssey Bot command, its purpose, and who can use it."),
   new SlashCommandBuilder()
-    .setName("bot-help")
-    .setDescription("Show all available commands grouped by category."),
-  new SlashCommandBuilder()
     .setName("server-info")
     .setDescription("View server stats and bot setup status."),
   new SlashCommandBuilder()
@@ -155,7 +152,6 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("lockdown")
     .setDescription("Lock all text channels — prevents @everyone from sending messages.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption((option) =>
       option
         .setName("channel")
@@ -165,7 +161,6 @@ export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("unlockdown")
     .setDescription("Unlock channels after a lockdown — restores @everyone send permissions.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
     .addChannelOption((option) =>
       option
         .setName("channel")

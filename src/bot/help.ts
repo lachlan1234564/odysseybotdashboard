@@ -21,6 +21,9 @@ export function buildHelpEmbed(settings: GuildSettings) {
         value: [
           "`/ping` — Check whether the bot is online.",
           "`/help` — Open this private command guide.",
+          "`/server-info` — View this server's setup and enabled features.",
+          "`/user-info member` — View account age, roles, join date, and warning count.",
+          "`/bot-status` — View bot uptime, latency, memory, and server count.",
           "`/custom` — Run an enabled dashboard-created command. Its own access rules still apply."
         ].join("\n")
       },
@@ -33,10 +36,13 @@ export function buildHelpEmbed(settings: GuildSettings) {
         ].join("\n")
       },
       {
-        name: "Announcements & Roles · Bot Admins",
+        name: "Administration · Bot Admins",
         value: [
           "`/announce` — Preview and post a saved announcement.",
-          "`/reaction-roles` — Post a saved self-service button role panel."
+          "`/socials-post` — Publish the saved social promotion.",
+          "`/reaction-roles` — Post a saved self-service button role panel.",
+          "`/automod-status` — Review active Auto Mod and channel link rules.",
+          "`/lockdown`, `/unlockdown` — Change channel send permissions during an incident."
         ].join("\n")
       },
       {

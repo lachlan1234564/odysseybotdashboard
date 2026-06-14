@@ -108,8 +108,9 @@ Start with the exact error shown in the dashboard. Save and test errors now incl
 - Audit logs may be delayed. The bot reads recent entries within 5 seconds of an event.
 - Very high-rate abuse may outpace the audit log. Consider stronger Discord native protections for extreme cases.
 
-## Welcome messages not sending
+## Welcome or goodbye messages not sending
 
-- Ensure welcome is enabled and a channel is selected.
+- Ensure the relevant welcome/goodbye toggle is enabled and its channel is selected.
 - The bot needs **Guild Members** intent and **Send Messages** in the welcome channel.
+- If an embed is enabled, the bot also needs **Embed Links**.
 - DM welcome fails silently if the user has DMs disabled. This is expected behavior.

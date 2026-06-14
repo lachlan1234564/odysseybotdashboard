@@ -1,9 +1,18 @@
+import {
+  dashboardSearchItems,
+  hasFormStateChanged,
+  searchDashboardItems,
+  shouldBlockNavigation,
+  toggleState
+} from "./dashboard-core.js";
+
 const state = {
   guilds: [],
-  resources: { guild: null, channels: [], roles: [] },
+  resources: { guild: null, channels: [], roles: [], emojis: [] },
   customCommands: [],
   ticketTypes: [],
   ticketPanels: [],
+  ticketTypesError: null,
   announcements: [],
   closeRequests: [],
   docsTopics: [],
@@ -21,7 +30,15 @@ const state = {
   stickyMessages: [],
   scheduledAnnouncements: [],
   socials: null,
-  verification: null
+  verification: null,
+  branding: null,
+  activePage: "overview",
+  selectedGuildId: null,
+  initializing: true,
+  dirtyForms: new Set(),
+  pendingNavigation: null,
+  submittingForm: null,
+  suppressBeforeUnload: false
 };
 
 const pageMeta = {
@@ -33,7 +50,7 @@ const pageMeta = {
   moderation: ["Moderation", "Warnings and actions recorded by the bot."],
   settings: ["Server Settings", "Shared Discord roles, channels, and access defaults."],
   branding: ["Appearance", "Visual defaults used across bot messages."],
-  welcome: ["Welcome Messages", "Greet new members with style."],
+  welcome: ["Welcome & Goodbye", "Shape a clear member experience when people join or leave."],
   security: ["Security", "Anti-raid, anti-nuke, and role protection."],
   automation: ["Automation", "Message rules, role panels, sticky notices, and schedules."],
   docs: ["Documentation", "Help, setup, and troubleshooting."]
@@ -82,6 +99,7 @@ const actionGroups = {
   panel: ["post_ticket_panel", "create_ticket"],
   announcement: ["send_announcement"],
   targetUser: ["send_dm", "timeout_user", "remove_timeout", "kick_user", "ban_user", "unban_user", "add_user_to_channel", "remove_user_from_channel"],
+  reason: ["timeout_user", "kick_user", "ban_user", "unban_user", "request_close_ticket", "log_to_mod"],
   amount: ["purge_messages"],
   duration: ["timeout_user"],
   deleteDays: ["ban_user"],
@@ -90,6 +108,34 @@ const actionGroups = {
   permission: ["require_permission"],
   sequence: ["action_sequence"]
 };
+
+const commandVariables = [
+  ["{user}", "User mention"],
+  ["{username}", "Username"],
+  ["{user_id}", "User ID"],
+  ["{server}", "Server name"],
+  ["{server_id}", "Server ID"],
+  ["{server_member_count}", "Member count"],
+  ["{channel}", "Channel mention"],
+  ["{channel_name}", "Channel name"],
+  ["{channel_id}", "Channel ID"],
+  ["{text}", "Command text"],
+  ["{reason}", "Reason"],
+  ["{target}", "Target member"],
+  ["{created_at}", "Created date"]
+];
+
+const standardTicketEmojis = [
+  ["🎫", "ticket"], ["💬", "chat"], ["❓", "question"], ["🛠️", "support"],
+  ["💳", "billing"], ["🚨", "urgent"], ["📩", "message"], ["🐛", "bug"],
+  ["💡", "idea"], ["🤝", "partnership"], ["📢", "announcement"], ["🎮", "gaming"],
+  ["🎨", "creative"], ["📚", "information"], ["🔒", "private"], ["✅", "approved"],
+  ["⭐", "featured"], ["❤️", "community"], ["🔥", "hot"], ["📦", "order"],
+  ["🧾", "receipt"], ["💼", "business"], ["🧑‍💻", "technical"], ["🌐", "website"],
+  ["🎉", "event"], ["🆘", "help"], ["📌", "general"], ["🔧", "tools"]
+];
+
+let activeVariableField = null;
 
 class ApiError extends Error {
   constructor(message, fields = {}) {
@@ -104,9 +150,13 @@ async function api(path, options = {}) {
   try {
     response = await fetch(`/api${path}`, {
       ...options,
+      signal: options.signal || AbortSignal.timeout(15_000),
       headers: isFormData ? (options.headers || {}) : { "Content-Type": "application/json", ...(options.headers || {}) }
     });
-  } catch {
+  } catch (error) {
+    if (error.name === "TimeoutError" || error.name === "AbortError") {
+      throw new ApiError("The request took too long. Your changes were not lost; check the bot connection and retry.");
+    }
     throw new ApiError("The dashboard backend is offline or unreachable. Start it with `pnpm dashboard` or `pnpm dev`, then try again.");
   }
   if (response.status === 401) {
@@ -127,11 +177,16 @@ async function api(path, options = {}) {
       }
     }
   }
+  if (response.status === 409 && data?.error?.includes("Choose a Discord server")) {
+    window.location.replace("/servers");
+    throw new ApiError(data.error);
+  }
   if (!response.ok) throw new ApiError(data?.error || "Request failed.", data?.fields || {});
   return data;
 }
 
 function toast(message, isError = false) {
+  if (isError) state.submittingForm = null;
   const element = document.querySelector("#toast");
   element.textContent = message;
   element.classList.toggle("error", isError);
@@ -178,8 +233,37 @@ async function withBusy(button, busyText, task) {
 }
 
 function success(message) {
+  if (state.submittingForm) {
+    markFormClean(state.submittingForm);
+    state.submittingForm = null;
+  }
   toast(message);
   recordActivity(message);
+  resumePendingNavigation();
+}
+
+function syncFeatureToggles(root = document) {
+  root.querySelectorAll?.(".switch input[type='checkbox']").forEach((input) => {
+    const stateValue = toggleState(input.checked, input.name === "active");
+    const control = input.closest(".switch");
+    const label = control?.querySelector(".switch-state");
+    control?.classList.toggle("is-enabled", stateValue.enabled);
+    control?.classList.toggle("is-disabled", !stateValue.enabled);
+    if (label) label.textContent = stateValue.label;
+  });
+  root.querySelectorAll?.(".check-card input[type='checkbox']").forEach((input) => {
+    const card = input.closest(".check-card");
+    let badge = card?.querySelector(".option-state");
+    if (card && !badge) {
+      badge = document.createElement("b");
+      badge.className = "option-state";
+      card.append(badge);
+    }
+    const stateValue = toggleState(input.checked);
+    card?.classList.toggle("is-enabled", stateValue.enabled);
+    card?.classList.toggle("is-disabled", !stateValue.enabled);
+    if (badge) badge.textContent = stateValue.enabled ? "On" : "Off";
+  });
 }
 
 function setFormStatus(form, message, type, duration = 0) {
@@ -216,6 +300,88 @@ function normalizeCommandName(value) {
   return value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").trim().toLowerCase()
     .replace(/\s+/g, "-").replace(/[^a-z0-9_-]+/g, "-").replace(/-{2,}/g, "-")
     .replace(/^[-_]+|[-_]+$/g, "").slice(0, 32);
+}
+
+function isVariableInput(element) {
+  return element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
+}
+
+function variableInputLabel(element) {
+  return element.closest("label")?.childNodes[0]?.textContent?.trim()
+    || element.getAttribute("placeholder")
+    || "selected field";
+}
+
+function renderCommandVariables() {
+  const container = document.querySelector("#command-variable-chips");
+  container.innerHTML = commandVariables.map(([value, label]) =>
+    `<button type="button" class="variable-chip" data-variable="${escapeHtml(value)}" title="${escapeHtml(label)}">${escapeHtml(value)}</button>`
+  ).join("");
+}
+
+function insertCommandVariable(variable) {
+  const fallback = [...document.querySelectorAll("#custom-form [data-variable-input]")]
+    .find((element) => !element.closest(".hidden"));
+  const target = isVariableInput(activeVariableField) && activeVariableField.isConnected && !activeVariableField.disabled
+    ? activeVariableField
+    : fallback;
+  if (!isVariableInput(target)) {
+    toast("Click a message, embed, field, or reason box before inserting a variable.", true);
+    return;
+  }
+  const start = target.selectionStart ?? target.value.length;
+  const end = target.selectionEnd ?? start;
+  target.setRangeText(variable, start, end, "end");
+  target.focus();
+  target.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function customEmojiName(value = "") {
+  return /^<a?:([^:>]+):\d+>$/.exec(value)?.[1] || "";
+}
+
+function ticketEmojiLabel(value = "") {
+  const name = customEmojiName(value);
+  return name ? `:${name}:` : value;
+}
+
+function setTicketEmoji(value = "", updatePreview = true) {
+  const form = document.querySelector("#ticket-form");
+  form.elements.emoji.value = value;
+  const current = document.querySelector("#ticket-emoji-current");
+  const custom = state.resources.emojis.find((emoji) => emoji.value === value);
+  current.innerHTML = custom
+    ? `<img src="${escapeHtml(custom.imageUrl)}" alt=":${escapeHtml(custom.name)}:">`
+    : escapeHtml(value || "🎫");
+  document.querySelector("#ticket-emoji-toggle span:last-child").textContent = value ? "Change emoji" : "Choose emoji";
+  if (updatePreview) {
+    clearErrors(form);
+    updateTicketPreview();
+    updateFormDirtyState(form);
+  }
+}
+
+function renderTicketEmojiPicker(filter = "") {
+  const query = filter.trim().toLowerCase();
+  const standard = standardTicketEmojis.filter(([emoji, name]) =>
+    !query || emoji.includes(query) || name.includes(query)
+  );
+  const custom = state.resources.emojis.filter((emoji) =>
+    !query || emoji.name.toLowerCase().includes(query)
+  );
+  const sections = [];
+  if (standard.length) {
+    sections.push(`<div class="emoji-section"><strong>Standard</strong><div class="emoji-options">${standard.map(([emoji, name]) =>
+      `<button type="button" class="emoji-option" data-emoji="${escapeHtml(emoji)}" title="${escapeHtml(name)}">${escapeHtml(emoji)}</button>`
+    ).join("")}</div></div>`);
+  }
+  if (custom.length) {
+    sections.push(`<div class="emoji-section"><strong>${escapeHtml(state.resources.guild?.name || "Server")} emoji</strong><div class="emoji-options">${custom.map((emoji) =>
+      `<button type="button" class="emoji-option custom" data-emoji="${escapeHtml(emoji.value)}" title=":${escapeHtml(emoji.name)}:"><img src="${escapeHtml(emoji.imageUrl)}" alt=":${escapeHtml(emoji.name)}:"><small>${escapeHtml(emoji.name)}</small></button>`
+    ).join("")}</div></div>`);
+  }
+  document.querySelector("#ticket-emoji-grid").innerHTML = sections.join("")
+    || emptyState("No matching emoji", "Try another search.");
 }
 
 function resourceNames(ids, collection, prefix = "") {
@@ -255,6 +421,133 @@ function formObject(form) {
 
 function selectedValues(select) {
   return [...select.selectedOptions].map((option) => option.value).filter(Boolean);
+}
+
+const formBaselines = new WeakMap();
+
+function formFingerprint(form) {
+  return JSON.stringify([...form.querySelectorAll("input, textarea, select")].map((field, index) => {
+    const key = field.name
+      || field.id
+      || [...field.attributes].find((attribute) => attribute.name.startsWith("data-"))?.name
+      || String(index);
+    if (field instanceof HTMLInputElement && ["checkbox", "radio"].includes(field.type)) {
+      return [key, field.type, field.checked];
+    }
+    if (field instanceof HTMLSelectElement && field.multiple) {
+      return [key, "multiple", selectedValues(field)];
+    }
+    return [key, field.type || field.tagName, field.value];
+  }));
+}
+
+function markFormClean(form) {
+  if (!(form instanceof HTMLFormElement)) return;
+  syncFeatureToggles(form);
+  formBaselines.set(form, formFingerprint(form));
+  state.dirtyForms.delete(form);
+  updateUnsavedBar();
+}
+
+function markAllFormsClean() {
+  document.querySelectorAll("form").forEach(markFormClean);
+}
+
+function updateFormDirtyState(form) {
+  if (state.initializing || !(form instanceof HTMLFormElement)) return;
+  const baseline = formBaselines.get(form);
+  if (baseline === undefined) {
+    markFormClean(form);
+    return;
+  }
+  if (hasFormStateChanged(baseline, formFingerprint(form))) state.dirtyForms.add(form);
+  else state.dirtyForms.delete(form);
+  updateUnsavedBar();
+}
+
+function updateUnsavedBar() {
+  const bar = document.querySelector("#unsaved-bar");
+  const count = state.dirtyForms.size;
+  bar.classList.toggle("hidden", count === 0);
+  document.querySelector("#unsaved-copy").textContent = state.pendingNavigation
+    ? `${state.pendingNavigation.label}. Save or discard first.`
+    : `${count} editor${count === 1 ? " has" : "s have"} changes that are not saved yet.`;
+}
+
+function currentNavigationTarget() {
+  return {
+    type: "page",
+    page: state.activePage,
+    ticketView: state.ticketView,
+    securityView: state.securityView,
+    automationView: state.automationView,
+    docTopic: state.activeDocTopic
+  };
+}
+
+async function switchGuild(guildId) {
+  const result = await api("/guilds/select", {
+    method: "POST",
+    body: JSON.stringify({ guildId })
+  });
+  state.suppressBeforeUnload = true;
+  window.location.assign(result.next || "/");
+}
+
+async function performNavigation(target) {
+  state.pendingNavigation = null;
+  updateUnsavedBar();
+  if (target.type === "logout") {
+    await target.run();
+    return;
+  }
+  if (target.type === "resetForm") {
+    if (target.formId === "custom-form") resetCustomForm();
+    return;
+  }
+  if (target.type === "server") {
+    await switchGuild(target.guildId);
+    return;
+  }
+  if (target.ticketView) state.ticketView = target.ticketView;
+  if (target.securityView) state.securityView = target.securityView;
+  if (target.automationView) state.automationView = target.automationView;
+  await showPage(target.page);
+  if (target.docTopic) await showDocsTopic(target.docTopic);
+}
+
+function requestNavigation(target, label) {
+  if (shouldBlockNavigation(state.dirtyForms.size)) {
+    state.pendingNavigation = { target, label };
+    updateUnsavedBar();
+    signalBlockedNavigation();
+    return;
+  }
+  performNavigation(target).catch((error) => toast(error.message, true));
+}
+
+function signalBlockedNavigation() {
+  const shell = document.querySelector(".app-shell");
+  const bar = document.querySelector("#unsaved-bar");
+  shell?.classList.remove("navigation-blocked");
+  bar?.classList.remove("attention");
+  void shell?.offsetWidth;
+  shell?.classList.add("navigation-blocked");
+  bar?.classList.add("attention");
+  window.clearTimeout(signalBlockedNavigation.timer);
+  signalBlockedNavigation.timer = window.setTimeout(() => {
+    shell?.classList.remove("navigation-blocked");
+    bar?.classList.remove("attention");
+  }, 520);
+}
+
+function resumePendingNavigation() {
+  if (state.dirtyForms.size || !state.pendingNavigation) {
+    updateUnsavedBar();
+    return;
+  }
+  const pending = state.pendingNavigation;
+  performNavigation(pending.target).catch((error) => toast(error.message, true));
 }
 
 function setSelectedValues(select, values = []) {
@@ -317,7 +610,9 @@ function populateResourceSelects() {
 function populateLibrarySelects() {
   document.querySelectorAll("[data-ticket-type-select]").forEach((select) => {
     const selected = selectedValues(select);
-    select.innerHTML = state.ticketTypes.map((type) => `<option value="${type.id}">${escapeHtml(type.emoji ? `${type.emoji} ${type.label}` : type.label)}</option>`).join("");
+    select.innerHTML = state.ticketTypes.map((type) =>
+      `<option value="${type.id}">${escapeHtml(type.emoji ? `${ticketEmojiLabel(type.emoji)} ${type.label}` : type.label)}</option>`
+    ).join("");
     setSelectedValues(select, selected);
   });
   document.querySelectorAll("[data-ticket-panel-select]").forEach((select) => {
@@ -364,7 +659,9 @@ function replacePreviewVariables(value = "") {
     .replaceAll("{ticket_id}", "42")
     .replaceAll("{ticket_category}", "General Support")
     .replaceAll("{created_at}", "June 7, 2026")
-    .replaceAll("{closed_at}", "Not closed");
+    .replaceAll("{closed_at}", "Not closed")
+    .replaceAll("{boostCount}", "14")
+    .replaceAll("{tier}", "Tier 2");
 }
 
 function renderDiscordPreview(container, { content = "", embed = null, components = null }) {
@@ -382,7 +679,7 @@ function renderDiscordPreview(container, { content = "", embed = null, component
     </div>` : "";
   const componentHtml = components ? `<div class="preview-components">${components.mode === "dropdown"
     ? `<div class="preview-select">${escapeHtml(components.placeholder || "Choose an option")}⌄</div>`
-    : `<div class="preview-buttons">${components.labels.slice(0, 10).map((label) => `<span class="preview-button">${escapeHtml(label)}</span>`).join("")}</div>`
+    : `<div class="preview-buttons">${components.labels.slice(0, 10).map((label) => `<span class="preview-button ${escapeHtml(components.buttonStyle || "secondary")}">${escapeHtml(label)}</span>`).join("")}</div>`
   }</div>` : "";
   container.innerHTML = `<div class="discord-message"><div class="discord-avatar">O</div><div><div class="discord-head"><strong>Odyssey Bot</strong><span class="bot-tag">APP</span><time>Today at 12:00</time></div>${safeContent ? `<div class="discord-content">${escapeHtml(safeContent)}</div>` : ""}${embedHtml}${componentHtml}${!safeContent && !embedHtml ? '<div class="discord-content">Configure the action to see a preview.</div>' : ""}</div></div>`;
 }
@@ -398,10 +695,15 @@ function embedFieldsFromDom() {
 function addEmbedField(field = { name: "", value: "", inline: false }) {
   const row = document.createElement("div");
   row.className = "embed-field-row";
-  row.innerHTML = `<input data-field-name maxlength="256" placeholder="Field name" value="${escapeHtml(field.name)}"><textarea data-field-value maxlength="1024" rows="1" placeholder="Field value">${escapeHtml(field.value)}</textarea><label class="inline-toggle" title="Inline"><input data-field-inline type="checkbox" ${field.inline ? "checked" : ""}></label><button type="button" class="remove-field">Remove</button>`;
-  row.querySelector(".remove-field").addEventListener("click", () => { row.remove(); updateCustomPreview(); });
+  row.innerHTML = `<input data-field-name data-variable-input maxlength="256" placeholder="Field name" value="${escapeHtml(field.name)}"><textarea data-field-value data-variable-input maxlength="1024" rows="1" placeholder="Field value">${escapeHtml(field.value)}</textarea><label class="inline-toggle" title="Inline"><input data-field-inline type="checkbox" ${field.inline ? "checked" : ""}></label><button type="button" class="remove-field">Remove</button>`;
+  row.querySelector(".remove-field").addEventListener("click", () => {
+    row.remove();
+    updateCustomPreview();
+    updateFormDirtyState(document.querySelector("#custom-form"));
+  });
   row.querySelectorAll("input,textarea").forEach((input) => input.addEventListener("input", updateCustomPreview));
   document.querySelector("#embed-fields").append(row);
+  updateFormDirtyState(document.querySelector("#custom-form"));
 }
 
 function customEmbedFromForm(form) {
@@ -437,6 +739,7 @@ function updateCustomActionVisibility() {
   document.querySelector('[data-action-group="panel"]').classList.toggle("hidden", !actionGroups.panel.includes(action));
   document.querySelector('[data-action-group="announcement"]').classList.toggle("hidden", !actionGroups.announcement.includes(action));
   document.querySelector('[data-action-group="target-user"]').classList.toggle("hidden", !actionGroups.targetUser.includes(action));
+  document.querySelector('[data-action-group="reason"]').classList.toggle("hidden", !actionGroups.reason.includes(action));
   document.querySelector('[data-action-group="amount"]').classList.toggle("hidden", !actionGroups.amount.includes(action));
   document.querySelector('[data-action-group="duration"]').classList.toggle("hidden", !actionGroups.duration.includes(action));
   document.querySelector('[data-action-group="delete-days"]').classList.toggle("hidden", !actionGroups.deleteDays.includes(action));
@@ -496,7 +799,7 @@ function updatePanelPreview() {
     ? draft.childPanelIds.map((id) => panelMap.get(id)?.name).filter(Boolean)
     : draft.ticketTypeIds.map((id) => {
         const type = typeMap.get(id);
-        return type ? `${type.emoji || "🎫"} ${type.label}` : null;
+        return type ? `${ticketEmojiLabel(type.emoji) || "🎫"} ${type.label}` : null;
       }).filter(Boolean);
   renderDiscordPreview(document.querySelector("#panel-preview"), {
     embed: {
@@ -512,7 +815,8 @@ function updatePanelPreview() {
     components: {
       mode: draft.panelKind === "multi" || draft.displayMode === "dropdown" ? "dropdown" : "buttons",
       placeholder: draft.dropdownPlaceholder,
-      labels
+      labels,
+      buttonStyle: state.branding?.ticketButtonStyle || "secondary"
     }
   });
 }
@@ -523,7 +827,7 @@ function updateTicketPreview() {
   renderDiscordPreview(document.querySelector("#ticket-preview"), {
     content: "@Lachlan",
     embed: {
-      title: values.label || "Ticket type",
+      title: `${ticketEmojiLabel(values.emoji) || "🎫"} ${values.label || "Ticket type"}`,
       description: values.welcomeMessage,
       color: values.color,
       imageUrl: values.imageUrl,
@@ -535,6 +839,7 @@ function updateTicketPreview() {
     },
     components: {
       mode: "buttons",
+      buttonStyle: state.branding?.ticketButtonStyle || "secondary",
       labels: [
         ...(form.elements.claimButtonEnabled.checked ? ["Claim ticket"] : []),
         ...(form.elements.requestCloseEnabled.checked
@@ -587,9 +892,11 @@ function addSocialEntry(containerId, entry = { label: "", url: "" }) {
   row.querySelector(".remove-social-entry").addEventListener("click", () => {
     row.remove();
     updateSocialsPreview();
+    updateFormDirtyState(document.querySelector("#socials-form"));
   });
   row.querySelectorAll("input").forEach((input) => input.addEventListener("input", updateSocialsPreview));
   document.querySelector(`#${containerId}`).append(row);
+  updateFormDirtyState(document.querySelector("#socials-form"));
 }
 
 function updateSocialsPreview() {
@@ -634,6 +941,24 @@ function updateWelcomePreview() {
       fields: []
     }
   });
+  renderDiscordPreview(document.querySelector("#goodbye-preview"), {
+    content: replacePreviewVariables(values.goodbyeContent || "{user_name} has left {server_name}."),
+    embed: form.elements.goodbyeEmbedEnabled.checked ? {
+      title: replacePreviewVariables(values.embedTitle),
+      description: replacePreviewVariables(values.embedDescription),
+      color: values.embedColor || "#5865F2",
+      imageUrl: values.embedImageUrl,
+      thumbnailUrl: values.embedThumbnailUrl,
+      footerText: replacePreviewVariables(values.embedFooterText),
+      fields: []
+    } : null
+  });
+  renderDiscordPreview(document.querySelector("#boost-preview"), {
+    content: replacePreviewVariables(
+      values.boostMessage
+      || "Thank you {user} for boosting {server}! We now have {boostCount} boosts and are at {tier}."
+    )
+  });
 }
 
 async function loadOverview() {
@@ -666,27 +991,58 @@ async function loadCustomCommands() {
 }
 
 async function loadTickets() {
-  const [types, panels, history, closeRequests] = await Promise.all([
+  const [typesResult, panelsResult, historyResult, closeRequestsResult] = await Promise.allSettled([
     api("/ticket-types"),
     api("/ticket-panels"),
     api("/tickets"),
     api("/ticket-close-requests")
   ]);
-  state.ticketTypes = types;
-  state.ticketPanels = panels;
-  state.closeRequests = closeRequests;
+  const ticketStatus = document.querySelector("#ticket-load-status");
+  const typesPayload = typesResult.status === "fulfilled" ? typesResult.value : null;
+  state.ticketTypes = Array.isArray(typesPayload) ? typesPayload : (typesPayload?.items || []);
+  state.ticketPanels = panelsResult.status === "fulfilled" ? panelsResult.value : [];
+  state.closeRequests = closeRequestsResult.status === "fulfilled" ? closeRequestsResult.value : [];
+  state.ticketTypesError = typesResult.status === "rejected"
+    ? typesResult.reason?.message || "Ticket types could not be loaded."
+    : typesPayload?.ok === false ? typesPayload.error || "Ticket types could not be loaded." : null;
+  const history = historyResult.status === "fulfilled" ? historyResult.value : [];
+  const failedAreas = [
+    state.ticketTypesError ? "ticket types" : "",
+    panelsResult.status === "rejected" ? "ticket panels" : "",
+    historyResult.status === "rejected" ? "ticket history" : "",
+    closeRequestsResult.status === "rejected" ? "close requests" : ""
+  ].filter(Boolean);
+  if (failedAreas.length) {
+    ticketStatus.classList.remove("hidden");
+    ticketStatus.innerHTML = `
+      <div class="section-status-copy">
+        <strong>${state.ticketTypesError ? "Ticket types could not be loaded" : "Some ticket data could not be loaded"}</strong>
+        <span>${escapeHtml(state.ticketTypesError || `Unavailable: ${failedAreas.join(", ")}. Other dashboard areas are still available.`)}</span>
+      </div>
+      <button type="button" class="secondary-button compact" id="retry-ticket-load">Retry</button>`;
+    ticketStatus.querySelector("#retry-ticket-load").addEventListener("click", () => {
+      loadTickets().catch((error) => toast(error.message, true));
+    });
+  } else {
+    ticketStatus.classList.add("hidden");
+    ticketStatus.innerHTML = "";
+  }
   populateLibrarySelects();
-  document.querySelector("#ticket-count").textContent = types.length;
-  document.querySelector("#panel-count").textContent = panels.length;
-  document.querySelector("#ticket-list").innerHTML = itemList(types, "ticket", (item) =>
-    `${item.active ? "Active" : "Disabled"} · max ${item.maxOpenTickets} per user · ${item.staffRoleIds.length} staff role(s)`
+  document.querySelector("#ticket-count").textContent = state.ticketTypes.length;
+  document.querySelector("#panel-count").textContent = state.ticketPanels.length;
+  document.querySelector("#ticket-list").innerHTML = state.ticketTypesError
+    ? emptyState("Ticket types unavailable", "Retry when the dashboard database connection is available.")
+    : itemList(state.ticketTypes, "ticket", (item) =>
+    `${item.active ? "Active" : "Disabled"} · ${ticketEmojiLabel(item.emoji) || "No emoji"} · ${item.categoryId ? "Custom category" : "Default category"} · ${item.staffRoleIds.length} staff role(s)`
   );
-  document.querySelector("#panel-list").innerHTML = itemList(panels, "panel", (item) =>
+  document.querySelector("#panel-list").innerHTML = panelsResult.status === "rejected"
+    ? emptyState("Ticket panels unavailable", "Retry when the dashboard connection recovers.")
+    : itemList(state.ticketPanels, "panel", (item) =>
     `${item.active ? "Active" : "Disabled"} · ${item.panelKind === "multi" ? "Multi-panel" : item.displayMode} · ${item.panelKind === "multi" ? item.childPanelIds.length : item.ticketTypeIds.length} option(s)`
   );
   document.querySelector("#ticket-history").innerHTML = table(
-    ["Type", "User", "Priority", "Status", "Opened", "Claimed by"],
-    history.map((ticket) => `<tr><td>${escapeHtml(ticket.typeLabel || "Deleted type")}</td><td>${escapeHtml(ticket.userId)}</td><td><span class="pill priority-${escapeHtml(ticket.priority || "normal")}">${escapeHtml(ticket.priority || "normal")}</span></td><td><span class="pill">${escapeHtml(ticket.status)}</span></td><td>${escapeHtml(ticket.openedAt)}</td><td>${escapeHtml(ticket.claimedBy || "-")}</td></tr>`)
+    ["Type", "User", "Status", "Opened", "Claimed by"],
+    history.map((ticket) => `<tr><td>${escapeHtml(ticket.typeLabel || "Deleted type")}</td><td>${escapeHtml(ticket.userId)}</td><td><span class="pill">${escapeHtml(ticket.status)}</span></td><td>${escapeHtml(ticket.openedAt)}</td><td>${escapeHtml(ticket.claimedBy || "-")}</td></tr>`)
   );
   document.querySelector("#ticket-close-requests").innerHTML = table(
     ["Request", "Source", "Ticket", "Requester", "Reason", "Status", "Resolved by", "Created"],
@@ -731,11 +1087,13 @@ async function loadSocials() {
   (data.memberEntries || []).forEach((entry) => addSocialEntry("social-members", entry));
   if (!data.links?.length) addSocialEntry("social-links");
   updateSocialsPreview();
+  markFormClean(form);
 }
 
 async function loadGuilds() {
   const data = await api("/guilds");
   state.guilds = data.guilds;
+  state.selectedGuildId = data.selectedGuildId;
   const select = document.querySelector("#guild-switcher");
   select.innerHTML = state.guilds.map((guild) =>
     `<option value="${guild.id}">${escapeHtml(guild.name)}</option>`
@@ -764,14 +1122,69 @@ async function loadSettings() {
     if (field instanceof HTMLSelectElement && field.multiple) setSelectedValues(field, value);
     else field.value = value || "";
   });
+  markFormClean(form);
+}
+
+function blendHex(colorValue, amount = 0.22) {
+  const match = /^#([0-9a-f]{6})$/i.exec(colorValue);
+  if (!match) return "#98A2FF";
+  const number = Number.parseInt(match[1], 16);
+  const channels = [number >> 16, (number >> 8) & 255, number & 255]
+    .map((channel) => Math.round(channel + (255 - channel) * amount));
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function applyDashboardAccent(value) {
+  if (!/^#[0-9a-f]{6}$/i.test(value || "")) return;
+  document.documentElement.style.setProperty("--brand", value);
+  document.documentElement.style.setProperty("--brand-bright", blendHex(value));
+}
+
+function updateBrandingPreview() {
+  const form = document.querySelector("#branding-form");
+  const values = formObject(form);
+  applyDashboardAccent(values.accentColor);
+  renderDiscordPreview(document.querySelector("#branding-preview"), {
+    embed: {
+      title: values.ticketPanelTitle || "Support Tickets",
+      description: values.ticketPanelDescription || "Choose a ticket type below to contact the team.",
+      color: values.ticketPanelColor || "#5865F2",
+      imageUrl: values.ticketPanelImageUrl,
+      thumbnailUrl: values.embedIconUrl,
+      footerText: values.footerText,
+      footerIconUrl: values.embedIconUrl,
+      fields: []
+    },
+    components: {
+      mode: "buttons",
+      labels: ["General support", "Billing"],
+      buttonStyle: values.ticketButtonStyle || "secondary"
+    }
+  });
+  const media = [
+    { label: "Embed icon", url: values.embedIconUrl },
+    { label: "Ticket banner", url: values.ticketPanelImageUrl },
+    { label: "Announcement image", url: values.announcementDefaultImageUrl },
+    { label: "Announcement thumbnail", url: values.announcementDefaultThumbnailUrl }
+  ];
+  document.querySelector("#branding-media-preview").innerHTML = media.map((item) => item.url
+    ? `<div class="media-preview-item"><img src="${escapeHtml(item.url)}" alt=""><span>${escapeHtml(item.label)}</span></div>`
+    : `<div class="media-preview-item empty"><div>Image</div><span>${escapeHtml(item.label)}</span></div>`
+  ).join("");
 }
 
 async function loadBranding() {
   const branding = await api("/branding");
+  state.branding = branding;
   const form = document.querySelector("#branding-form");
   Object.entries(branding).forEach(([key, value]) => {
     if (form.elements[key]) form.elements[key].value = value || "";
   });
+  ["accentColor", "ticketPanelColor", "announcementDefaultColor"].forEach((name) => {
+    if (form.elements[`${name}Text`]) form.elements[`${name}Text`].value = form.elements[name].value.toUpperCase();
+  });
+  updateBrandingPreview();
+  markFormClean(form);
 }
 
 async function loadWelcome() {
@@ -786,6 +1199,7 @@ async function loadWelcome() {
     else field.value = value || "";
   });
   updateWelcomePreview();
+  markFormClean(form);
 }
 
 async function loadSecurity() {
@@ -878,18 +1292,18 @@ async function loadSecurity() {
   ).join("");
 
   document.querySelector("#verification-records").innerHTML = table(
-    ["User", "Result", "Reasons", "Risk", "VPN", "Device", "Verified", "Expires"],
+    ["User", "Result", "Reasons", "Risk", "VPN", "Verified", "Expires"],
     verification.records.map((record) => `<tr>
       <td>${escapeHtml(record.userId)}</td>
       <td><span class="pill status-${escapeHtml(record.status)}">${escapeHtml(record.status)}</span></td>
       <td class="wrap-cell">${escapeHtml((record.reasonCodes || []).join(", ") || "None")}</td>
       <td>${record.riskScore}</td>
       <td>${record.vpnDetected === null ? "N/A" : record.vpnDetected ? "Yes" : "No"}</td>
-      <td>${record.deviceHash ? "Recorded" : "N/A"}</td>
       <td>${escapeHtml(record.verifiedAt)}</td>
       <td>${escapeHtml(record.expiresAt)}</td>
     </tr>`)
   );
+  [raidForm, nukeForm, roleForm, verificationForm].forEach(markFormClean);
 }
 
 function automationList(items, type, subtitle, extraAction) {
@@ -951,8 +1365,12 @@ function addAutoModLinkRule(rule = { channelId: "", allowedDomains: [], blockedD
     <label class="field">Blocked domains<textarea data-link-rule-blocked rows="2" placeholder="example.com">${escapeHtml((rule.blockedDomains || []).join("\n"))}</textarea><small>These stay blocked in this channel.</small></label>
     <button type="button" class="secondary-button compact remove-link-rule">Remove rule</button>`;
   row.querySelector("[data-link-rule-channel]").value = rule.channelId || "";
-  row.querySelector(".remove-link-rule").addEventListener("click", () => row.remove());
+  row.querySelector(".remove-link-rule").addEventListener("click", () => {
+    row.remove();
+    updateFormDirtyState(document.querySelector("#auto-mod-form"));
+  });
   document.querySelector("#automod-link-rules").append(row);
+  updateFormDirtyState(document.querySelector("#auto-mod-form"));
 }
 
 function autoModLinkRules() {
@@ -964,11 +1382,16 @@ function autoModLinkRules() {
 }
 
 async function loadAutomation() {
-  const [autoMod, rolePanels, stickyMessages, scheduledAnnouncements] = await Promise.all([
+  const [autoMod, rolePanels, stickyMessages, scheduledAnnouncements, diagnostics] = await Promise.all([
     api("/auto-mod"),
     api("/role-panels"),
     api("/sticky-messages"),
-    api("/scheduled-announcements")
+    api("/scheduled-announcements"),
+    api("/auto-mod/diagnostics").catch((error) => ({
+      ok: false,
+      warnings: [error.message],
+      checks: []
+    }))
   ]);
   state.autoMod = autoMod;
   state.rolePanels = rolePanels;
@@ -986,6 +1409,29 @@ async function loadAutomation() {
   });
   document.querySelector("#automod-link-rules").innerHTML = "";
   (autoMod.linkChannelRules || []).forEach(addAutoModLinkRule);
+  const diagnosticsPanel = document.querySelector("#automod-diagnostics");
+  diagnosticsPanel.classList.toggle("has-warnings", !diagnostics.ok);
+  const unavailable = diagnostics.unavailable === true;
+  const ignoredChannels = diagnostics.exemptions?.ignoredChannels || [];
+  const ignoredRoles = diagnostics.exemptions?.ignoredRoles || [];
+  const ignoredUsers = diagnostics.exemptions?.ignoredUserIds || [];
+  diagnosticsPanel.innerHTML = `
+    <div class="section-title">
+      <div><span class="step">${diagnostics.ok ? "Ready" : unavailable ? "Offline" : "Check"}</span><h3>Discord readiness</h3><p>${diagnostics.ok ? "Intents and permissions look ready for AutoMod." : unavailable ? "Discord could not be reached. AutoMod settings are still available below." : "Resolve these items for reliable moderation."}</p></div>
+      <span class="state-pill ${diagnostics.ok ? "enabled" : "warning"}">${diagnostics.ok ? "Ready" : unavailable ? "Check unavailable" : `${diagnostics.warnings.length} warning${diagnostics.warnings.length === 1 ? "" : "s"}`}</span>
+    </div>
+    ${diagnostics.checks?.length ? `<div class="diagnostic-checks">${diagnostics.checks.map((check) =>
+      `<span class="${check.ok ? "ok" : "missing"}">${check.ok ? "✓" : "!"} ${escapeHtml(check.label)}</span>`
+    ).join("")}</div>` : ""}
+    ${diagnostics.warnings?.length ? `<div class="diagnostic-warnings">${diagnostics.warnings.map((warning) =>
+      `<p>${escapeHtml(warning)}</p>`
+    ).join("")}</div>` : ""}
+    ${diagnostics.exemptions ? `<div class="diagnostic-exemptions">
+      <p><strong>Non-link exempt channels:</strong> ${ignoredChannels.length ? ignoredChannels.map((channel) => `#${escapeHtml(channel.name)} (${escapeHtml(channel.id)})`).join(", ") : "None"}</p>
+      <p><strong>Ignored roles:</strong> ${ignoredRoles.length ? ignoredRoles.map((role) => `${escapeHtml(role.name)} (${escapeHtml(role.id)})`).join(", ") : "None"}</p>
+      <p><strong>Ignored users:</strong> ${ignoredUsers.length ? ignoredUsers.map(escapeHtml).join(", ") : "None"}</p>
+      <p>If your test channel, account, or one of its roles appears here, caps, spam, mass mentions, and repeated pings are intentionally skipped there.</p>
+    </div>` : ""}`;
 
   populateLibrarySelects();
   document.querySelector("#role-panel-count").textContent = rolePanels.length;
@@ -1011,6 +1457,7 @@ async function loadAutomation() {
   );
   updateRolePanelPreview();
   updateStickyPreview();
+  markFormClean(autoForm);
 }
 
 function enhanceDocsCodeBlocks() {
@@ -1104,6 +1551,7 @@ function setAutomationView(view) {
 }
 
 async function showPage(name) {
+  state.activePage = name;
   document.querySelectorAll(".nav-group").forEach((group) => {
     group.classList.toggle("open", group.querySelector(`[data-nav-toggle="${name}"]`) !== null);
   });
@@ -1135,6 +1583,30 @@ async function showPage(name) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function renderDashboardSearch(query) {
+  const results = searchDashboardItems(query, dashboardSearchItems).slice(0, 7);
+  state.searchResults = results;
+  const container = document.querySelector("#dashboard-search-results");
+  const input = document.querySelector("#dashboard-search");
+  container.classList.toggle("hidden", !query.trim());
+  input.setAttribute("aria-expanded", String(Boolean(query.trim())));
+  container.innerHTML = results.length
+    ? results.map((item, index) => `
+      <button type="button" role="option" data-search-index="${index}">
+        <strong>${escapeHtml(item.label)}</strong>
+        <span>${escapeHtml(item.description)}</span>
+      </button>
+    `).join("")
+    : emptyState("No matching dashboard area", "Try a feature name such as tickets, auto roles, or invite blocker.");
+}
+
+function navigateSearchItem(item) {
+  if (!item) return;
+  document.querySelector("#dashboard-search").value = "";
+  renderDashboardSearch("");
+  requestNavigation({ type: "page", ...item }, `Open ${item.label}`);
+}
+
 function resetCustomForm() {
   const form = document.querySelector("#custom-form");
   form.reset();
@@ -1147,6 +1619,8 @@ function resetCustomForm() {
   form.elements.deleteMessageDays.value = "";
   form.elements.amount.value = "";
   form.elements.newName.value = "";
+  form.elements.reason.value = "";
+  form.elements.permissionName.value = "";
   form.elements.pingType.value = "none";
   document.querySelector("#embed-fields").innerHTML = "";
   document.querySelector("#sequence-fields").innerHTML = "";
@@ -1154,6 +1628,7 @@ function resetCustomForm() {
   clearErrors(form);
   updateCommandConflicts();
   updateCustomActionVisibility();
+  markFormClean(form);
 }
 
 function resetPanelForm() {
@@ -1170,6 +1645,7 @@ function resetPanelForm() {
   clearErrors(form);
   populateLibrarySelects();
   updatePanelVisibility();
+  markFormClean(form);
 }
 
 function resetTicketForm() {
@@ -1187,9 +1663,14 @@ function resetTicketForm() {
   form.elements.closeButtonEnabled.checked = true;
   form.elements.requestCloseEnabled.checked = false;
   form.elements.closeRequestDelaySeconds.value = 0;
+  setTicketEmoji("", false);
+  document.querySelector("#ticket-emoji-menu").classList.add("hidden");
+  document.querySelector("#ticket-emoji-search").value = "";
+  renderTicketEmojiPicker();
   form.querySelector(".cancel-edit").style.display = "none";
   clearErrors(form);
   updateTicketPreview();
+  markFormClean(form);
 }
 
 function resetAnnouncementForm() {
@@ -1200,6 +1681,7 @@ function resetAnnouncementForm() {
   form.elements.color.value = "#5865f2";
   form.querySelector(".cancel-edit").style.display = "none";
   updateAnnouncementPreview();
+  markFormClean(form);
 }
 
 function resetRolePanelForm() {
@@ -1213,6 +1695,7 @@ function resetRolePanelForm() {
   form.querySelector(".cancel-edit").style.display = "none";
   clearErrors(form);
   updateRolePanelPreview();
+  markFormClean(form);
 }
 
 function resetStickyForm() {
@@ -1224,6 +1707,7 @@ function resetStickyForm() {
   form.querySelector(".cancel-edit").style.display = "none";
   clearErrors(form);
   updateStickyPreview();
+  markFormClean(form);
 }
 
 function resetScheduledForm() {
@@ -1237,32 +1721,139 @@ function resetScheduledForm() {
   form.elements.nextRunAt.value = soon.toISOString().slice(0, 16);
   form.querySelector(".cancel-edit").style.display = "none";
   clearErrors(form);
+  markFormClean(form);
 }
 
 document.querySelectorAll("[data-page]").forEach((button) => button.addEventListener("click", () => {
-  if (button.dataset.ticketView) state.ticketView = button.dataset.ticketView;
-  if (button.dataset.securityView) state.securityView = button.dataset.securityView;
-  if (button.dataset.automationView) state.automationView = button.dataset.automationView;
-  showPage(button.dataset.page);
+  requestNavigation({
+    type: "page",
+    page: button.dataset.page,
+    ticketView: button.dataset.ticketView,
+    securityView: button.dataset.securityView,
+    automationView: button.dataset.automationView
+  }, `Open ${button.textContent.trim()}`);
 }));
 document.querySelectorAll("[data-nav-toggle]").forEach((button) => button.addEventListener("click", () => {
   const group = button.closest(".nav-group");
   group.classList.toggle("open");
 }));
-document.querySelectorAll(".jump-button").forEach((button) => button.addEventListener("click", () => showPage(button.dataset.jump)));
-document.querySelectorAll("[data-doc-topic]").forEach((button) => button.addEventListener("click", async () => {
-  await showPage("docs");
-  await showDocsTopic(button.dataset.docTopic);
+document.querySelectorAll(".jump-button").forEach((button) => button.addEventListener("click", () => {
+  requestNavigation({ type: "page", page: button.dataset.jump }, `Open ${pageMeta[button.dataset.jump]?.[0] || "that page"}`);
 }));
-document.querySelector("#logout").addEventListener("click", async () => { await api("/logout", { method: "POST" }); window.location.replace("/login"); });
+document.querySelectorAll("[data-doc-topic]").forEach((button) => button.addEventListener("click", async () => {
+  requestNavigation(
+    { type: "page", page: "docs", docTopic: button.dataset.docTopic },
+    "Open documentation"
+  );
+}));
+document.querySelector("#logout").addEventListener("click", () => {
+  const run = async () => {
+    await api("/logout", { method: "POST" });
+    state.suppressBeforeUnload = true;
+    window.location.replace("/login");
+  };
+  if (state.dirtyForms.size) {
+    state.pendingNavigation = {
+      target: { type: "logout", run },
+      label: "Log out"
+    };
+    updateUnsavedBar();
+  } else {
+    run().catch((error) => toast(error.message, true));
+  }
+});
 document.querySelector("#clear-activity").addEventListener("click", () => {
   state.recentActivity = [];
   sessionStorage.removeItem("rapidbot.activity");
   renderActivity();
 });
 
+document.querySelector("#dashboard-search").addEventListener("input", (event) => {
+  renderDashboardSearch(event.target.value);
+});
+document.querySelector("#dashboard-search").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.currentTarget.value = "";
+    renderDashboardSearch("");
+  }
+  if (event.key === "Enter" && state.searchResults?.[0]) {
+    event.preventDefault();
+    navigateSearchItem(state.searchResults[0]);
+  }
+});
+document.querySelector("#dashboard-search-results").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-search-index]");
+  if (button) navigateSearchItem(state.searchResults?.[Number(button.dataset.searchIndex)]);
+});
+document.addEventListener("keydown", (event) => {
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+    event.preventDefault();
+    document.querySelector("#dashboard-search").focus();
+  }
+});
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".dashboard-search")) renderDashboardSearch("");
+});
+
+document.addEventListener("submit", (event) => {
+  if (event.target instanceof HTMLFormElement && event.target.id !== "login-form") {
+    state.submittingForm = event.target;
+  }
+}, true);
+document.addEventListener("input", (event) => {
+  const form = event.target.closest?.("form");
+  if (form) {
+    syncFeatureToggles(form);
+    updateFormDirtyState(form);
+  }
+}, true);
+document.addEventListener("change", (event) => {
+  const form = event.target.closest?.("form");
+  if (form) {
+    syncFeatureToggles(form);
+    updateFormDirtyState(form);
+  }
+}, true);
+
+document.querySelector("#save-changes").addEventListener("click", () => {
+  const dirtyForms = [...state.dirtyForms];
+  const form = dirtyForms.find((candidate) => candidate.closest(".page.active"))
+    || dirtyForms[0];
+  if (!form) return resumePendingNavigation();
+  form.requestSubmit();
+});
+document.querySelector("#discard-changes").addEventListener("click", () => {
+  const pending = state.pendingNavigation;
+  const target = pending?.target || currentNavigationTarget();
+  state.dirtyForms.clear();
+  state.pendingNavigation = null;
+  updateUnsavedBar();
+  if (target.type === "server" || target.type === "logout") {
+    performNavigation(target).catch((error) => toast(error.message, true));
+    return;
+  }
+  sessionStorage.setItem("odyssey.pendingNavigation", JSON.stringify(target));
+  state.suppressBeforeUnload = true;
+  window.location.reload();
+});
+window.addEventListener("beforeunload", (event) => {
+  if (!state.suppressBeforeUnload && state.dirtyForms.size) {
+    event.preventDefault();
+    event.returnValue = "";
+  }
+});
+
 document.querySelector("#custom-form").addEventListener("input", updateCustomPreview);
 document.querySelector("#custom-form").addEventListener("change", updateCommandConflicts);
+document.querySelector("#custom-form").addEventListener("focusin", (event) => {
+  if (!isVariableInput(event.target) || !event.target.matches("[data-variable-input]")) return;
+  activeVariableField = event.target;
+  document.querySelector("#variable-target-hint").textContent = `Inserts into: ${variableInputLabel(event.target)}`;
+});
+document.querySelector("#command-variable-chips").addEventListener("click", (event) => {
+  const chip = event.target.closest("[data-variable]");
+  if (chip) insertCommandVariable(chip.dataset.variable);
+});
 document.querySelector("#custom-form").elements.actionType.addEventListener("change", updateCustomActionVisibility);
 document.querySelector("#add-embed-field").addEventListener("click", () => addEmbedField());
 document.querySelector("#custom-form").elements.name.addEventListener("blur", (event) => {
@@ -1308,7 +1899,9 @@ function buildActionPayload(values, embed, form) {
     replyVisibility: values.replyVisibility,
     deleteUsage: form.elements.deleteUsage.checked,
     actionConfig: {
-      content: actionGroups.message.includes(actionType) ? values.content : embed.content,
+      content: actionType === "require_permission"
+        ? values.permissionName
+        : actionGroups.message.includes(actionType) ? values.content : embed.content,
       targetChannelId: ["send_channel", "send_announcement", "log_to_mod"].includes(actionType)
         ? (actionType === "send_announcement" ? (values.announcementChannelId || null) : (values.targetChannelId || null))
         : null,
@@ -1412,7 +2005,7 @@ document.querySelector("#add-sequence-item").addEventListener("click", () => {
       <label class="field">Action<select data-seq-action>
         ${Object.entries(actionLabels).map(([k, v]) => `<option value="${k}">${v}</option>`).join("")}
       </select></label>
-      <label class="field">Content<textarea data-seq-content rows="2" maxlength="2000"></textarea></label>
+      <label class="field">Content<textarea data-seq-content data-variable-input rows="2" maxlength="2000"></textarea></label>
       <label class="field">Target channel<select data-seq-channel data-channel-select="text"><option value="">Not configured</option></select></label>
       <label class="field">Optional ping<select data-seq-ping><option value="none">No ping</option><option value="everyone">@everyone</option><option value="here">@here</option></select></label>
       <label class="field">Role<select data-seq-role data-role-select><option value="">Not configured</option></select></label>
@@ -1420,18 +2013,22 @@ document.querySelector("#add-sequence-item").addEventListener("click", () => {
       <label class="field">Duration (min)<input data-seq-duration type="number" min="1" max="40320"></label>
       <label class="field">Delete days<input data-seq-delete type="number" min="0" max="7"></label>
       <label class="field">Amount<input data-seq-amount type="number" min="1" max="100"></label>
-      <label class="field">Reason<textarea data-seq-reason rows="1" maxlength="1000"></textarea></label>
-      <label class="field">New name<input data-seq-newname maxlength="100"></label>
+      <label class="field">Reason<textarea data-seq-reason data-variable-input rows="1" maxlength="1000"></textarea></label>
+      <label class="field">New name<input data-seq-newname data-variable-input maxlength="100"></label>
       <label class="field">Category<select data-seq-category data-channel-select="category"><option value="">Not configured</option></select></label>
       <label class="field">Embed color<input data-seq-color type="color" value="#5865f2"></label>
-      <label class="field">Embed title<input data-seq-title maxlength="256"></label>
-      <label class="field span-2">Embed description<textarea data-seq-description rows="2" maxlength="4096"></textarea></label>
+      <label class="field">Embed title<input data-seq-title data-variable-input maxlength="256"></label>
+      <label class="field span-2">Embed description<textarea data-seq-description data-variable-input rows="2" maxlength="4096"></textarea></label>
     </div>
     <button type="button" class="remove-seq secondary-button compact">Remove action</button>
   `;
-  row.querySelector(".remove-seq").addEventListener("click", () => row.remove());
+  row.querySelector(".remove-seq").addEventListener("click", () => {
+    row.remove();
+    updateFormDirtyState(document.querySelector("#custom-form"));
+  });
   populateResourceSelects();
   container.append(row);
+  updateFormDirtyState(document.querySelector("#custom-form"));
 });
 
 document.querySelector("#custom-send-test").addEventListener("click", async () => {
@@ -1506,6 +2103,28 @@ document.querySelector("#panel-send-test").addEventListener("click", async () =>
       success("Successfully posted the saved ticket panel.");
     } catch (error) { toast(`Could not post ticket panel: ${error.message}`, true); }
   });
+});
+
+document.querySelector("#ticket-emoji-toggle").addEventListener("click", () => {
+  const menu = document.querySelector("#ticket-emoji-menu");
+  menu.classList.toggle("hidden");
+  if (!menu.classList.contains("hidden")) {
+    renderTicketEmojiPicker(document.querySelector("#ticket-emoji-search").value);
+    document.querySelector("#ticket-emoji-search").focus();
+  }
+});
+document.querySelector("#ticket-emoji-search").addEventListener("input", (event) => {
+  renderTicketEmojiPicker(event.target.value);
+});
+document.querySelector("#ticket-emoji-grid").addEventListener("click", (event) => {
+  const option = event.target.closest("[data-emoji]");
+  if (!option) return;
+  setTicketEmoji(option.dataset.emoji);
+  document.querySelector("#ticket-emoji-menu").classList.add("hidden");
+});
+document.querySelector("#ticket-emoji-clear").addEventListener("click", () => {
+  setTicketEmoji("");
+  document.querySelector("#ticket-emoji-menu").classList.add("hidden");
 });
 
 document.querySelector("#ticket-form").addEventListener("input", (event) => {
@@ -1678,16 +2297,74 @@ document.querySelector("#settings-form").addEventListener("submit", async (event
   });
 });
 
+document.querySelector("#branding-form").addEventListener("input", updateBrandingPreview);
+document.querySelector("#branding-form").addEventListener("change", updateBrandingPreview);
 document.querySelector("#branding-form").addEventListener("submit", async (event) => {
   event.preventDefault();
-  const values = formObject(event.currentTarget);
-  delete values.guildId;
   const form = event.currentTarget;
+  const values = formObject(form);
+  clearErrors(form);
+  setFormStatus(form, "Saving appearance and updating the bot nickname in Discord...", "saving");
   await withBusy(form.querySelector('[type="submit"]'), "Saving appearance...", async () => {
     try {
-      await api("/branding", { method: "PUT", body: JSON.stringify(values) });
-      success("Successfully saved branding and appearance.");
-    } catch (error) { toast(`Could not save appearance: ${error.message}`, true); }
+      const result = await api("/branding", {
+        method: "PUT",
+        body: JSON.stringify({
+          serverName: values.serverName,
+          accentColor: values.accentColor,
+          ticketButtonStyle: values.ticketButtonStyle,
+          footerText: values.footerText,
+          ticketPanelTitle: values.ticketPanelTitle,
+          ticketPanelDescription: values.ticketPanelDescription,
+          ticketPanelColor: values.ticketPanelColor,
+          ticketPanelImageUrl: values.ticketPanelImageUrl,
+          announcementDefaultColor: values.announcementDefaultColor,
+          announcementDefaultImageUrl: values.announcementDefaultImageUrl,
+          announcementDefaultThumbnailUrl: values.announcementDefaultThumbnailUrl,
+          embedIconUrl: values.embedIconUrl
+        })
+      });
+      state.branding = result.branding;
+      await loadBranding();
+      if (result.nickname.status === "failed") {
+        markFormClean(form);
+        state.submittingForm = null;
+        setFormStatus(form, result.nickname.message, "error", 12000);
+        toast(result.nickname.message, true);
+        recordActivity(result.nickname.message, "error");
+        resumePendingNavigation();
+      } else {
+        setFormStatus(form, result.nickname.message, "success", 8000);
+        success("Successfully saved appearance and updated the Discord bot nickname.");
+      }
+    } catch (error) {
+      showErrors(form, error.fields);
+      setFormStatus(form, `Could not save appearance: ${error.message}`, "error", 12000);
+      toast(`Could not save appearance: ${error.message}`, true);
+    }
+  });
+});
+document.querySelector("#branding-reset").addEventListener("click", async () => {
+  if (!window.confirm("Reset this server's appearance settings to Odyssey Bot defaults?")) return;
+  const button = document.querySelector("#branding-reset");
+  const form = document.querySelector("#branding-form");
+  await withBusy(button, "Resetting...", async () => {
+    try {
+      const result = await api("/branding", { method: "DELETE" });
+      state.branding = result.branding;
+      await loadBranding();
+      const message = result.nickname.status === "updated"
+        ? "Appearance and the Discord bot nickname were reset to defaults."
+        : result.nickname.message;
+      setFormStatus(form, message, result.nickname.status === "updated" ? "success" : "error", 10000);
+      if (result.nickname.status === "updated") success(message);
+      else {
+        toast(message, true);
+        recordActivity(message, "error");
+      }
+    } catch (error) {
+      toast(`Could not reset appearance: ${error.message}`, true);
+    }
   });
 });
 
@@ -1711,11 +2388,19 @@ document.querySelector("#welcome-form").addEventListener("submit", async (event)
       embedImageUrl: values.embedImageUrl || "",
       embedThumbnailUrl: values.embedThumbnailUrl || "",
       embedFooterText: values.embedFooterText || "",
-      autoRoleIds: selectedValues(form.elements.autoRoleIds)
+      autoRolesEnabled: form.elements.autoRolesEnabled.checked,
+      autoRoleIds: selectedValues(form.elements.autoRoleIds),
+      goodbyeEnabled: form.elements.goodbyeEnabled.checked,
+      goodbyeChannelId: values.goodbyeChannelId || null,
+      goodbyeContent: values.goodbyeContent || "",
+      goodbyeEmbedEnabled: form.elements.goodbyeEmbedEnabled.checked,
+      boostEnabled: form.elements.boostEnabled.checked,
+      boostChannelId: values.boostChannelId || null,
+      boostMessage: values.boostMessage || ""
       }) });
       await loadWelcome();
-      success("Successfully saved welcome message settings.");
-    } catch (error) { toast(`Could not save welcome settings: ${error.message}`, true); }
+      success("Successfully saved welcome and goodbye settings.");
+    } catch (error) { toast(`Could not save member message settings: ${error.message}`, true); }
   });
 });
 
@@ -1755,6 +2440,92 @@ document.querySelector("#welcome-test").addEventListener("click", async () => {
       });
       success("Successfully sent welcome message preview.");
     } catch (error) { toast(`Could not send welcome preview: ${error.message}`, true); }
+  });
+});
+
+document.querySelector("#goodbye-test").addEventListener("click", async () => {
+  const channelId = document.querySelector("#goodbye-test-channel").value;
+  if (!channelId) return toast("Choose a channel to test the goodbye message.", true);
+  const form = document.querySelector("#welcome-form");
+  const values = formObject(form);
+  const useEmbed = form.elements.goodbyeEmbedEnabled.checked;
+  const button = document.querySelector("#goodbye-test");
+  await withBusy(button, "Sending test...", async () => {
+    try {
+      await api("/test/embed", {
+        method: "POST",
+        body: JSON.stringify({
+          channelId,
+          content: replacePreviewVariables(values.goodbyeContent || "{user_name} has left {server_name}."),
+          embed: useEmbed ? {
+            content: "",
+            title: replacePreviewVariables(values.embedTitle),
+            description: replacePreviewVariables(values.embedDescription),
+            color: values.embedColor || "#5865F2",
+            imageUrl: values.embedImageUrl,
+            thumbnailUrl: values.embedThumbnailUrl,
+            footerText: replacePreviewVariables(values.embedFooterText),
+            footerIconUrl: "",
+            timestamp: false,
+            fields: [],
+            authorName: "",
+            authorIconUrl: "",
+            authorUrl: "",
+            titleUrl: ""
+          } : {
+            content: "",
+            title: "",
+            description: "",
+            color: "#5865F2",
+            imageUrl: "",
+            thumbnailUrl: "",
+            footerText: "",
+            footerIconUrl: "",
+            timestamp: false,
+            fields: [],
+            authorName: "",
+            authorIconUrl: "",
+            authorUrl: "",
+            titleUrl: ""
+          }
+        })
+      });
+      success("Successfully sent goodbye message preview.");
+    } catch (error) {
+      toast(`Could not send goodbye preview: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#boost-test").addEventListener("click", async () => {
+  const channelId = document.querySelector("#boost-test-channel").value;
+  if (!channelId) return toast("Choose a channel to test the boost message.", true);
+  const form = document.querySelector("#welcome-form");
+  const values = formObject(form);
+  const content = replacePreviewVariables(
+    values.boostMessage
+    || "Thank you {user} for boosting {server}! We now have {boostCount} boosts and are at {tier}."
+  );
+  const button = document.querySelector("#boost-test");
+  await withBusy(button, "Sending test...", async () => {
+    try {
+      await api("/test/embed", {
+        method: "POST",
+        body: JSON.stringify({
+          channelId,
+          content,
+          embed: {
+            content: "", title: "", description: "", color: "#5865F2",
+            imageUrl: "", thumbnailUrl: "", footerText: "", footerIconUrl: "",
+            timestamp: false, fields: [], authorName: "", authorIconUrl: "",
+            authorUrl: "", titleUrl: ""
+          }
+        })
+      });
+      success("Successfully sent boost message preview.");
+    } catch (error) {
+      toast(`Could not send boost preview: ${error.message}`, true);
+    }
   });
 });
 
@@ -1854,7 +2625,6 @@ document.querySelector("#verification-form").addEventListener("submit", async (e
           minServerDays: Number(values.minServerDays),
           vpnCheckEnabled: form.elements.vpnCheckEnabled.checked,
           vpnFailClosed: form.elements.vpnFailClosed.checked,
-          deviceCheckEnabled: form.elements.deviceCheckEnabled.checked,
           recordRetentionHours: Number(values.recordRetentionHours)
         })
       });
@@ -1912,6 +2682,8 @@ document.querySelector("#auto-mod-form").addEventListener("submit", async (event
         capsPercentage: Number(values.capsPercentage),
         spamThreshold: Number(values.spamThreshold),
         mentionThreshold: Number(values.mentionThreshold),
+        mentionSpamThreshold: Number(values.mentionSpamThreshold),
+        mentionWindowSeconds: Number(values.mentionWindowSeconds),
         action: values.action,
         timeoutMinutes: Number(values.timeoutMinutes),
         ignoredChannelIds: selectedValues(form.elements.ignoredChannelIds),
@@ -2034,7 +2806,12 @@ document.querySelectorAll(".cancel-edit").forEach((button) => button.addEventLis
 }));
 
 document.querySelectorAll(".new-editor").forEach((button) => button.addEventListener("click", () => {
-  if (button.dataset.editor === "custom") resetCustomForm();
+  if (button.dataset.editor === "custom") {
+    requestNavigation(
+      { type: "resetForm", formId: "custom-form" },
+      "Start a new command"
+    );
+  }
 }));
 
 document.querySelector("#docs-search")?.addEventListener("input", (event) => {
@@ -2129,6 +2906,7 @@ document.body.addEventListener("click", async (event) => {
       setSelectedValues(form.elements.roleIds, item.roleIds);
       form.querySelector(".cancel-edit").style.display = "block";
       updateRolePanelPreview();
+      markFormClean(form);
     }
 
     if (action === "edit" && type === "sticky") {
@@ -2141,6 +2919,7 @@ document.body.addEventListener("click", async (event) => {
       form.elements.minIntervalSeconds.value = item.minIntervalSeconds;
       form.querySelector(".cancel-edit").style.display = "block";
       updateStickyPreview();
+      markFormClean(form);
     }
 
     if (action === "edit" && type === "scheduled") {
@@ -2158,6 +2937,7 @@ document.body.addEventListener("click", async (event) => {
       form.elements.intervalMinutes.value = item.intervalMinutes ?? "";
       form.elements.enabled.checked = item.enabled;
       form.querySelector(".cancel-edit").style.display = "block";
+      markFormClean(form);
     }
     window.scrollTo({ top: 0, behavior: "smooth" });
     return;
@@ -2220,7 +3000,8 @@ document.body.addEventListener("click", async (event) => {
     form.elements.description.value = item.description;
     form.elements.enabled.checked = item.enabled;
     form.elements.actionType.value = item.actionType;
-    form.elements.content.value = config.content;
+    form.elements.content.value = item.actionType === "require_permission" ? "" : config.content;
+    form.elements.permissionName.value = item.actionType === "require_permission" ? config.content : "";
     form.elements.targetChannelId.value = config.targetChannelId || "";
     form.elements.announcementChannelId.value = config.targetChannelId || "";
     form.elements.roleId.value = config.roleId || "";
@@ -2280,6 +3061,7 @@ document.body.addEventListener("click", async (event) => {
     form.querySelector(".cancel-edit").style.display = "block";
     updateCommandConflicts();
     updateCustomActionVisibility();
+    markFormClean(form);
   }
 
   if (type === "panel") {
@@ -2298,6 +3080,7 @@ document.body.addEventListener("click", async (event) => {
     setSelectedValues(form.elements.ticketTypeIds, item.ticketTypeIds);
     setSelectedValues(form.elements.childPanelIds, item.childPanelIds);
     updatePanelVisibility();
+    markFormClean(form);
   }
 
   if (type === "ticket") {
@@ -2309,8 +3092,10 @@ document.body.addEventListener("click", async (event) => {
     });
     ["active", "claimButtonEnabled", "closeButtonEnabled", "closeReasonRequired", "requestCloseEnabled"].forEach((key) => { if (form.elements[key]) form.elements[key].checked = item[key]; });
     ["staffRoleIds", "pingRoleIds", "allowedRoleIds", "blockedRoleIds"].forEach((key) => setSelectedValues(form.elements[key], item[key]));
+    setTicketEmoji(item.emoji || "", false);
     form.querySelector(".cancel-edit").style.display = "block";
     updateTicketPreview();
+    markFormClean(form);
   }
 
   if (type === "announcement") {
@@ -2319,6 +3104,7 @@ document.body.addEventListener("click", async (event) => {
     Object.entries(item).forEach(([key, value]) => { if (form.elements[key]) form.elements[key].value = value ?? ""; });
     form.querySelector(".cancel-edit").style.display = "block";
     updateAnnouncementPreview();
+    markFormClean(form);
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
@@ -2334,13 +3120,26 @@ document.querySelectorAll(".color-control").forEach((control) => {
 
 async function init() {
   try {
+    renderCommandVariables();
     const session = await api("/session");
     if (!session.authenticated) return window.location.replace("/login");
+    if (!session.guildId) return window.location.replace("/servers");
     await loadGuilds();
-    state.resources = await api("/discord/resources");
-    document.querySelector("#guild-name").textContent = state.resources.guild.name;
+    try {
+      state.resources = await api("/discord/resources");
+    } catch (error) {
+      const selectedGuild = state.guilds.find((guild) => guild.id === state.selectedGuildId);
+      state.resources = {
+        guild: selectedGuild || { id: state.selectedGuildId, name: "Selected server" },
+        channels: [],
+        roles: [],
+        emojis: []
+      };
+      toast(`Discord resources are temporarily unavailable: ${error.message}`, true);
+    }
+    document.querySelector("#guild-name").textContent = state.resources.guild?.name || "Selected server";
     populateResourceSelects();
-    await Promise.all([loadCustomCommands(), loadTickets(), loadAnnouncements()]);
+    await Promise.allSettled([loadCustomCommands(), loadTickets(), loadAnnouncements(), loadBranding()]);
     populateLibrarySelects();
     resetCustomForm();
     resetPanelForm();
@@ -2350,12 +3149,20 @@ async function init() {
     resetStickyForm();
     resetScheduledForm();
     await loadOverview();
+    state.initializing = false;
+    markAllFormsClean();
     if (window.location.pathname === "/docs" || window.location.pathname === "/help" || window.location.pathname.startsWith("/docs/")) {
       await showPage("docs");
       const topic = window.location.pathname.split("/")[2];
       if (topic) await showDocsTopic(topic, false);
     }
+    const pendingTarget = sessionStorage.getItem("odyssey.pendingNavigation");
+    if (pendingTarget) {
+      sessionStorage.removeItem("odyssey.pendingNavigation");
+      await performNavigation(JSON.parse(pendingTarget));
+    }
   } catch (error) {
+    state.initializing = false;
     toast(error.message, true);
     document.querySelector("#status").innerHTML = "<i></i>Connection issue";
   }
@@ -2363,25 +3170,24 @@ async function init() {
 
 document.querySelector("#guild-switcher").addEventListener("change", async (event) => {
   const select = event.currentTarget;
-  select.disabled = true;
-  try {
-    await api("/guilds/select", {
-      method: "POST",
-      body: JSON.stringify({ guildId: select.value })
-    });
-    window.location.reload();
-  } catch (error) {
-    select.disabled = false;
-    toast(error.message, true);
-  }
+  const guildId = select.value;
+  select.value = state.selectedGuildId;
+  requestNavigation(
+    { type: "server", guildId },
+    `Switch to ${state.guilds.find((guild) => guild.id === guildId)?.name || "another server"}`
+  );
 });
 
 window.addEventListener("popstate", async () => {
-  if (window.location.pathname.startsWith("/docs")) {
-    await showPage("docs");
-    const topic = window.location.pathname.split("/")[2];
-    if (topic) await showDocsTopic(topic, false);
-  }
+  const topic = window.location.pathname.startsWith("/docs")
+    ? window.location.pathname.split("/")[2]
+    : null;
+  requestNavigation(
+    topic
+      ? { type: "page", page: "docs", docTopic: topic }
+      : { type: "page", page: "overview" },
+    "Follow browser navigation"
+  );
 });
 
 init();

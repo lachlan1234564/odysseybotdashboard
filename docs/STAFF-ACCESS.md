@@ -43,7 +43,7 @@ For staff to access the dashboard, host the application on Railway:
 
 The bot stays online even when your personal computer is turned off.
 
-See [SETUP.md](SETUP.md#deploy-to-railway) for the full deployment walkthrough.
+Open [Railway Hosting](/docs/railway-hosting) in the dashboard help center for the full deployment walkthrough.
 
 ---
 

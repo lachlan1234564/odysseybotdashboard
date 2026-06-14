@@ -81,13 +81,16 @@ export async function sendGuildLog(
   channelId: string | null,
   channelResolver: (id: string) => Promise<unknown>,
   embed: EmbedBuilder
-): Promise<void> {
-  if (!channelId) return;
+): Promise<boolean> {
+  if (!channelId) return false;
   const channel = await channelResolver(channelId).catch(() => null);
   if (channel && typeof channel === "object" && "send" in channel && typeof channel.send === "function") {
     const sendable = channel as { send: (options: { embeds: EmbedBuilder[] }) => Promise<unknown> };
-    await sendable.send({ embeds: [embed] }).catch(() => undefined);
+    return sendable.send({ embeds: [embed] })
+      .then(() => true)
+      .catch(() => false);
   }
+  return false;
 }
 
 export async function logModeration(input: {

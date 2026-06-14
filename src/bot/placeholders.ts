@@ -22,6 +22,8 @@ export function buildDiscordPlaceholders(input: {
   ticketType?: TicketType | null;
   createdAt?: Date | string | number | null;
   closedAt?: Date | string | number | null;
+  boostCount?: number | string;
+  tier?: string;
 }): PlaceholderValues {
   const { guild, channel, user, target, ticket, ticketType } = input;
   const channelName = channel && "name" in channel ? String(channel.name ?? "") : "";
@@ -51,6 +53,8 @@ export function buildDiscordPlaceholders(input: {
     ticket_id: ticket ? String(ticket.id) : "",
     ticket_category: ticketType?.label ?? "",
     created_at: discordDate(createdAt),
-    closed_at: discordDate(closedAt)
+    closed_at: discordDate(closedAt),
+    boostCount: input.boostCount === undefined ? "" : String(input.boostCount),
+    tier: input.tier ?? ""
   };
 }

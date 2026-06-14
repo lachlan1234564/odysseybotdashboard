@@ -486,5 +486,36 @@ export const postgresMigrations = [
       CREATE INDEX IF NOT EXISTS idx_verification_links_hash ON verification_links(token_hash);
       CREATE INDEX IF NOT EXISTS idx_verification_records_guild ON verification_records(guild_id, verified_at);
     `
+  },
+  {
+    version: 11,
+    sql: `
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS goodbye_enabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS goodbye_channel_id TEXT;
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS goodbye_content TEXT NOT NULL DEFAULT '';
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS goodbye_embed_enabled INTEGER NOT NULL DEFAULT 0;
+    `
+  },
+  {
+    version: 12,
+    sql: `
+      ALTER TABLE branding ADD COLUMN IF NOT EXISTS accent_color TEXT NOT NULL DEFAULT '#7785FF';
+      ALTER TABLE branding ADD COLUMN IF NOT EXISTS ticket_button_style TEXT NOT NULL DEFAULT 'secondary';
+    `
+  },
+  {
+    version: 13,
+    sql: `
+      ALTER TABLE auto_mod_settings ADD COLUMN IF NOT EXISTS mention_spam_threshold INTEGER NOT NULL DEFAULT 3;
+      ALTER TABLE auto_mod_settings ADD COLUMN IF NOT EXISTS mention_window_seconds INTEGER NOT NULL DEFAULT 30;
+
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS boost_enabled INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS boost_channel_id TEXT;
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS boost_message TEXT NOT NULL DEFAULT 'Thank you {user} for boosting {server}! We now have {boostCount} boosts and are at {tier}.';
+      ALTER TABLE welcome_settings ADD COLUMN IF NOT EXISTS auto_roles_enabled INTEGER NOT NULL DEFAULT 0;
+      UPDATE welcome_settings
+      SET auto_roles_enabled = 1
+      WHERE enabled = 1 AND auto_role_ids <> '[]';
+    `
   }
 ] as const;

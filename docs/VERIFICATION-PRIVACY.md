@@ -8,15 +8,15 @@ A website cannot reliably prove that two Discord accounts belong to the same per
 
 ## Current privacy-respecting verification
 
-Odyssey Bot now includes an optional Discord OAuth2 verification page. It collects only:
+Odyssey Bot includes an optional Discord OAuth2 verification page. It collects only:
 
 - The Discord user ID from the `identify` scope.
 - Basic account creation age calculated from the Discord ID.
 - Optional membership in the selected server, checked by the bot.
 - Verification time and status.
-- A short pass/fail reason and an expiry time.
+- A short pass/flag/fail reason, optional risk score, and an expiry time.
 
-It does not create browser fingerprints or store device identifiers, advertising IDs, or raw IP addresses. Verification records expire after the configured retention period.
+It does not create browser fingerprints, derive device hashes, or store device identifiers, advertising IDs, or raw IP addresses. Verification records expire after the configured retention period.
 
 ## Configure Discord OAuth
 

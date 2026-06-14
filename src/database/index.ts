@@ -51,6 +51,38 @@ export async function migrateDatabase(): Promise<void> {
 
 await migrateDatabase();
 
+async function clearDeprecatedVerificationDeviceData(): Promise<void> {
+  if (db.dialect === "postgres") {
+    const columns = await db.all<{ table_name: string; column_name: string }>(`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND (
+          (table_name = 'verification_settings' AND column_name = 'device_check_enabled')
+          OR (table_name = 'verification_records' AND column_name = 'device_hash')
+        )
+    `);
+    if (columns.some((column) => column.table_name === "verification_settings")) {
+      await db.run("UPDATE verification_settings SET device_check_enabled = 0");
+    }
+    if (columns.some((column) => column.table_name === "verification_records")) {
+      await db.run("UPDATE verification_records SET device_hash = NULL WHERE device_hash IS NOT NULL");
+    }
+    return;
+  }
+
+  const settingsColumns = await db.all<{ name: string }>("PRAGMA table_info(verification_settings)");
+  if (settingsColumns.some((column) => column.name === "device_check_enabled")) {
+    await db.run("UPDATE verification_settings SET device_check_enabled = 0");
+  }
+  const recordColumns = await db.all<{ name: string }>("PRAGMA table_info(verification_records)");
+  if (recordColumns.some((column) => column.name === "device_hash")) {
+    await db.run("UPDATE verification_records SET device_hash = NULL WHERE device_hash IS NOT NULL");
+  }
+}
+
+await clearDeprecatedVerificationDeviceData();
+
 function parseJsonArray(value: string | null): string[] {
   if (!value) return [];
   try {
@@ -125,6 +157,8 @@ export async function getBranding(guildId: string): Promise<Branding> {
   return {
     guildId,
     serverName: row.server_name as string,
+    accentColor: (row.accent_color as string) ?? "#7785FF",
+    ticketButtonStyle: (row.ticket_button_style as Branding["ticketButtonStyle"]) ?? "secondary",
     footerText: row.footer_text as string,
     ticketPanelTitle: row.ticket_panel_title as string,
     ticketPanelDescription: row.ticket_panel_description as string,
@@ -141,7 +175,8 @@ export async function saveBranding(branding: Branding): Promise<Branding> {
   await ensureGuildRows(branding.guildId);
   await db.run(`
     UPDATE branding SET
-      server_name = @serverName, footer_text = @footerText,
+      server_name = @serverName, accent_color = @accentColor,
+      ticket_button_style = @ticketButtonStyle, footer_text = @footerText,
       ticket_panel_title = @ticketPanelTitle,
       ticket_panel_description = @ticketPanelDescription,
       ticket_panel_color = @ticketPanelColor,
@@ -153,6 +188,11 @@ export async function saveBranding(branding: Branding): Promise<Branding> {
     WHERE guild_id = @guildId
   `, { ...branding });
   return getBranding(branding.guildId);
+}
+
+export async function resetBranding(guildId: string): Promise<Branding> {
+  await db.run("DELETE FROM branding WHERE guild_id = ?", [guildId]);
+  return getBranding(guildId);
 }
 
 function mapCustomCommand(row: Record<string, unknown>): CustomCommand {
@@ -581,7 +621,6 @@ export interface TicketRecord {
   closedAt: string | null;
   closedBy: string | null;
   lastActivityAt: string;
-  priority: "low" | "normal" | "high" | "urgent";
 }
 
 export async function getTicketByChannel(guildId: string, channelId: string): Promise<TicketRecord | undefined> {
@@ -590,7 +629,7 @@ export async function getTicketByChannel(guildId: string, channelId: string): Pr
       ticket_type_id AS "ticketTypeId", status, claimed_by AS "claimedBy",
       panel_id AS "panelId", close_reason AS "closeReason",
       opened_at AS "openedAt", closed_at AS "closedAt", closed_by AS "closedBy",
-      last_activity_at AS "lastActivityAt", priority
+      last_activity_at AS "lastActivityAt"
     FROM tickets WHERE guild_id = ? AND channel_id = ?
   `, [guildId, channelId]);
   if (!row) return undefined;
@@ -607,17 +646,6 @@ export async function closeTicket(guildId: string, channelId: string, userId: st
 
 export async function updateTicketActivity(guildId: string, channelId: string): Promise<void> {
   await db.run("UPDATE tickets SET last_activity_at = CURRENT_TIMESTAMP WHERE guild_id = ? AND channel_id = ? AND status = 'open'", [guildId, channelId]);
-}
-
-export async function updateTicketPriority(
-  guildId: string,
-  channelId: string,
-  priority: TicketRecord["priority"]
-): Promise<boolean> {
-  return (await db.run(
-    "UPDATE tickets SET priority = ? WHERE guild_id = ? AND channel_id = ? AND status = 'open'",
-    [priority, guildId, channelId]
-  )).changes > 0;
 }
 
 export async function listInactiveTickets() {
@@ -678,7 +706,7 @@ export async function listRecentTickets(guildId: string, limit = 50) {
   return db.all(`
     SELECT tickets.id, tickets.channel_id AS "channelId", tickets.user_id AS "userId",
       tickets.status, tickets.claimed_by AS "claimedBy", tickets.opened_at AS "openedAt",
-      tickets.closed_at AS "closedAt", tickets.priority, ticket_types.label AS "typeLabel"
+      tickets.closed_at AS "closedAt", ticket_types.label AS "typeLabel"
     FROM tickets LEFT JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id
     WHERE tickets.guild_id = ? ORDER BY tickets.id DESC LIMIT ?
   `, [guildId, limit]);
@@ -707,7 +735,16 @@ function mapWelcomeSettings(row: Record<string, unknown>): WelcomeSettings {
     embedImageUrl: (row.embed_image_url as string) ?? "",
     embedThumbnailUrl: (row.embed_thumbnail_url as string) ?? "",
     embedFooterText: (row.embed_footer_text as string) ?? "",
-    autoRoleIds: parseJsonArray(row.auto_role_ids as string | null)
+    autoRolesEnabled: Boolean(row.auto_roles_enabled),
+    autoRoleIds: parseJsonArray(row.auto_role_ids as string | null),
+    goodbyeEnabled: Boolean(row.goodbye_enabled),
+    goodbyeChannelId: row.goodbye_channel_id as string | null,
+    goodbyeContent: (row.goodbye_content as string) ?? "",
+    goodbyeEmbedEnabled: Boolean(row.goodbye_embed_enabled),
+    boostEnabled: Boolean(row.boost_enabled),
+    boostChannelId: row.boost_channel_id as string | null,
+    boostMessage: (row.boost_message as string)
+      ?? "Thank you {user} for boosting {server}! We now have {boostCount} boosts and are at {tier}."
   };
 }
 
@@ -726,13 +763,22 @@ export async function saveWelcomeSettings(settings: WelcomeSettings): Promise<We
       content = @content, embed_title = @embedTitle, embed_description = @embedDescription,
       embed_color = @embedColor, embed_image_url = @embedImageUrl,
       embed_thumbnail_url = @embedThumbnailUrl, embed_footer_text = @embedFooterText,
-      auto_role_ids = @autoRoleIds, updated_at = CURRENT_TIMESTAMP
+      auto_roles_enabled = @autoRolesEnabled, auto_role_ids = @autoRoleIds,
+      goodbye_enabled = @goodbyeEnabled, goodbye_channel_id = @goodbyeChannelId,
+      goodbye_content = @goodbyeContent, goodbye_embed_enabled = @goodbyeEmbedEnabled,
+      boost_enabled = @boostEnabled, boost_channel_id = @boostChannelId,
+      boost_message = @boostMessage,
+      updated_at = CURRENT_TIMESTAMP
     WHERE guild_id = @guildId
   `, {
     ...settings,
     enabled: Number(settings.enabled),
     dmEnabled: Number(settings.dmEnabled),
     dmEmbedEnabled: Number(settings.dmEmbedEnabled),
+    autoRolesEnabled: Number(settings.autoRolesEnabled),
+    goodbyeEnabled: Number(settings.goodbyeEnabled),
+    goodbyeEmbedEnabled: Number(settings.goodbyeEmbedEnabled),
+    boostEnabled: Number(settings.boostEnabled),
     autoRoleIds: JSON.stringify(settings.autoRoleIds)
   });
   return getWelcomeSettings(settings.guildId);
@@ -878,6 +924,8 @@ function mapAutoMod(row: Record<string, unknown>): AutoModSettings {
     capsPercentage: Number(row.caps_percentage ?? 75),
     spamThreshold: Number(row.spam_threshold ?? 4),
     mentionThreshold: Number(row.mention_threshold ?? 5),
+    mentionSpamThreshold: Number(row.mention_spam_threshold ?? 3),
+    mentionWindowSeconds: Number(row.mention_window_seconds ?? 30),
     action: (row.action as AutoModSettings["action"]) ?? "delete",
     timeoutMinutes: Number(row.timeout_minutes ?? 10),
     alwaysBlockDiscordInvites: row.always_block_discord_invites === undefined
@@ -905,7 +953,9 @@ export async function saveAutoModSettings(settings: AutoModSettings): Promise<Au
       block_suspicious_links = @blockSuspiciousLinks, block_caps = @blockCaps,
       block_spam = @blockSpam, block_mass_mentions = @blockMassMentions,
       caps_percentage = @capsPercentage, spam_threshold = @spamThreshold,
-      mention_threshold = @mentionThreshold, action = @action,
+      mention_threshold = @mentionThreshold,
+      mention_spam_threshold = @mentionSpamThreshold,
+      mention_window_seconds = @mentionWindowSeconds, action = @action,
       timeout_minutes = @timeoutMinutes, ignored_channel_ids = @ignoredChannelIds,
       always_block_discord_invites = @alwaysBlockDiscordInvites,
       link_channel_rules = @linkChannelRules,
@@ -996,7 +1046,6 @@ export async function getVerificationSettings(guildId: string): Promise<Verifica
     minServerDays: Number(row.min_server_days ?? 0),
     vpnCheckEnabled: Boolean(row.vpn_check_enabled),
     vpnFailClosed: Boolean(row.vpn_fail_closed),
-    deviceCheckEnabled: Boolean(row.device_check_enabled),
     recordRetentionHours: Number(row.record_retention_hours ?? 168)
   };
 }
@@ -1011,7 +1060,6 @@ export async function saveVerificationSettings(settings: VerificationSettings): 
       min_server_days = @minServerDays,
       vpn_check_enabled = @vpnCheckEnabled,
       vpn_fail_closed = @vpnFailClosed,
-      device_check_enabled = @deviceCheckEnabled,
       record_retention_hours = @recordRetentionHours,
       updated_at = CURRENT_TIMESTAMP
     WHERE guild_id = @guildId
@@ -1019,8 +1067,7 @@ export async function saveVerificationSettings(settings: VerificationSettings): 
     ...settings,
     enabled: Number(settings.enabled),
     vpnCheckEnabled: Number(settings.vpnCheckEnabled),
-    vpnFailClosed: Number(settings.vpnFailClosed),
-    deviceCheckEnabled: Number(settings.deviceCheckEnabled)
+    vpnFailClosed: Number(settings.vpnFailClosed)
   });
   return getVerificationSettings(settings.guildId);
 }
@@ -1049,16 +1096,15 @@ export async function createVerificationRecord(
 ): Promise<void> {
   await db.run(`
     INSERT INTO verification_records (
-      guild_id, user_id, status, reason_codes, risk_score, device_hash,
+      guild_id, user_id, status, reason_codes, risk_score,
       account_created_at, server_joined_at, vpn_detected, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `, [
     record.guildId,
     record.userId,
     record.status,
     JSON.stringify(record.reasonCodes),
     record.riskScore,
-    record.deviceHash ?? null,
     record.accountCreatedAt,
     record.serverJoinedAt ?? null,
     record.vpnDetected === null ? null : Number(record.vpnDetected),
@@ -1081,7 +1127,6 @@ export async function listVerificationRecords(guildId: string, limit = 50): Prom
     status: row.status as VerificationRecord["status"],
     reasonCodes: parseJsonArray(row.reason_codes as string),
     riskScore: Number(row.risk_score ?? 0),
-    deviceHash: row.device_hash as string | null,
     accountCreatedAt: String(row.account_created_at ?? ""),
     serverJoinedAt: row.server_joined_at ? String(row.server_joined_at) : null,
     vpnDetected: row.vpn_detected === null || row.vpn_detected === undefined
@@ -1089,23 +1134,6 @@ export async function listVerificationRecords(guildId: string, limit = 50): Prom
       : Boolean(row.vpn_detected),
     verifiedAt: String(row.verified_at),
     expiresAt: String(row.expires_at)
-  }));
-}
-
-export async function getDeviceHashAltMatches(
-  guildId: string,
-  deviceHash: string,
-  excludeUserId: string
-): Promise<Array<{ userId: string; verifiedAt: string }>> {
-  if (!deviceHash) return [];
-  const rows = await db.all<Record<string, unknown>>(`
-    SELECT user_id, verified_at FROM verification_records
-    WHERE guild_id = ? AND device_hash = ? AND user_id != ?
-    ORDER BY verified_at DESC LIMIT 20
-  `, [guildId, deviceHash, excludeUserId]);
-  return rows.map((row) => ({
-    userId: String(row.user_id),
-    verifiedAt: String(row.verified_at)
   }));
 }
 

@@ -12,6 +12,8 @@ export interface GuildSettings {
 export interface Branding {
   guildId: string;
   serverName: string;
+  accentColor: string;
+  ticketButtonStyle: "secondary" | "primary" | "success";
   footerText: string;
   ticketPanelTitle: string;
   ticketPanelDescription: string;
@@ -261,7 +263,15 @@ export interface WelcomeSettings {
   embedImageUrl: string;
   embedThumbnailUrl: string;
   embedFooterText: string;
+  autoRolesEnabled: boolean;
   autoRoleIds: string[];
+  goodbyeEnabled: boolean;
+  goodbyeChannelId: string | null;
+  goodbyeContent: string;
+  goodbyeEmbedEnabled: boolean;
+  boostEnabled: boolean;
+  boostChannelId: string | null;
+  boostMessage: string;
 }
 
 export interface AntiRaidSettings {
@@ -328,6 +338,8 @@ export interface AutoModSettings {
   capsPercentage: number;
   spamThreshold: number;
   mentionThreshold: number;
+  mentionSpamThreshold: number;
+  mentionWindowSeconds: number;
   action: "delete" | "warn" | "timeout" | "log";
   timeoutMinutes: number;
   alwaysBlockDiscordInvites: boolean;
@@ -365,7 +377,6 @@ export interface VerificationSettings {
   minServerDays: number;
   vpnCheckEnabled: boolean;
   vpnFailClosed: boolean;
-  deviceCheckEnabled: boolean;
   recordRetentionHours: number;
 }
 
@@ -376,7 +387,6 @@ export interface VerificationRecord {
   status: "passed" | "flagged" | "denied";
   reasonCodes: string[];
   riskScore: number;
-  deviceHash: string | null;
   accountCreatedAt: string;
   serverJoinedAt: string | null;
   vpnDetected: boolean | null;

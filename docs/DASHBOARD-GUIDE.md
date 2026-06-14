@@ -77,9 +77,11 @@ The **Tickets** sidebar group contains four pages:
 - **History:** Recent ticket records with status, user, and claim information.
 - **Close Requests:** Pending, approved, and denied ticket closure requests.
 
-Staff can claim tickets and set their priority to low, normal, high, or urgent inside the ticket channel. When a ticket closes, the bot exports the newest 100 messages if a transcript channel is configured.
+Staff can claim and close tickets inside the ticket channel. When a ticket closes, the bot exports the newest 100 messages if a transcript channel is configured.
 
 **Important:** Create ticket types **before** panels, because a panel must contain one or more saved ticket types.
+
+Ticket types use a searchable emoji selector. It includes normal emoji and custom emoji available in the Discord server currently selected at the top of the dashboard.
 
 ### Announcements
 
@@ -112,11 +114,12 @@ Ticket types and announcement templates can override some of these defaults.
 Set fallback branding:
 
 - Server or bot name
+- Dashboard accent and ticket button style
 - Footer text and embed icon
-- Legacy ticket title, description, color, and banner
+- Ticket title, description, color, and banner defaults
 - Default announcement color, image, and thumbnail
 
-New ticket panels and types also have their own visual settings that override these defaults.
+The live preview updates while you type. **Reset defaults** resets only the server selected at the top of the dashboard. New ticket panels and types can override these defaults.
 
 ### Docs / Help
 
@@ -484,18 +487,17 @@ The bot records warnings and moderation actions in the database. You can view th
 |---------|---------------------|--------------|
 | `/ping` | Everyone | Confirm the bot is online and show gateway latency |
 | `/help` | Everyone | List commands by category with permission labels |
-| `/bot-help` | Everyone | List all commands grouped by category |
 | `/server-info` | Everyone | View server stats and bot setup overview |
 | `/user-info member` | Everyone | View account age, join date, roles, and warnings |
-| `/automod-status` | Everyone | View current Auto Mod rules and link settings |
+| `/automod-status` | Bot admins | View current Auto Mod rules and link settings |
 | `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |
 | `/bot-status` | Everyone | View bot uptime, latency, memory, and server count |
 | `/reaction-roles panel [channel]` | Bot admins | Posts a saved self-service button role panel |
 | `/ticket-panel [panel] [channel]` | Bot admins | Post a saved ticket panel |
 | `/announce template [channel]` | Bot admins | Preview and confirm an announcement |
 | `/close-request [reason]` | Ticket staff | Asks the opener/community to accept or deny ticket closure |
-| `/lockdown [channel]` | Administrator | Lock text channels — prevent @everyone from sending messages |
-| `/unlockdown [channel]` | Administrator | Unlock channels after a lockdown |
+| `/lockdown [channel]` | Bot admins | Lock text channels — prevent @everyone from sending messages |
+| `/unlockdown [channel]` | Bot admins | Unlock channels after a lockdown |
 | `/custom name [text] [reason] [target]` | Configurable per command | Run a dashboard-created command |
 | `/warn member reason` | Moderate Members | Stores a warning |
 | `/warnings member` | Moderate Members | Shows recent warnings |
@@ -539,12 +541,16 @@ Appearance sets fallback branding used when a specific panel, type, or template 
 | Field | What It Does | When to Use It | What Happens If Blank |
 |-------|--------------|----------------|----------------------|
 | **Server / bot name** | Displayed in footers and logs. | Always set this. | Falls back to generic text. |
+| **Dashboard accent** | Changes dashboard highlights for the selected server. | Match the dashboard to your server brand. | Uses the Odyssey Bot default accent. |
+| **Ticket button style** | Chooses neutral gray, Discord blue, or green ticket buttons. | Use when a panel is displayed as buttons. | Uses neutral gray. |
 | **Footer text** | Default footer for embeds. | Set a branded footer. | No footer appears unless specified elsewhere. |
 | **Embed icon** | Small icon in embed footers. | Upload your server logo. | No icon appears. |
-| **Legacy ticket title** | Fallback title for old ticket panels. | Kept for backward compatibility. | Uses the panel's own title. |
-| **Legacy ticket color** | Fallback color for old panels. | Kept for backward compatibility. | Uses the panel's own color. |
+| **Ticket panel title and description** | Fallback copy for ticket entry messages. | Set a consistent support prompt. | Uses Odyssey Bot defaults. |
+| **Ticket panel color and banner** | Fallback color and large image for ticket entry messages. | Set branded ticket media. | Uses the default color and no banner. |
 | **Default announcement color** | Fallback color for announcements. | Set a brand color. | Uses `#5865F2` (Discord blurple). |
 | **Default announcement image/thumbnail** | Fallback media for announcements. | Set branded images. | No image/thumbnail appears unless specified in the template. |
+
+Use the live preview and media check before saving. **Reset defaults** affects only the active Discord server.
 
 ---
 

@@ -30,7 +30,6 @@ import {
   handleTicketCreate,
   handleTicketCreateButton,
   handleTicketPanel,
-  handleTicketPrioritySelect,
   processInactiveTickets,
   prepareTicketCloseRequest
 } from "./tickets.js";
@@ -56,7 +55,6 @@ import { replacePlaceholders } from "../shared/placeholders.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
 import { handleHelpCommand } from "./help.js";
 import {
-  handleBotHelp,
   handleServerInfo,
   handleUserInfo,
   handleAutomodStatus,
@@ -68,6 +66,7 @@ import {
   handleBotStatus
 } from "./admin-commands.js";
 import { logError } from "../shared/logging.js";
+import { renderBoostTemplate } from "../shared/boost.js";
 
 const config = loadDiscordConfig();
 const client = new Client({
@@ -123,7 +122,6 @@ client.on(Events.GuildMemberAdd, async (member) => {
 async function handleWelcome(member: import("discord.js").GuildMember): Promise<void> {
   if (member.user.bot) return;
   const settings = await getWelcomeSettings(member.guild.id);
-  if (!settings.enabled) return;
 
   const variables = buildDiscordPlaceholders({
     guild: member.guild,
@@ -132,7 +130,7 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
     createdAt: Date.now()
   });
 
-  if (settings.channelId) {
+  if (settings.enabled && settings.channelId) {
     const channel = await member.guild.channels.fetch(settings.channelId).catch(() => null);
     if (channel && channel.isTextBased() && !channel.isDMBased() && "send" in channel) {
       const channelVariables = buildDiscordPlaceholders({
@@ -162,7 +160,7 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
     }
   }
 
-  if (settings.dmEnabled && (settings.dmContent || settings.dmEmbedEnabled)) {
+  if (settings.enabled && settings.dmEnabled && (settings.dmContent || settings.dmEmbedEnabled)) {
     try {
       const dmContent = replacePlaceholders(settings.dmContent, variables);
       if (settings.dmEmbedEnabled) {
@@ -185,12 +183,103 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
     }
   }
 
-  if (settings.autoRoleIds.length > 0) {
+  if (settings.autoRolesEnabled && settings.autoRoleIds.length > 0) {
     for (const roleId of settings.autoRoleIds) {
       const role = await member.guild.roles.fetch(roleId).catch(() => null);
       if (role) await member.roles.add(role, "Welcome auto-role").catch(() => undefined);
     }
   }
+}
+
+async function handleGoodbye(
+  member: Pick<import("discord.js").GuildMember, "guild" | "user">
+): Promise<void> {
+  if (member.user.bot) return;
+  const settings = await getWelcomeSettings(member.guild.id);
+  const hasGoodbyeEmbed = settings.goodbyeEmbedEnabled && Boolean(
+    settings.embedTitle || settings.embedDescription || settings.embedImageUrl
+    || settings.embedThumbnailUrl || settings.embedFooterText
+  );
+  if (!settings.goodbyeEnabled || !settings.goodbyeChannelId || (!settings.goodbyeContent && !hasGoodbyeEmbed)) return;
+
+  const channel = await member.guild.channels.fetch(settings.goodbyeChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || channel.isDMBased() || !("send" in channel)) return;
+
+  const variables = buildDiscordPlaceholders({
+    guild: member.guild,
+    channel,
+    user: member.user,
+    target: member.user,
+    createdAt: Date.now()
+  });
+  const content = replacePlaceholders(settings.goodbyeContent, variables);
+
+  if (hasGoodbyeEmbed) {
+    const embed = renderEmbedMessage({
+      ...emptyEmbedConfig(),
+      content: "",
+      title: settings.embedTitle,
+      description: settings.embedDescription,
+      color: settings.embedColor,
+      imageUrl: settings.embedImageUrl,
+      thumbnailUrl: settings.embedThumbnailUrl,
+      footerText: settings.embedFooterText
+    }, variables);
+    await channel.send({ content: content || undefined, ...embed });
+    return;
+  }
+
+  await channel.send(content);
+}
+
+function boostTierLabel(tier: number): string {
+  if (tier === 3) return "Tier 3";
+  if (tier === 2) return "Tier 2";
+  if (tier === 1) return "Tier 1";
+  return "No boost tier";
+}
+
+async function handleBoostMessage(
+  oldMember: import("discord.js").GuildMember,
+  newMember: import("discord.js").GuildMember
+): Promise<void> {
+  if (newMember.user.bot) return;
+  const previousBoost = oldMember.premiumSinceTimestamp;
+  const currentBoost = newMember.premiumSinceTimestamp;
+  if (!currentBoost || previousBoost === currentBoost) return;
+
+  const settings = await getWelcomeSettings(newMember.guild.id);
+  if (!settings.boostEnabled || !settings.boostChannelId || !settings.boostMessage.trim()) return;
+  const channel = await newMember.guild.channels.fetch(settings.boostChannelId).catch(() => null);
+  if (!channel || !channel.isTextBased() || channel.isDMBased() || !("send" in channel)) {
+    console.warn(`[Boost] guild=${newMember.guild.id} channel=${settings.boostChannelId} result=channel-missing-or-not-sendable`);
+    return;
+  }
+  const botMember = newMember.guild.members.me;
+  const permissions = botMember && "permissionsFor" in channel
+    ? channel.permissionsFor(botMember)
+    : null;
+  if (
+    !permissions?.has(PermissionFlagsBits.ViewChannel)
+    || !permissions.has(PermissionFlagsBits.SendMessages)
+  ) {
+    console.warn(`[Boost] guild=${newMember.guild.id} channel=${channel.id} result=missing-view-or-send-permission`);
+    return;
+  }
+
+  const content = renderBoostTemplate(settings.boostMessage, {
+    user: `<@${newMember.id}>`,
+    server: newMember.guild.name,
+    boostCount: newMember.guild.premiumSubscriptionCount ?? 0,
+    tier: boostTierLabel(Number(newMember.guild.premiumTier))
+  });
+  await channel.send({ content, allowedMentions: { users: [newMember.id] } })
+    .then(() => {
+      console.info(`[Boost] guild=${newMember.guild.id} channel=${channel.id} member=${newMember.id} result=sent`);
+    })
+    .catch((error: Error) => {
+      logError(`Boost message failed for guild ${newMember.guild.id} channel ${channel.id}`, error);
+    });
 }
 
 client.on(Events.ChannelDelete, async (channel) => {
@@ -218,6 +307,9 @@ client.on(Events.GuildMemberRemove, async (member) => {
   } catch {
     // ignore
   }
+  await handleGoodbye(member).catch((error) => {
+    logError("Goodbye handler failed", error);
+  });
 });
 
 client.on(Events.GuildRoleDelete, async (role) => {
@@ -249,6 +341,9 @@ client.on(Events.WebhooksUpdate, async (channel) => {
 client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   if (!newMember.guild) return;
   if (_oldMember.partial) return;
+  await handleBoostMessage(_oldMember, newMember).catch((error) => {
+    logError("Boost message handler failed", error);
+  });
   const hadAdmin = _oldMember.roles.cache.some((r) => r.permissions.has(PermissionFlagsBits.Administrator));
   const hasAdmin = newMember.roles.cache.some((r) => r.permissions.has(PermissionFlagsBits.Administrator));
   if (hadAdmin !== hasAdmin) {
@@ -304,11 +399,6 @@ async function handleCommand(interaction: ChatInputCommandInteraction): Promise<
 
   if (interaction.commandName === "help") {
     await handleHelpCommand(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "bot-help") {
-    await handleBotHelp(interaction);
     return;
   }
 
@@ -396,8 +486,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleTicketCreate(interaction);
     } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith("ticket:panel-select:")) {
       await handlePanelSelect(interaction);
-    } else if (interaction.isStringSelectMenu() && interaction.customId === "ticket:set-priority") {
-      await handleTicketPrioritySelect(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket:create-button:")) {
       await handleTicketCreateButton(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("role-panel:toggle:")) {

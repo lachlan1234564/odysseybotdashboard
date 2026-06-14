@@ -39,7 +39,7 @@
         <nav>
           <button class="nav-item" data-page="settings"><span>07</span>Server Settings</button>
           <button class="nav-item" data-page="branding"><span>08</span>Appearance</button>
-          <button class="nav-item" data-page="welcome"><span>09</span>Welcome Messages</button>
+          <button class="nav-item" data-page="welcome"><span>09</span>Welcome &amp; Goodbye</button>
           <div class="nav-group">
             <button class="nav-item nav-parent" data-nav-toggle="security"><span>10</span>Security<i></i></button>
             <div class="nav-submenu" data-nav-menu="security">
@@ -73,6 +73,14 @@
       <main class="content">
         <header class="topbar">
           <div><p class="eyebrow">Bot administration</p><h1 id="page-title">Overview</h1><p id="page-subtitle" class="page-subtitle">A quick read on your server automation.</p></div>
+          <div class="dashboard-search">
+            <label for="dashboard-search">Find a setting or feature</label>
+            <div class="dashboard-search-control">
+              <input id="dashboard-search" type="search" autocomplete="off" placeholder="Try “auto roles” or “invite blocker”" aria-controls="dashboard-search-results" aria-expanded="false">
+              <kbd>⌘K</kbd>
+            </div>
+            <div id="dashboard-search-results" class="dashboard-search-results hidden" role="listbox"></div>
+          </div>
           <div class="topbar-actions"><span id="status" class="status"><i></i>Connected</span></div>
         </header>
 
@@ -115,7 +123,7 @@
             <form id="custom-form" class="builder-stack">
               <input type="hidden" name="id">
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">01</span><h3>Command identity</h3><p>What people discover in autocomplete.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span>Enabled</label></div>
+                <div class="section-title"><div><span class="step">01</span><h3>Command identity</h3><p>What people discover in autocomplete.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span><strong class="switch-state">Enabled</strong></label></div>
                 <div class="form-grid">
                   <label class="field">Command name<input name="name" required maxlength="32" autocomplete="off" placeholder="server-info"><small>Lowercase letters, numbers, hyphens, and underscores only. Spaces are converted to hyphens.</small><span class="field-error" data-error-for="name"></span></label>
                   <label class="field">Description<input name="description" maxlength="100" placeholder="Shows useful server information"><small>Shown in the dashboard and future command sync metadata.</small></label>
@@ -171,8 +179,17 @@
                   </optgroup>
                 </select></label>
 
+                <div class="variable-inserter">
+                  <div class="variable-inserter-head">
+                    <strong>Insert a variable</strong>
+                    <small>Click a text field, place the cursor, then choose a variable. Real project variable names are used.</small>
+                    <span id="variable-target-hint" class="variable-target-hint">Select a supported text box.</span>
+                  </div>
+                  <div id="command-variable-chips" class="variable-chips"></div>
+                </div>
+
                 <div class="action-block" data-action-group="message">
-                  <label class="field">Message<textarea name="content" rows="5" maxlength="2000" placeholder="Hello {user}, welcome to {server}."></textarea><small>Variables: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{channel}</code> <code>{text}</code> <code>{reason}</code> <code>{target}</code></small><span class="field-error" data-error-for="actionConfig.content"></span></label>
+                  <label class="field">Message<textarea name="content" data-variable-input rows="5" maxlength="2000" placeholder="Hello {user}, welcome to {server}."></textarea><small>Use the variable buttons above to insert placeholders at the cursor.</small><span class="field-error" data-error-for="actionConfig.content"></span></label>
                 </div>
                 <div class="action-block hidden" data-action-group="channel">
                   <label class="field">Destination channel<select name="targetChannelId" data-channel-select="text"></select><span class="field-error" data-error-for="actionConfig.targetChannelId"></span></label>
@@ -195,6 +212,9 @@
                 <div class="action-block hidden" data-action-group="target-user">
                   <label class="field">Target user ID<input name="targetUserId" maxlength="32" placeholder="User ID for DMs, timeouts, kicks, bans, etc."><span class="field-error" data-error-for="actionConfig.targetUserId"></span></label>
                 </div>
+                <div class="action-block hidden" data-action-group="reason">
+                  <label class="field">Reason<textarea name="reason" data-variable-input rows="3" maxlength="1000" placeholder="Optional reason for {target}"></textarea><small>Supports variables and is included in supported moderation or logging actions.</small></label>
+                </div>
                 <div class="action-block hidden" data-action-group="duration">
                   <label class="field">Duration (minutes)<input name="durationMinutes" type="number" min="1" max="40320" placeholder="60"><span class="field-error" data-error-for="actionConfig.durationMinutes"></span></label>
                 </div>
@@ -205,32 +225,32 @@
                   <label class="field">Amount (messages to purge)<input name="amount" type="number" min="1" max="100" value="10"><span class="field-error" data-error-for="actionConfig.amount"></span></label>
                 </div>
                 <div class="action-block hidden" data-action-group="new-name">
-                  <label class="field">New channel name<input name="newName" maxlength="100" placeholder="new-channel-name"><small>Supports variables like {user}, {username}, {server}</small><span class="field-error" data-error-for="actionConfig.newName"></span></label>
+                  <label class="field">New channel name<input name="newName" data-variable-input maxlength="100" placeholder="new-channel-name"><small>Supports variables like {user}, {username}, {server}</small><span class="field-error" data-error-for="actionConfig.newName"></span></label>
                 </div>
                 <div class="action-block hidden" data-action-group="new-category">
                   <label class="field">Target category<select name="newCategoryId" data-channel-select="category"></select><span class="field-error" data-error-for="actionConfig.newCategoryId"></span></label>
                 </div>
                 <div class="action-block hidden" data-action-group="permission">
-                  <label class="field">Required permission<input name="content" maxlength="100" placeholder="ManageMessages"><small>Enter the Discord permission flag name, e.g. ManageMessages, KickMembers, BanMembers</small><span class="field-error" data-error-for="actionConfig.content"></span></label>
+                  <label class="field">Required permission<input name="permissionName" maxlength="100" placeholder="ManageMessages"><small>Enter the Discord permission flag name, e.g. ManageMessages, KickMembers, BanMembers</small><span class="field-error" data-error-for="actionConfig.content"></span></label>
                 </div>
                 <div class="action-block hidden" data-action-group="embed">
                   <div class="embed-builder">
                     <div class="form-grid">
-                      <label class="field">Content above embed<textarea name="embedContent" rows="2" maxlength="2000"></textarea></label>
+                      <label class="field">Content above embed<textarea name="embedContent" data-variable-input rows="2" maxlength="2000"></textarea></label>
                       <label class="field">Embed color<div class="color-control"><input name="embedColor" type="color" value="#5865f2"><input name="embedColorText" value="#5865F2" maxlength="7"></div></label>
-                      <label class="field">Title<input name="embedTitle" maxlength="256"></label>
+                      <label class="field">Title<input name="embedTitle" data-variable-input maxlength="256"></label>
                       <label class="field">Title URL<input name="embedTitleUrl" type="url" placeholder="https://..."></label>
-                      <label class="field span-2">Description<textarea name="embedDescription" rows="6" maxlength="4096" placeholder="Use placeholders here too."></textarea></label>
+                      <label class="field span-2">Description<textarea name="embedDescription" data-variable-input rows="6" maxlength="4096" placeholder="Use placeholders here too."></textarea></label>
                     </div>
                     <details>
                       <summary>Author, media, footer, and timestamp <span>Advanced</span></summary>
                       <div class="details-body form-grid">
-                        <label class="field">Author name<input name="embedAuthorName" maxlength="256"></label>
+                        <label class="field">Author name<input name="embedAuthorName" data-variable-input maxlength="256"></label>
                         <label class="field">Author URL<input name="embedAuthorUrl" type="url"></label>
                         <label class="field">Author icon<div class="media-control"><input name="embedAuthorIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedAuthorIconUrl">Upload</button></div></label>
                         <label class="field">Large image<div class="media-control"><input name="embedImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedImageUrl">Upload</button></div></label>
                         <label class="field">Thumbnail<div class="media-control"><input name="embedThumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedThumbnailUrl">Upload</button></div></label>
-                        <label class="field">Footer text<input name="embedFooterText" maxlength="2048"></label>
+                        <label class="field">Footer text<input name="embedFooterText" data-variable-input maxlength="2048"></label>
                         <label class="field">Footer icon<div class="media-control"><input name="embedFooterIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedFooterIconUrl">Upload</button></div></label>
                         <label class="check-card"><input name="embedTimestamp" type="checkbox"><span><strong>Add timestamp</strong><small>Uses the time the command runs.</small></span></label>
                       </div>
@@ -281,13 +301,14 @@
             <div><span class="badge">Ticket workflow</span><h2>Ticket Studio</h2><p>Define ticket types first, then compose them into reusable panels or multi-panel menus.</p></div>
             <div class="topbar-actions"><button class="secondary-button" data-doc-topic="tickets">Tickets docs</button></div>
           </div>
+          <div id="ticket-load-status" class="surface section-status hidden" role="status" aria-live="polite"></div>
 
           <div class="ticket-view active" id="ticket-view-panels">
             <div class="builder-layout">
               <form id="panel-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Panel identity</h3><p>One server can have many distinct ticket entry points.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span>Active</label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Panel identity</h3><p>One server can have many distinct ticket entry points.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
                   <div class="form-grid">
                     <label class="field">Internal name<input name="name" required maxlength="100" placeholder="Main support"></label>
                     <label class="field">Target channel<select name="targetChannelId" data-channel-select="text"></select></label>
@@ -328,15 +349,28 @@
               <form id="ticket-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Type and routing</h3><p>Define where the ticket goes and who can support it.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span>Active</label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Type and routing</h3><p>Define where the ticket goes and who can support it.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
                   <div class="form-grid">
-                    <label class="field">Label<input name="label" required maxlength="100" placeholder="Billing support"></label>
-                    <label class="field">Emoji<input name="emoji" maxlength="64" placeholder="💳"></label>
-                    <label class="field span-2">Menu description<input name="description" maxlength="100"></label>
-                    <label class="field">Category<select name="categoryId" data-channel-select="category"></select><small>Saved as the Discord category ID for this server. Leave blank to use the server default.</small><span class="field-error" data-error-for="categoryId"></span></label>
-                    <label class="field">Transcript channel override<select name="transcriptChannelId" data-channel-select="text"></select><span class="field-error" data-error-for="transcriptChannelId"></span></label>
-                    <label class="field">Staff roles<select name="staffRoleIds" data-role-select multiple size="5"></select></label>
-                    <label class="field">Ping roles on open<select name="pingRoleIds" data-role-select multiple size="5"></select></label>
+                    <label class="field">Name<input name="label" required maxlength="100" placeholder="Billing support"><small>Shown to members in the ticket panel.</small></label>
+                    <label class="field">Emoji
+                      <input name="emoji" type="hidden">
+                      <button type="button" class="emoji-picker-trigger secondary-button" id="ticket-emoji-toggle">
+                        <span id="ticket-emoji-current" class="emoji-current">🎫</span>
+                        <span>Choose emoji</span>
+                      </button>
+                      <span class="field-error" data-error-for="emoji"></span>
+                    </label>
+                    <div class="emoji-picker-menu span-2 hidden" id="ticket-emoji-menu">
+                      <div class="emoji-picker-head">
+                        <div><strong>Choose a ticket emoji</strong><small>Includes standard emoji and custom emoji from this Discord server.</small></div>
+                        <button type="button" class="secondary-button compact" id="ticket-emoji-clear">No emoji</button>
+                      </div>
+                      <input id="ticket-emoji-search" type="search" placeholder="Search emoji by name">
+                      <div id="ticket-emoji-grid" class="emoji-grid"></div>
+                    </div>
+                    <label class="field span-2">Short description<input name="description" maxlength="100" placeholder="Questions about payments and subscriptions"><small>Optional helper text beneath the ticket option.</small></label>
+                    <label class="field">Discord category<select name="categoryId" data-channel-select="category"></select><small>New ticket channels are created here. Leave blank to use the server default.</small><span class="field-error" data-error-for="categoryId"></span></label>
+                    <label class="field">Staff role<select name="staffRoleIds" data-role-select multiple size="5"></select><small>Select one or more roles that can view, claim, and close this ticket type.</small><span class="field-error" data-error-for="staffRoleIds"></span></label>
                   </div>
                 </section>
                 <section class="surface form-section">
@@ -350,23 +384,27 @@
                     <label class="field">Footer icon<div class="media-control"><input name="footerIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="footerIconUrl">Upload</button></div></label>
                   </div>
                 </section>
-                <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">03</span><h3>Rules and lifecycle</h3><p>Limits, permissions, buttons, and automatic cleanup.</p></div></div>
-                  <div class="form-grid">
-                    <label class="field">Allowed / community roles<select name="allowedRoleIds" data-role-select multiple size="5"></select><small>Controls who may open this type. These roles may also answer a staff close request when they can see the ticket.</small></label>
-                    <label class="field">Blocked roles<select name="blockedRoleIds" data-role-select multiple size="5"></select></label>
-                    <label class="field">Max open per user<input name="maxOpenTickets" type="number" min="1" max="20" value="1"></label>
-                    <label class="field">Auto-close after inactivity<input name="autoCloseHours" type="number" min="0" max="8760" value="0"><small>Hours. Set 0 to disable.</small></label>
-                    <label class="field span-2">Channel naming format<input name="namingFormat" required value="ticket-{username}"><small>Available: <code>{username}</code> <code>{type}</code> <code>{userId}</code></small></label>
+                <details class="surface advanced-settings">
+                  <summary><span><strong>Advanced ticket rules</strong><small>Optional permissions, transcripts, limits, and lifecycle controls.</small></span><b>Optional</b></summary>
+                  <div class="details-body">
+                    <div class="form-grid">
+                      <label class="field">Transcript channel override<select name="transcriptChannelId" data-channel-select="text"></select><span class="field-error" data-error-for="transcriptChannelId"></span></label>
+                      <label class="field">Ping roles on open<select name="pingRoleIds" data-role-select multiple size="5"></select></label>
+                      <label class="field">Allowed / community roles<select name="allowedRoleIds" data-role-select multiple size="5"></select><small>Leave empty to allow everyone except blocked roles.</small></label>
+                      <label class="field">Blocked roles<select name="blockedRoleIds" data-role-select multiple size="5"></select></label>
+                      <label class="field">Max open per user<input name="maxOpenTickets" type="number" min="1" max="20" value="1"></label>
+                      <label class="field">Auto-close after inactivity<input name="autoCloseHours" type="number" min="0" max="8760" value="0"><small>Hours. Set 0 to disable.</small></label>
+                      <label class="field span-2">Channel naming format<input name="namingFormat" required value="ticket-{username}"><small>Available: <code>{username}</code> <code>{type}</code> <code>{userId}</code></small></label>
+                    </div>
+                    <div class="option-grid">
+                      <label class="check-card"><input name="claimButtonEnabled" type="checkbox" checked><span><strong>Claim button</strong><small>Staff can take ownership.</small></span></label>
+                      <label class="check-card"><input name="closeButtonEnabled" type="checkbox" checked><span><strong>Close button</strong><small>Creator and staff can close.</small></span></label>
+                      <label class="check-card"><input name="closeReasonRequired" type="checkbox"><span><strong>Require close reason</strong><small>Shows a modal before closing.</small></span></label>
+                      <label class="check-card"><input name="requestCloseEnabled" type="checkbox"><span><strong>Close request button</strong><small>Opener/community asks staff. Staff can separately use <code>/close-request</code>.</small></span></label>
+                      <label class="field span-2">Close request delay (seconds)<input name="closeRequestDelaySeconds" type="number" min="0" max="86400" value="0"><small>Wait before deleting the channel after an accepted request.</small></label>
+                    </div>
                   </div>
-                  <div class="option-grid">
-                    <label class="check-card"><input name="claimButtonEnabled" type="checkbox" checked><span><strong>Claim button</strong><small>Staff can take ownership.</small></span></label>
-                    <label class="check-card"><input name="closeButtonEnabled" type="checkbox" checked><span><strong>Close button</strong><small>Creator and staff can close.</small></span></label>
-                    <label class="check-card"><input name="closeReasonRequired" type="checkbox"><span><strong>Require close reason</strong><small>Shows a modal before closing.</small></span></label>
-                    <label class="check-card"><input name="requestCloseEnabled" type="checkbox"><span><strong>Close request button</strong><small>Opener/community asks staff. Staff can separately use <code>/close-request</code> to ask the opener.</small></span></label>
-                    <label class="field span-2">Close request delay (seconds)<input name="closeRequestDelaySeconds" type="number" min="0" max="86400" value="0"><small>Wait before deleting the channel after an accepted request. The bot always allows at least 5 seconds for the final status message.</small></label>
-                  </div>
-                </section>
+                </details>
                 <input name="sortOrder" type="hidden" value="0">
                 <div class="sticky-actions ticket-save-actions">
                   <div id="ticket-save-status" class="form-save-status hidden" role="status" aria-live="polite"></div>
@@ -500,46 +538,68 @@
 
         <section class="page" id="page-branding">
           <div class="page-intro">
-            <div><span class="badge">Visual identity</span><h2>Appearance</h2><p>Set default branding, colors, images, and fallback embed settings.</p></div>
+            <div><span class="badge">Visual identity</span><h2>Appearance</h2><p>Set reusable colors, media, panel defaults, and see the result before saving.</p></div>
             <div class="topbar-actions"><button class="secondary-button" data-doc-topic="dashboard-guide">Appearance docs</button></div>
           </div>
-          <form id="branding-form" class="settings-layout">
-            <section class="surface form-section">
-              <div class="section-title"><div><span class="step">01</span><h3>Identity</h3></div></div>
-              <div class="form-grid">
-                <label class="field">Server / bot name<input name="serverName" maxlength="100" value="Odyssey Bot"></label>
-                <label class="field">Footer text<input name="footerText" maxlength="200"></label>
-                <label class="field">Embed icon<div class="media-control"><input name="embedIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedIconUrl">Upload</button></div></label>
+          <div class="builder-layout">
+            <form id="branding-form" class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Brand identity</h3><p>Used as reusable defaults across server messages.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Bot nickname in this server<input name="serverName" required maxlength="32" value="Odyssey Bot"><small>Saving updates Odyssey Bot's Discord nickname in the selected server. Discord requires Change Nickname permission.</small><span class="field-error" data-error-for="serverName"></span></label>
+                  <label class="field">Dashboard accent<div class="color-control"><input name="accentColor" type="color" value="#7785ff"><input name="accentColorText" value="#7785FF" maxlength="7"></div><small>Updates dashboard highlights for the active server.</small></label>
+                  <label class="field">Footer text<input name="footerText" maxlength="200" placeholder="Powered by Odyssey Bot"></label>
+                  <label class="field">Ticket button style<select name="ticketButtonStyle"><option value="secondary">Neutral gray</option><option value="primary">Discord blue</option><option value="success">Success green</option></select><small>Used by ticket panels displayed as buttons.</small></label>
+                  <label class="field span-2">Embed icon<div class="media-control"><input name="embedIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedIconUrl">Upload</button></div><span class="field-error" data-error-for="embedIconUrl"></span></label>
+                </div>
+              </section>
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">02</span><h3>Ticket panel defaults</h3><p>Fallback values for new and legacy ticket entry messages.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Panel title<input name="ticketPanelTitle" required maxlength="256" value="Support Tickets"><span class="field-error" data-error-for="ticketPanelTitle"></span></label>
+                  <label class="field">Embed color<div class="color-control"><input name="ticketPanelColor" type="color" value="#5865f2"><input name="ticketPanelColorText" value="#5865F2" maxlength="7"></div></label>
+                  <label class="field span-2">Panel description<textarea name="ticketPanelDescription" required rows="4">Choose a ticket type below to contact the team.</textarea><span class="field-error" data-error-for="ticketPanelDescription"></span></label>
+                  <label class="field span-2">Panel banner<div class="media-control"><input name="ticketPanelImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="ticketPanelImageUrl">Upload</button></div><span class="field-error" data-error-for="ticketPanelImageUrl"></span></label>
+                </div>
+              </section>
+              <details class="surface advanced-settings">
+                <summary><span><strong>Announcement defaults</strong><small>Fallback color and media for announcement templates.</small></span><b>Optional</b></summary>
+                <div class="details-body form-grid">
+                  <label class="field">Default color<div class="color-control"><input name="announcementDefaultColor" type="color" value="#5865f2"><input name="announcementDefaultColorText" value="#5865F2" maxlength="7"></div></label>
+                  <label class="field">Default image<div class="media-control"><input name="announcementDefaultImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="announcementDefaultImageUrl">Upload</button></div></label>
+                  <label class="field">Default thumbnail<div class="media-control"><input name="announcementDefaultThumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="announcementDefaultThumbnailUrl">Upload</button></div></label>
+                </div>
+              </details>
+              <div class="sticky-actions ticket-save-actions">
+                <div id="branding-save-status" class="form-save-status hidden" role="status" aria-live="polite"></div>
+                <button type="submit">Save appearance</button>
+                <button type="button" class="secondary-button" id="branding-reset">Reset defaults</button>
               </div>
-            </section>
-            <section class="surface form-section">
-              <div class="section-title"><div><span class="step">02</span><h3>Default media and colors</h3></div></div>
-              <div class="form-grid">
-                <label class="field">Ticket panel title<input name="ticketPanelTitle" maxlength="256" value="Support Tickets"></label>
-                <label class="field">Ticket panel description<textarea name="ticketPanelDescription" rows="3">Choose a ticket type below to contact the team.</textarea></label>
-                <label class="field">Ticket panel color<div class="color-control"><input name="ticketPanelColor" type="color" value="#5865f2"><input name="ticketPanelColorText" value="#5865F2" maxlength="7"></div></label>
-                <label class="field">Ticket panel banner<div class="media-control"><input name="ticketPanelImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="ticketPanelImageUrl">Upload</button></div></label>
-                <label class="field">Announcement default color<div class="color-control"><input name="announcementDefaultColor" type="color" value="#5865f2"><input name="announcementDefaultColorText" value="#5865F2" maxlength="7"></div></label>
-                <label class="field">Announcement default image<div class="media-control"><input name="announcementDefaultImageUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="announcementDefaultImageUrl">Upload</button></div></label>
-                <label class="field">Announcement default thumbnail<div class="media-control"><input name="announcementDefaultThumbnailUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="announcementDefaultThumbnailUrl">Upload</button></div></label>
-              </div>
-            </section>
-            <div class="sticky-actions"><button type="submit">Save appearance</button></div>
-          </form>
+            </form>
+            <aside class="preview-column">
+              <section class="surface preview-surface">
+                <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Default ticket panel</h3></div><span class="live-pill">Live</span></div>
+                <div id="branding-preview" class="discord-stage"></div>
+              </section>
+              <section class="surface media-preview-card">
+                <div class="section-title"><div><p class="eyebrow">Media check</p><h3>Logo and banner</h3></div></div>
+                <div id="branding-media-preview" class="media-preview-grid"></div>
+              </section>
+            </aside>
+          </div>
         </section>
 
         <section class="page" id="page-welcome">
           <div class="page-intro">
-            <div><span class="badge">New member experience</span><h2>Welcome Messages</h2><p>Greet new members with a custom message, embed, DM, and optional auto-role.</p></div>
+            <div><span class="badge">Member experience</span><h2>Welcome &amp; Goodbye</h2><p>Greet new members, assign safe auto-roles, and post a clear message when someone leaves.</p></div>
             <div class="topbar-actions"><button class="secondary-button" data-doc-topic="welcome-messages">Welcome docs</button></div>
           </div>
           <div class="builder-layout">
             <form id="welcome-form" class="builder-stack">
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">01</span><h3>Enable welcome</h3></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="section-title"><div><span class="step">01</span><h3>Enable welcome</h3></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                 <div class="form-grid">
                   <label class="field">Welcome channel<select name="channelId" data-channel-select="text"></select><small>Where the public welcome message is posted.</small></label>
-                  <label class="field">Auto-roles<select name="autoRoleIds" data-role-select multiple size="5"></select><small>Roles automatically added when a member joins.</small></label>
                 </div>
                 <div class="option-grid">
                   <label class="check-card"><input name="dmEnabled" type="checkbox"><span><strong>Send DM welcome</strong><small>Send a direct message to the new member.</small></span></label>
@@ -548,11 +608,15 @@
                 <label class="field">DM content<textarea name="dmContent" rows="3" maxlength="2000" placeholder="Welcome to {server}, {user}!"></textarea><small>Only used if DM welcome is enabled.</small></label>
               </section>
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">02</span><h3>Channel message</h3><p>Public welcome in the chosen channel.</p></div></div>
+                <div class="section-title"><div><span class="step">02</span><h3>Auto Roles</h3><p>Assign selected roles independently from welcome messages.</p></div><label class="switch"><input name="autoRolesEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
+                <label class="field">Roles assigned on join<select name="autoRoleIds" data-role-select multiple size="5"></select><small>Odyssey Bot needs Manage Roles and must sit above every selected role.</small><span class="field-error" data-error-for="autoRoleIds"></span></label>
+              </section>
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">03</span><h3>Channel message</h3><p>Public welcome in the chosen channel.</p></div></div>
                 <label class="field">Message text<textarea name="content" rows="3" maxlength="2000" placeholder="Welcome {user} to {server}! You are member #{memberCount}."></textarea><small>Variables: <code>{user}</code> <code>{username}</code> <code>{server}</code> <code>{memberCount}</code> <code>{createdAt}</code></small></label>
               </section>
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">03</span><h3>Embed design</h3><p>Optional embed shown alongside the welcome text.</p></div></div>
+                <div class="section-title"><div><span class="step">04</span><h3>Embed design</h3><p>Optional embed shown alongside the welcome text.</p></div></div>
                 <div class="form-grid">
                   <label class="field">Embed title<input name="embedTitle" maxlength="256" placeholder="Welcome to {server}"></label>
                   <label class="field">Embed color<div class="color-control"><input name="embedColor" type="color" value="#5865f2"><input name="embedColorText" value="#5865F2" maxlength="7"></div></label>
@@ -562,7 +626,22 @@
                   <label class="field span-2">Footer text<input name="embedFooterText" maxlength="2048" placeholder="Member #{memberCount}"></label>
                 </div>
               </section>
-              <div class="sticky-actions"><button type="submit">Save welcome settings</button></div>
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">05</span><h3>Goodbye message</h3><p>Post when a human member leaves. This does not DM the departing member.</p></div><label class="switch"><input name="goodbyeEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
+                <div class="form-grid">
+                  <label class="field">Goodbye channel<select name="goodbyeChannelId" data-channel-select="text"></select><small>Saved per server. The bot needs View Channel and Send Messages.</small></label>
+                  <label class="check-card"><input name="goodbyeEmbedEnabled" type="checkbox"><span><strong>Use the welcome embed design</strong><small>Reuses the title, description, color, and media above with goodbye variables.</small></span></label>
+                  <label class="field span-2">Goodbye message<textarea name="goodbyeContent" rows="3" maxlength="2000" placeholder="{user_name} has left {server_name}."></textarea><small>Useful variables: <code>{user_name}</code> <code>{user_id}</code> <code>{server_name}</code> <code>{server_member_count}</code> <code>{user_avatar}</code></small></label>
+                </div>
+              </section>
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">06</span><h3>Server boost message</h3><p>Celebrate when a member starts boosting this server.</p></div><label class="switch"><input name="boostEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
+                <div class="form-grid">
+                  <label class="field">Boost channel<select name="boostChannelId" data-channel-select="text"></select><small>The bot needs View Channel and Send Messages.</small><span class="field-error" data-error-for="boostChannelId"></span></label>
+                  <label class="field span-2">Message template<textarea name="boostMessage" rows="3" maxlength="2000">Thank you {user} for boosting {server}! We now have {boostCount} boosts and are at {tier}.</textarea><small>Variables: <code>{user}</code> <code>{server}</code> <code>{boostCount}</code> <code>{tier}</code></small><span class="field-error" data-error-for="boostMessage"></span></label>
+                </div>
+              </section>
+              <div class="sticky-actions"><button type="submit">Save member messages</button></div>
             </form>
             <aside class="preview-column">
               <section class="surface preview-surface">
@@ -570,6 +649,18 @@
                 <div id="welcome-preview" class="discord-stage"></div>
                 <div class="test-row"><select id="welcome-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="welcome-test">Send test</button></div>
                 <p class="microcopy">Test sends a preview to the selected channel. Auto-roles are not applied in test mode.</p>
+              </section>
+              <section class="surface preview-surface">
+                <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Goodbye message</h3></div><span class="live-pill">Live</span></div>
+                <div id="goodbye-preview" class="discord-stage"></div>
+                <div class="test-row"><select id="goodbye-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="goodbye-test">Send test</button></div>
+                <p class="microcopy">The preview uses sample member data and never removes a real member.</p>
+              </section>
+              <section class="surface preview-surface">
+                <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Boost message</h3></div><span class="live-pill">Live</span></div>
+                <div id="boost-preview" class="discord-stage"></div>
+                <div class="test-row"><select id="boost-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="boost-test">Send test</button></div>
+                <p class="microcopy">Discord requires the Server Members Intent to detect boost status changes.</p>
               </section>
             </aside>
           </div>
@@ -584,7 +675,7 @@
             <div class="security-view active" id="security-view-anti-raid">
             <form id="anti-raid-form" class="builder-stack">
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">01</span><h3>Anti-raid</h3><p>Detect and respond to suspicious join waves.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="section-title"><div><span class="step">01</span><h3>Anti-raid</h3><p>Detect and respond to suspicious join waves.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                 <div class="form-grid">
                   <label class="field">Join threshold<input name="joinThreshold" type="number" min="1" max="1000" value="10"><small>Number of joins within the time window to trigger.</small></label>
                   <label class="field">Time window (seconds)<input name="timeWindowSeconds" type="number" min="1" max="3600" value="60"></label>
@@ -606,7 +697,7 @@
             <div class="security-view" id="security-view-anti-nuke">
             <form id="anti-nuke-form" class="builder-stack">
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">02</span><h3>Anti-nuke</h3><p>Monitor dangerous administrative actions and respond to abuse.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="section-title"><div><span class="step">02</span><h3>Anti-nuke</h3><p>Monitor dangerous administrative actions and respond to abuse.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                 <div class="form-grid">
                   <label class="field">Channel delete threshold<input name="channelDeleteThreshold" type="number" min="1" max="100" value="5"></label>
                   <label class="field">Channel create threshold<input name="channelCreateThreshold" type="number" min="1" max="100" value="5"></label>
@@ -631,7 +722,7 @@
             <div class="security-view" id="security-view-anti-role">
               <form id="anti-role-form" class="builder-stack">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">03</span><h3>Role Protection</h3><p>Watch dangerous permissions, protected roles, renames, deletions, and rapid role changes.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                  <div class="section-title"><div><span class="step">03</span><h3>Role Protection</h3><p>Watch dangerous permissions, protected roles, renames, deletions, and rapid role changes.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                   <div class="inline-alert"><strong>Start with Log only.</strong> Test in a private server before enabling timeouts, kicks, or bans. The bot never punishes itself or the server owner.</div>
                   <div class="form-grid">
                     <label class="field">Protected roles<select name="protectedRoleIds" data-role-select multiple size="7"></select><small>Assignments and changes to these roles are treated as high-risk.</small><span class="field-error" data-error-for="protectedRoleIds"></span></label>
@@ -649,10 +740,10 @@
             <div class="security-view security-full-span" id="security-view-verification">
               <form id="verification-form" class="builder-stack">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">04</span><h3>Anti-alt verification</h3><p>Confirm Discord identity with a transparent consent flow. Members see a disclosure before any checks run.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                  <div class="section-title"><div><span class="step">04</span><h3>Discord member verification</h3><p>Confirm Discord identity and server membership with a transparent consent flow.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                   <div class="privacy-disclosure">
                     <strong>Privacy-first design</strong>
-                    <p>Odyssey Bot checks Discord account age, server membership, and optional network risk signals. Only salted risk records with reason codes are stored. Raw technical data is never shown to server staff. All records expire automatically.</p>
+                    <p>Odyssey Bot checks Discord account age, server membership, and optional VPN/proxy risk signals. It does not fingerprint devices or claim to detect alternate accounts. Records contain only the Discord user ID, result, reason codes, and expiry data.</p>
                   </div>
                   <div id="verification-provider-status" class="provider-status-grid"></div>
                   <div class="form-grid">
@@ -665,7 +756,6 @@
                   <div class="option-grid">
                     <label class="check-card"><input name="vpnCheckEnabled" type="checkbox"><span><strong>VPN / proxy check</strong><small>Disabled unless VPN provider env vars are set.</small></span></label>
                     <label class="check-card"><input name="vpnFailClosed" type="checkbox"><span><strong>Fail if VPN check unavailable</strong><small>Leave off to avoid blocking during outages.</small></span></label>
-                    <label class="check-card"><input name="deviceCheckEnabled" type="checkbox"><span><strong>Device consistency check</strong><small>Flags if the same device hash appears for another account in this server. Only a salted hash is stored, never raw device data.</small></span></label>
                     <label class="field">Record retention (hours)<input name="recordRetentionHours" type="number" min="1" max="8760" value="168"></label>
                   </div>
                 </section>
@@ -696,8 +786,11 @@
 
           <div class="automation-view active" id="automation-view-auto-mod">
             <form id="auto-mod-form" class="settings-layout">
+              <section id="automod-diagnostics" class="surface diagnostics-panel" aria-live="polite">
+                <div class="section-title"><div><span class="step">Check</span><h3>Discord readiness</h3><p>Checking intents and permissions for this server…</p></div></div>
+              </section>
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">01</span><h3>Auto Mod rules</h3><p>Choose exactly what the bot should detect. Administrators are ignored automatically.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span>Enabled</label></div>
+                <div class="section-title"><div><span class="step">01</span><h3>Auto Mod rules</h3><p>Choose exactly what the bot should detect. Administrators are ignored automatically.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                 <div class="option-grid">
                   <label class="check-card"><input name="blockInvites" type="checkbox"><span><strong>Discord invites</strong><small>Detect discord.gg and Discord invite URLs.</small></span></label>
                   <label class="check-card"><input name="alwaysBlockDiscordInvites" type="checkbox" checked><span><strong>Always block Discord invites</strong><small>Invite links stay blocked even in channels that allow other domains.</small></span></label>
@@ -712,7 +805,9 @@
                   <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select><small>Falls back to the global mod log.</small></label>
                   <label class="field">Caps threshold (%)<input name="capsPercentage" type="number" min="50" max="100" value="75"></label>
                   <label class="field">Repeated message threshold<input name="spamThreshold" type="number" min="2" max="20" value="4"></label>
-                  <label class="field">Mention threshold<input name="mentionThreshold" type="number" min="2" max="50" value="5"></label>
+                  <label class="field">Mentions in one message<input name="mentionThreshold" type="number" min="2" max="50" value="5"><small>Users and roles combined.</small></label>
+                  <label class="field">Repeated pings to one user<input name="mentionSpamThreshold" type="number" min="2" max="20" value="3"><small>Counts across all non-exempt channels.</small></label>
+                  <label class="field">Repeated-ping window (seconds)<input name="mentionWindowSeconds" type="number" min="5" max="3600" value="30"></label>
                   <label class="field">Timeout length (minutes)<input name="timeoutMinutes" type="number" min="1" max="40320" value="10"></label>
                   <label class="field">Channels exempt from non-link rules<select name="ignoredChannelIds" data-channel-select="text" multiple size="6"></select><small>Skips caps, repeated spam, and mass mentions. Link rules below still apply.</small></label>
                   <label class="field">Ignored roles<select name="ignoredRoleIds" data-role-select multiple size="6"></select></label>
@@ -731,7 +826,7 @@
               <form id="role-panel-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Button role panel</h3><p>Members click a button to add or remove one of the approved roles.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span>Active</label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Button role panel</h3><p>Members click a button to add or remove one of the approved roles.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
                   <div class="form-grid">
                     <label class="field">Panel name<input name="name" required maxlength="100" placeholder="Community Roles"></label>
                     <label class="field">Post channel<select name="channelId" data-channel-select="text"></select></label>
@@ -755,7 +850,7 @@
               <form id="sticky-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Sticky message</h3><p>After channel activity, the bot moves this notice back to the bottom.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span>Enabled</label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Sticky message</h3><p>After channel activity, the bot moves this notice back to the bottom.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span><strong class="switch-state">Enabled</strong></label></div>
                   <div class="form-grid">
                     <label class="field">Channel<select name="channelId" data-channel-select="text" required></select><span class="field-error" data-error-for="channelId"></span></label>
                     <label class="field">Minimum repost delay (seconds)<input name="minIntervalSeconds" type="number" min="10" max="3600" value="30"><small>Higher values reduce bot noise in busy channels.</small></label>
@@ -776,7 +871,7 @@
               <form id="scheduled-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Scheduled announcement</h3><p>Schedule an existing announcement template. Test sends never include pings.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span>Enabled</label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Scheduled announcement</h3><p>Schedule an existing announcement template. Test sends never include pings.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span><strong class="switch-state">Enabled</strong></label></div>
                   <div class="form-grid">
                     <label class="field">Schedule name<input name="name" required maxlength="100" placeholder="Weekly Update"></label>
                     <label class="field">Announcement template<select name="announcementTemplateId" data-announcement-select required></select></label>
@@ -802,6 +897,19 @@
             <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run Odyssey Bot, from first setup to troubleshooting.</p></div>
             <div class="topbar-actions"><input type="search" id="docs-search" placeholder="Search docs..."></div>
           </div>
+          <section class="docs-hero surface">
+            <div>
+              <p class="eyebrow">Start from GitHub</p>
+              <h3>Download, configure, and launch Odyssey Bot</h3>
+              <p>The guide uses the real scripts from this repository and keeps every secret in your local <code>.env</code> file.</p>
+            </div>
+            <div class="docs-hero-actions">
+              <button type="button" data-doc-topic="quick-start">Open Quick Start</button>
+              <button type="button" class="secondary-button" data-doc-topic="setup">Full setup guide</button>
+              <button type="button" class="secondary-button" data-doc-topic="railway-hosting">Railway hosting</button>
+            </div>
+            <div class="docs-command-strip"><code>git clone &lt;YOUR_GITHUB_REPO_URL&gt;</code><code>pnpm install</code><code>pnpm dev</code></div>
+          </section>
           <div class="docs-browser">
             <aside class="surface docs-topic-panel">
               <div class="section-title"><div><p class="eyebrow">Knowledge base</p><h3>Topics</h3></div></div>
@@ -1243,6 +1351,13 @@
         </section>
       </main>
     </div>
+    <aside id="unsaved-bar" class="unsaved-bar hidden" role="alert" aria-live="polite">
+      <div><strong>Careful, you have unsaved changes</strong><span id="unsaved-copy">Save or discard them before leaving this page.</span></div>
+      <div class="unsaved-actions">
+        <button type="button" class="secondary-button" id="discard-changes">Discard</button>
+        <button type="button" id="save-changes">Save changes</button>
+      </div>
+    </aside>
     <div id="toast" class="global-notice" role="status" aria-live="polite"></div>
   </body>
 </html>

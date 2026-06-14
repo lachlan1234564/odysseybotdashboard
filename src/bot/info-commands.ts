@@ -2,7 +2,7 @@ import {
   ChatInputCommandInteraction,
   EmbedBuilder,
   GuildMember,
-  AttachmentBuilder
+  PermissionFlagsBits
 } from "discord.js";
 import {
   getAutoModSettings,
@@ -17,59 +17,9 @@ import {
 import type { AutoModSettings } from "../shared/types.js";
 import { renderEmbedMessage } from "./messages.js";
 import { emptyEmbedConfig } from "../shared/types.js";
-import { replacePlaceholders } from "../shared/placeholders.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
-
-export async function handleBotHelp(interaction: ChatInputCommandInteraction): Promise<void> {
-  const embed = new EmbedBuilder()
-    .setColor(0x5865F2)
-    .setTitle("Odyssey Bot commands")
-    .setDescription("Here are all available commands grouped by what they do.");
-
-  const groups: Record<string, Array<{ name: string; description: string }>> = {
-    "Info": [
-      { name: "/ping", description: "Check that Odyssey Bot is online and responsive." },
-      { name: "/bot-help", description: "Show this command list." },
-      { name: "/server-info", description: "View server stats and bot setup status." },
-      { name: "/user-info", description: "View a user's account age, join date, roles, and warnings." }
-    ],
-    "Tickets": [
-      { name: "/ticket-panel", description: "Post a saved ticket panel." },
-      { name: "/close-request", description: "Staff: ask to close a ticket." }
-    ],
-    "Announcements & Socials": [
-      { name: "/announce", description: "Preview and publish a saved announcement template." },
-      { name: "/socials-post", description: "Publish the configured social promotion embed." }
-    ],
-    "Roles & Automation": [
-      { name: "/reaction-roles", description: "Post a self-service role panel." },
-      { name: "/automod-status", description: "View current Auto Mod rules and link settings." }
-    ],
-    "Commands": [
-      { name: "/custom", description: "Run a dashboard-created custom command." }
-    ],
-    "Moderation": [
-      { name: "/warn", description: "Warn a member." },
-      { name: "/warnings", description: "View warnings for a member." },
-      { name: "/timeout", description: "Timeout a member." },
-      { name: "/kick", description: "Kick a member." },
-      { name: "/ban", description: "Ban a member." },
-      { name: "/clear", description: "Bulk-delete recent messages." }
-    ]
-  };
-
-  for (const [group, commands] of Object.entries(groups)) {
-    embed.addFields({
-      name: group,
-      value: commands.map((c) => `**${c.name}** — ${c.description}`).join("\n"),
-      inline: false
-    });
-  }
-
-  embed.setFooter({ text: `Running in ${interaction.guild?.name ?? "a server"}` });
-
-  await interaction.reply({ embeds: [embed], ephemeral: true });
-}
+import { requireBotAdmin } from "./utils.js";
+import { friendlyDiscordError, logDiscordError } from "../shared/logging.js";
 
 export async function handleServerInfo(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guild) {
@@ -93,6 +43,7 @@ export async function handleServerInfo(interaction: ChatInputCommandInteraction)
 
   const features: string[] = [];
   if (welcome.enabled) features.push("Welcome messages");
+  if (welcome.goodbyeEnabled) features.push("Goodbye messages");
   if (antiRaid.enabled) features.push("Anti-raid");
   if (antiNuke.enabled) features.push("Anti-nuke");
   if (customCommands.length > 0) features.push(`${customCommands.length} custom commands`);
@@ -125,19 +76,10 @@ export async function handleUserInfo(interaction: ChatInputCommandInteraction): 
   const user = member.user;
   const warnings = await listWarnings(interaction.guildId!, user.id);
 
-  const roles = member.roles instanceof Map
-    ? [...member.roles.values()]
-    : Array.isArray(member.roles)
-      ? []
-      : member.roles.cache;
-
-  const roleNames = (Array.isArray(roles)
-    ? roles
-    : [...roles.values()]
-  )
-    .filter((r) => "id" in r && r.id !== interaction.guildId)
-    .sort((a, b) => ("position" in b ? b.position : 0) - ("position" in a ? a.position : 0))
-    .map((r) => "name" in r ? r.name : String(r))
+  const roleNames = [...member.roles.cache.values()]
+    .filter((role) => role.id !== interaction.guildId)
+    .sort((a, b) => b.position - a.position)
+    .map((role) => role.name)
     .join(", ") || "No roles";
 
   const embed = new EmbedBuilder()
@@ -162,6 +104,7 @@ export async function handleAutomodStatus(interaction: ChatInputCommandInteracti
     await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
     return;
   }
+  if (!(await requireBotAdmin(interaction))) return;
 
   const settings = await getAutoModSettings(interaction.guildId);
   const embed = new EmbedBuilder()
@@ -208,10 +151,11 @@ export async function handleAutomodStatus(interaction: ChatInputCommandInteracti
 }
 
 export async function handleSocialsPost(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (!interaction.guildId) {
+  if (!interaction.guildId || !interaction.guild) {
     await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
     return;
   }
+  if (!(await requireBotAdmin(interaction))) return;
 
   const socials = await getSocialPromotionSettings(interaction.guildId);
   const channelOption = interaction.options.getChannel("channel");
@@ -236,39 +180,65 @@ export async function handleSocialsPost(interaction: ChatInputCommandInteraction
     return;
   }
 
+  const botMember = interaction.guild.members.me ?? await interaction.guild.members.fetchMe();
+  const permissions = "permissionsFor" in targetChannel
+    ? targetChannel.permissionsFor(botMember)
+    : null;
+  const requiredPermissions = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    ...(socials.outputMode === "embed" ? [PermissionFlagsBits.EmbedLinks] : [])
+  ];
+  const missingPermissions = requiredPermissions.filter((permission) => !permissions?.has(permission));
+  if (missingPermissions.length > 0) {
+    await interaction.reply({
+      content: "Odyssey Bot cannot post there. Check View Channel, Send Messages, and Embed Links permissions.",
+      ephemeral: true
+    });
+    return;
+  }
+
   const linkLines = socials.links.map((link) => `[${link.label}](${link.url})`).join("\n");
   const memberLines = socials.memberEntries.map((link) => `[${link.label}](${link.url})`).join("\n");
 
-  const files: AttachmentBuilder[] = [];
-  if (socials.outputMode === "plain") {
-    const plain = [
-      socials.title,
-      socials.description,
-      ...socials.links.map((link) => `${link.label}: ${link.url}`),
-      ...socials.memberEntries.map((link) => `${link.label}: ${link.url}`)
-    ].filter(Boolean).join("\n\n");
-    await targetChannel.send(plain);
-  } else {
-    const rendered = renderEmbedMessage({
-      ...emptyEmbedConfig(),
-      title: socials.title,
-      description: socials.description,
-      color: socials.color,
-      imageUrl: socials.imageUrl,
-      thumbnailUrl: socials.thumbnailUrl,
-      fields: [
-        ...(linkLines ? [{ name: "Official socials", value: linkLines, inline: false }] : []),
-        ...(memberLines ? [{ name: "Community and members", value: memberLines, inline: false }] : [])
-      ]
-    }, buildDiscordPlaceholders({
-      guild: interaction.guild!,
-      user: interaction.user,
-      target: interaction.user
-    }));
-    await targetChannel.send({
-      ...rendered,
-      files: rendered.files ?? undefined
+  try {
+    if (socials.outputMode === "plain") {
+      const plain = [
+        socials.title,
+        socials.description,
+        ...socials.links.map((link) => `${link.label}: ${link.url}`),
+        ...socials.memberEntries.map((link) => `${link.label}: ${link.url}`)
+      ].filter(Boolean).join("\n\n");
+      await targetChannel.send(plain);
+    } else {
+      const rendered = renderEmbedMessage({
+        ...emptyEmbedConfig(),
+        title: socials.title,
+        description: socials.description,
+        color: socials.color,
+        imageUrl: socials.imageUrl,
+        thumbnailUrl: socials.thumbnailUrl,
+        fields: [
+          ...(linkLines ? [{ name: "Official socials", value: linkLines, inline: false }] : []),
+          ...(memberLines ? [{ name: "Community and members", value: memberLines, inline: false }] : [])
+        ]
+      }, buildDiscordPlaceholders({
+        guild: interaction.guild,
+        user: interaction.user,
+        target: interaction.user
+      }));
+      await targetChannel.send({
+        ...rendered,
+        files: rendered.files ?? undefined
+      });
+    }
+  } catch (error) {
+    logDiscordError("Social promotion post failed", error);
+    await interaction.reply({
+      content: friendlyDiscordError(error, "Could not post the social promotion"),
+      ephemeral: true
     });
+    return;
   }
 
   await interaction.reply({

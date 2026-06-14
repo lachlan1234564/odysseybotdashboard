@@ -1,6 +1,8 @@
 # Verification process
 
-Odyssey Bot includes a transparent anti-alt verification system. This doc explains the full flow — from admin setup through to what the verified member sees.
+Odyssey Bot includes an optional Discord identity and membership verification flow. It can confirm who authorized the link, whether that Discord user belongs to the selected server, and whether configured account-age rules pass.
+
+It cannot reliably detect alternate accounts. The flow does not fingerprint browsers or devices.
 
 ---
 
@@ -64,7 +66,6 @@ Fields:
 | Min server time (days) | 0 | Flags members newer than this |
 | VPN/proxy check | Off | Requires provider env vars |
 | Fail if VPN check unavailable | Off | Block if the VPN provider is down |
-| Device consistency check | Off | Flag if same device hash appears for another account |
 | Record retention (hours) | 168 | Auto-delete old records after this time |
 
 **Action modes:**
@@ -86,10 +87,10 @@ Click **Create link** on the dashboard. A new link appears (expires in 24 hours)
 When the member opens the verification link (`https://verify.YOUR_DOMAIN.com/verify/<token>`), they see a page with:
 
 > **What happens during verification**
-> This server uses verification to reduce raids and alternate-account abuse. Verification may check your Discord account age, server membership, network risk, and device consistency signals.
+> This server uses verification to confirm your Discord identity and server membership. It may also check account age and optional VPN/proxy risk signals.
 >
 > **What is stored**
-> A salted risk record with reason codes (e.g. "new Discord account", "VPN detected"), a limited-time risk score, and your Discord user ID. No raw technical data is shown to server staff.
+> Your Discord user ID, a limited-time result, reason codes (for example, "new Discord account"), an optional risk score, and expiry data.
 >
 > **What is not stored**
 > No raw IP addresses, no browser fingerprints, no device identifiers, and no personal information beyond what Discord already shares.
@@ -113,7 +114,6 @@ After authorizing, the callback runs these checks in order:
 3. **Account age** — derived from the Discord Snowflake ID (no API call needed). Flagged if below `minAccountAgeDays`.
 4. **Server join time** — checked via the guild member endpoint. Flagged if below `minServerDays`.
 5. **VPN/proxy check** (optional) — only runs if provider env vars are configured and the toggle is on.
-6. **Device consistency check** (optional) — only runs if the toggle is on. Computes an HMAC-SHA256 hash from partial User-Agent + first 2 IP octets, salted with a server-side secret. Only the hash is stored. If the same hash exists for another Discord user in this server, it's flagged as a possible alt.
 
 ### Step 4: Result
 
@@ -143,7 +143,6 @@ The dashboard **Security → Verification** page shows a table of recent verific
 | Reasons | `new_discord_account, vpn_proxy_detected` |
 | Risk score | `70` |
 | VPN | `Yes` / `No` / `N/A` |
-| Device | `Recorded` / `N/A` |
 | Verified | timestamp |
 | Expires | timestamp |
 
@@ -159,7 +158,6 @@ Records auto-expire based on the retention setting. No raw technical data is eve
 | `recent_server_member` | +20 | Joined server less than `minServerDays` ago |
 | `vpn_proxy_detected` | +40 | VPN/proxy provider flagged the IP |
 | `vpn_check_unavailable` | +30 | VPN check failed and `vpnFailClosed` is on |
-| `device_match_other_account` | +50 | Same device hash seen for another user in this guild |
 
 ---
 
@@ -179,7 +177,7 @@ Records auto-expire based on the retention setting. No raw technical data is eve
 ## Privacy summary
 
 - Raw IP addresses are **never stored**. The VPN check sends the IP to the provider but does not persist it.
-- Raw browser/device data is **never stored**. Only an HMAC-SHA256 hash is saved, and it is salted with a server-side secret.
+- Browser/device fingerprints and device-derived hashes are **not collected or stored**.
 - No hidden tracking. The consent page is shown before any checks run.
 - All records expire automatically.
 - Secrets (`DISCORD_CLIENT_SECRET`, `VPN_CHECK_API_KEY`, `DASHBOARD_PASSWORD`) are redacted from all server logs.

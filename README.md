@@ -2,7 +2,7 @@
 
 Odyssey Bot is a modular Discord administration bot built with TypeScript, discord.js v14, a password-protected web dashboard, and a shared database. Use SQLite for local development or PostgreSQL when deploying to Railway.
 
-This README is a quick reference. For detailed, beginner-friendly guides, see the [docs/](docs/) folder:
+This README is a quick reference. The same beginner-friendly guides below are rendered inside the authenticated dashboard under **Docs / Help**, which is the easiest place to read them:
 
 - **[Setup and Railway deployment](docs/SETUP.md)** — Get the bot running from scratch.
 - **[Dashboard and feature guide](docs/DASHBOARD-GUIDE.md)** — Learn every dashboard page and feature.
@@ -60,10 +60,9 @@ The bot and dashboard share the same TypeScript config and database layer.
 |---------|----------------|--------------|
 | `/ping` | Everyone | Confirm the bot is online and show gateway latency |
 | `/help` | Everyone | List commands by category with permission labels |
-| `/bot-help` | Everyone | List all commands grouped by category |
 | `/server-info` | Everyone | View server stats and bot setup overview |
 | `/user-info member` | Everyone | View account age, join date, roles, and warnings |
-| `/automod-status` | Everyone | View current Auto Mod rules and link settings |
+| `/automod-status` | Bot admins | View current Auto Mod rules and link settings |
 | `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |
 | `/bot-status` | Everyone | View bot uptime, latency, memory, and server count |
 | `/custom name [text] [reason] [target]` | Configurable per command | Run a dashboard-created command |
@@ -71,8 +70,8 @@ The bot and dashboard share the same TypeScript config and database layer.
 | `/reaction-roles panel [channel]` | Bot admins | Post a saved self-service role panel |
 | `/announce template [channel]` | Bot admins | Preview and confirm an announcement |
 | `/close-request [reason]` | Ticket staff | Ask the ticket opener/community to approve closure |
-| `/lockdown [channel]` | Administrator | Lock text channels — prevent @everyone from sending messages |
-| `/unlockdown [channel]` | Administrator | Unlock channels after a lockdown |
+| `/lockdown [channel]` | Bot admins | Lock text channels — prevent @everyone from sending messages |
+| `/unlockdown [channel]` | Bot admins | Unlock channels after a lockdown |
 | `/warn member reason` | Moderate Members | Store a warning |
 | `/warnings member` | Moderate Members | Show recent warnings |
 | `/timeout member minutes [reason]` | Moderate Members | Time out a member |
@@ -87,6 +86,7 @@ The bot and dashboard share the same TypeScript config and database layer.
 - **Announcements:** Save embed or plain-text templates with a preview-and-confirm flow in Discord.
 - **Social Promotion:** Build and publish guild-specific embed or plain-text social directories with safe links, uploads, and live preview.
 - **Automation:** Configure channel-specific link policies, invite blocking, role panels, sticky messages, and scheduled announcements.
+- **Member messages:** Configure public welcomes, optional DMs, safe auto-roles, and goodbye messages.
 - **Security:** Configure anti-raid, anti-nuke, role protection, and optional privacy-conscious Discord OAuth member verification.
 - **Moderation:** View warnings and recorded actions.
 - **Server Settings:** Configure channels, categories, staff roles, admin roles, and muted role.

@@ -5,11 +5,13 @@ Ticket types define what happens after a member chooses an option on a ticket pa
 ## Create a type
 
 1. Open **Tickets > Ticket Types** in the sidebar.
-2. Enter a label, optional emoji, and short menu description.
-3. Choose the Discord category where new channels should be created.
-4. Select staff roles that can view, write, claim, and close these tickets.
-5. Optionally choose roles to ping when a ticket opens.
+2. Enter a name and short description.
+3. Open the emoji selector and choose a standard emoji or an emoji from the selected Discord server.
+4. Choose the Discord category where new channels should be created.
+5. Select staff roles that can view, write, claim, and close these tickets.
 6. Design the welcome embed and save the type.
+
+The common settings stay visible. Less frequently used permissions, transcript overrides, limits, pings, and automatic closing are under **Advanced ticket rules**.
 
 ## Access rules
 
@@ -19,6 +21,8 @@ Ticket types define what happens after a member chooses an option on a ticket pa
 - Staff roles receive view, send, and history permissions.
 
 ## Lifecycle controls
+
+Open **Advanced ticket rules** to configure these options:
 
 - **Max open per user** limits duplicate active tickets of this type.
 - **Channel naming format** supports `{username}`, `{type}`, and `{userId}`.
@@ -30,4 +34,4 @@ Ticket types define what happens after a member chooses an option on a ticket pa
 
 ## Logging
 
-Choose a transcript/log channel override on the type, or use the default ticket log channel from **Server Settings**. The MVP logs lifecycle metadata; it does not yet create a full message transcript file.
+Choose a transcript/log channel override on the type, or use the default ticket log channel from **Server Settings**. When configured, the bot exports the newest 100 ticket messages when the ticket closes.

@@ -1,10 +1,8 @@
 import {
   ChatInputCommandInteraction,
   EmbedBuilder,
-  ChannelType,
-  PermissionFlagsBits
+  ChannelType
 } from "discord.js";
-import { getGuildSettings } from "../database/index.js";
 import { requireBotAdmin } from "./utils.js";
 
 export async function handleLockdown(interaction: ChatInputCommandInteraction): Promise<void> {

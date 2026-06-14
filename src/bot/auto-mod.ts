@@ -5,82 +5,145 @@ import {
   getGuildSettings,
   recordModerationAction
 } from "../database/index.js";
-import type { AutoModSettings } from "../shared/types.js";
-import { domainMatches, extractMessageDomains } from "../shared/domains.js";
+import { getCachedAutoModSettings } from "../shared/auto-mod-cache.js";
+import { claimIncidentCooldown, deleteIncidentMessages } from "../shared/auto-mod-incidents.js";
+import {
+  createAutoModRuleState,
+  enabledAutoModRules,
+  evaluateAutoModMessage,
+  type AutoModIncidentMessage,
+  type AutoModMessageSnapshot
+} from "../shared/auto-mod-rules.js";
 import { buildActionLogEmbed, sendGuildLog } from "./utils.js";
 
-const recentMessages = new Map<string, Array<{ content: string; timestamp: number }>>();
-const invitePattern = /(?:https?:\/\/)?(?:www\.)?(?:discord\.gg|discord(?:app)?\.com\/invite)\/[a-z0-9-]+/i;
-const suspiciousLinkPattern = /https?:\/\/(?:(?:\d{1,3}\.){3}\d{1,3}|[^/\s]*xn--|(?:bit\.ly|tinyurl\.com|t\.co|cutt\.ly|is\.gd)\/)/i;
+const ruleState = createAutoModRuleState();
+const dmCooldowns = new Map<string, number>();
 
-function ignored(message: Message, settings: AutoModSettings): boolean {
-  if (!message.guild || !message.member) return true;
-  if (settings.ignoredUserIds.includes(message.author.id)) return true;
-  if (message.member.permissions.has(PermissionFlagsBits.Administrator)) return true;
-  return message.member.roles.cache.some((role) => settings.ignoredRoleIds.includes(role.id));
+function snapshot(message: Message): AutoModMessageSnapshot {
+  return {
+    messageId: message.id,
+    guildId: message.guildId!,
+    channelId: message.channelId,
+    authorId: message.author.id,
+    roleIds: [...message.member!.roles.cache.keys()],
+    isAdministrator: message.member!.permissions.has(PermissionFlagsBits.Administrator),
+    content: message.content,
+    mentionedUserIds: [...message.mentions.users.keys()],
+    mentionedRoleIds: [...message.mentions.roles.keys()],
+    timestamp: message.createdTimestamp
+  };
 }
 
-function isExcessiveCaps(content: string, threshold: number): boolean {
-  const letters = content.match(/[a-z]/gi) ?? [];
-  if (letters.length < 12) return false;
-  const uppercase = content.match(/[A-Z]/g)?.length ?? 0;
-  return (uppercase / letters.length) * 100 >= threshold;
+function debugDecision(input: {
+  message: AutoModMessageSnapshot;
+  enabledRules: string[];
+  skippedReason?: string | null;
+  matchedRule?: string | null;
+  action?: string;
+  actionResult?: string;
+  logResult?: string;
+  latencyMs?: number;
+}): void {
+  console.info([
+    "[AutoMod]",
+    `guild=${input.message.guildId}`,
+    `channel=${input.message.channelId}`,
+    `author=${input.message.authorId}`,
+    `enabledRules=${input.enabledRules.join(",") || "none"}`,
+    `skipped=${input.skippedReason || "none"}`,
+    `matched=${input.matchedRule || "none"}`,
+    `action=${input.action || "none"}`,
+    `result=${input.actionResult || "none"}`,
+    `log=${input.logResult || "not-attempted"}`,
+    input.latencyMs === undefined ? "" : `latencyMs=${input.latencyMs.toFixed(1)}`
+  ].filter(Boolean).join(" "));
 }
 
-function isRepeatedSpam(message: Message, threshold: number): boolean {
-  const key = `${message.guildId}:${message.author.id}`;
-  const cutoff = Date.now() - 12_000;
-  const normalized = message.content.trim().toLowerCase().replace(/\s+/g, " ");
-  const entries = (recentMessages.get(key) ?? []).filter((entry) => entry.timestamp >= cutoff);
-  entries.push({ content: normalized, timestamp: Date.now() });
-  recentMessages.set(key, entries);
-  return normalized.length > 0 && entries.filter((entry) => entry.content === normalized).length >= threshold;
+async function deleteMessage(message: Message): Promise<string> {
+  if (!message.deletable) {
+    return "delete failed: missing Manage Messages or channel access";
+  }
+  return message.delete()
+    .then(() => "message deleted")
+    .catch((error: Error) => `delete failed: ${error.name}`);
 }
 
-export function detectAutoModRule(message: Message, settings: AutoModSettings): string | null {
-  const content = message.content;
-  const channelRule = settings.linkChannelRules.find((rule) => rule.channelId === message.channelId);
-  const domains = extractMessageDomains(content);
-  const isAllowed = (domain: string) => channelRule?.allowedDomains.some((rule) => domainMatches(domain, rule)) ?? false;
-  const blockedDomain = domains.find((domain) =>
-    channelRule?.blockedDomains.some((rule) => domainMatches(domain, rule))
-  );
-  const hasInvite = invitePattern.test(content);
+async function deleteRepeatedPingMessages(
+  message: Message,
+  entries: AutoModIncidentMessage[]
+): Promise<{ deleted: number; channels: string[]; failed: number }> {
+  return deleteIncidentMessages(entries, async (entry) => {
+    const channel = message.guild!.channels.cache.get(entry.channelId)
+      ?? await message.guild!.channels.fetch(entry.channelId).catch(() => null);
+    if (
+      !channel
+      || !channel.isTextBased()
+      || channel.isDMBased()
+      || !("messages" in channel)
+    ) {
+      return "failed";
+    }
+    const offendingMessage = entry.messageId === message.id
+      ? message
+      : await channel.messages.fetch(entry.messageId).catch(() => null);
+    if (!offendingMessage) return "missing";
+    if (!offendingMessage.deletable) {
+      return "failed";
+    }
+    return offendingMessage.delete()
+      .then(() => "deleted" as const)
+      .catch(() => "failed" as const);
+  });
+}
 
-  if (settings.blockInvites && hasInvite) {
-    const inviteAllowed = !settings.alwaysBlockDiscordInvites
-      && domains.some((domain) => isAllowed(domain));
-    if (!inviteAllowed) return "Discord invite link";
-  }
-  if (blockedDomain) return `Blocked link domain: ${blockedDomain}`;
-  if (settings.blockSuspiciousLinks && suspiciousLinkPattern.test(content)
-    && !domains.some((domain) => isAllowed(domain))) {
-    return "Suspicious or disguised link";
-  }
-
-  if (settings.ignoredChannelIds.includes(message.channelId)) return null;
-  if (settings.blockCaps && isExcessiveCaps(content, settings.capsPercentage)) return "Excessive capital letters";
-  if (settings.blockMassMentions
-    && message.mentions.users.size + message.mentions.roles.size >= settings.mentionThreshold) {
-    return "Mass mentions";
-  }
-  if (settings.blockSpam && isRepeatedSpam(message, settings.spamThreshold)) return "Repeated message spam";
-  return null;
+async function sendIncidentDmOnce(
+  message: Message,
+  ruleKey: string,
+  content: string,
+  cooldownSeconds: number
+): Promise<void> {
+  const key = `${message.guildId}:${message.author.id}:${ruleKey}`;
+  const now = Date.now();
+  if (!claimIncidentCooldown(dmCooldowns, key, now, Math.max(10, cooldownSeconds) * 1_000)) return;
+  await message.author.send(content).catch(() => {
+    console.info(`[AutoMod] guild=${message.guildId} author=${message.author.id} dm=failed-or-closed rule=${ruleKey}`);
+  });
 }
 
 export async function handleAutoModMessage(message: Message): Promise<void> {
   if (!message.guild || !message.guildId || message.author.bot || !message.member) return;
-  const settings = await getAutoModSettings(message.guildId);
-  if (!settings.enabled || ignored(message, settings)) return;
+  const handlerStartedAt = performance.now();
+  const settings = await getCachedAutoModSettings(message.guildId, getAutoModSettings);
+  const messageSnapshot = snapshot(message);
+  const enabledRules = enabledAutoModRules(settings);
+  const decision = evaluateAutoModMessage(messageSnapshot, settings, ruleState);
 
-  const rule = detectAutoModRule(message, settings);
-  if (!rule) return;
+  if (!decision.matchedRule) {
+    debugDecision({
+      message: messageSnapshot,
+      enabledRules,
+      skippedReason: decision.skippedReason,
+      latencyMs: performance.now() - handlerStartedAt
+    });
+    return;
+  }
 
-  let result = "Logged only";
-  if (settings.action !== "log") {
-    result = await message.delete()
-      .then(() => "Deleted message")
-      .catch((error: Error) => `Could not delete message: ${error.message}`);
+  let incidentDeleted = 0;
+  let incidentFailed = 0;
+  let incidentChannels: string[] = [];
+  let actionResult = "logged only";
+  if (settings.action !== "log" && decision.incident?.kind === "repeated-ping") {
+    const removableMessages = decision.incident.messages.filter(
+      (entry) => !settings.ignoredChannelIds.includes(entry.channelId)
+    );
+    const removal = await deleteRepeatedPingMessages(message, removableMessages);
+    incidentDeleted = removal.deleted;
+    incidentFailed = removal.failed;
+    incidentChannels = removal.channels;
+    actionResult = `${incidentDeleted} incident message(s) deleted`;
+    if (incidentFailed) actionResult += `; ${incidentFailed} could not be deleted`;
+  } else if (settings.action !== "log") {
+    actionResult = await deleteMessage(message);
   }
 
   if (settings.action === "warn") {
@@ -88,52 +151,88 @@ export async function handleAutoModMessage(message: Message): Promise<void> {
       guildId: message.guildId,
       userId: message.author.id,
       moderatorId: message.guild.members.me?.id ?? "automod",
-      reason: `Auto Mod: ${rule}`
+      reason: `Auto Mod: ${decision.matchedRule}`
     });
-    result += "; warning stored";
+    actionResult += "; warning stored";
   }
 
   if (settings.action === "timeout") {
     if (message.member.moderatable) {
-      result += await message.member.timeout(
+      actionResult += await message.member.timeout(
         settings.timeoutMinutes * 60_000,
-        `Auto Mod: ${rule}`
+        `Auto Mod: ${decision.matchedRule}`
       ).then(() => `; timed out for ${settings.timeoutMinutes} minute(s)`)
-        .catch((error: Error) => `; timeout failed: ${error.message}`);
+        .catch((error: Error) => `; timeout failed: ${error.name}`);
     } else {
-      result += "; timeout failed because the member is above the bot";
+      actionResult += "; timeout failed: missing Moderate Members or role hierarchy";
     }
   }
 
   const guildSettings = await getGuildSettings(message.guildId);
+  const incidentDetails = decision.incident?.kind === "repeated-ping"
+    ? [
+      `Threshold: ${decision.incident.threshold} ping messages`,
+      `Window: ${decision.incident.windowSeconds} seconds`,
+      `Messages deleted: ${incidentDeleted}`,
+      `Channels affected: ${incidentChannels.map((id) => `<#${id}>`).join(", ") || "None"}`,
+      `Action: ${settings.action}`,
+      incidentFailed ? `Messages not deleted: ${incidentFailed}` : ""
+    ].filter(Boolean).join("\n")
+    : "Message content omitted from logs for privacy.";
   const embed = buildActionLogEmbed({
     title: "Auto Mod rule triggered",
     action: settings.action,
-    status: result,
-    reason: rule,
+    status: actionResult,
+    reason: decision.matchedRule,
     affectedUserId: message.author.id,
     executorId: message.guild.members.me?.id,
     channelId: message.channelId,
-    details: `Message: ${message.content.slice(0, 700) || "(no text content)"}`
+    details: incidentDetails
   });
-  await sendGuildLog(
+  const logged = await sendGuildLog(
     message.guildId,
     settings.logChannelId ?? guildSettings.modLogChannelId,
     (id) => message.guild!.channels.fetch(id),
     embed
   );
+  const logResult = logged ? "sent" : "not sent: channel missing or bot lacks access";
+
   await recordModerationAction({
     guildId: message.guildId,
     action: `automod_${settings.action}`,
     targetUserId: message.author.id,
     moderatorId: message.guild.members.me?.id ?? "automod",
-    reason: rule,
-    metadata: { channelId: message.channelId, result }
+    reason: decision.matchedRule,
+    metadata: {
+      channelId: message.channelId,
+      result: actionResult,
+      logResult,
+      incident: decision.incident?.kind ?? null,
+      incidentMessagesDeleted: incidentDeleted,
+      incidentChannels
+    }
   });
 
-  if (settings.action !== "log") {
+  debugDecision({
+    message: messageSnapshot,
+    enabledRules,
+    matchedRule: decision.matchedRule,
+    action: settings.action,
+    actionResult,
+    logResult,
+    latencyMs: performance.now() - handlerStartedAt
+  });
+
+  if (settings.action !== "log" && decision.incident?.kind === "repeated-ping") {
+    await sendIncidentDmOnce(
+      message,
+      "repeated-ping",
+      `Your messages were removed in **${message.guild.name}** for repeated ping abuse within ${decision.incident.windowSeconds} seconds.`,
+      decision.incident.windowSeconds
+    );
+  } else if (settings.action !== "log") {
     await message.author.send(
-      `Your message in **${message.guild.name}** was handled by Auto Mod. Rule: ${rule}.`
+      `Your message in **${message.guild.name}** was handled by Auto Mod. Rule: ${decision.matchedRule}.`
     ).catch(() => undefined);
   }
 }

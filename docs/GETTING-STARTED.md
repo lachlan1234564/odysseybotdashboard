@@ -20,7 +20,7 @@ Odyssey Bot is a self-hosted Discord bot with a web dashboard. You create comman
 - `DATABASE_URL` — `file:./data/bot.db` for SQLite
 - `TRUST_PROXY` — Set to `true` if behind Cloudflare Tunnel, nginx, or any reverse proxy
 
-See [docs/SETUP.md](SETUP.md) for the complete variable reference including verification and VPN provider options.
+Open the dashboard's [Setup guide](/docs/setup) for the complete variable reference, including verification and optional VPN provider settings.
 
 ## Next steps
 

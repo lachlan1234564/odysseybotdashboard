@@ -22,6 +22,8 @@ export interface PlaceholderValues {
   ticket_category?: string;
   created_at?: string;
   closed_at?: string;
+  boostCount?: string;
+  tier?: string;
 }
 
 export function replacePlaceholders(value: string, variables: PlaceholderValues): string {

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Choose a Server | Odyssey Bot</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/servers.js" type="module"></script>
+  </head>
+  <body class="server-select-page">
+    <main class="server-select-shell">
+      <header class="server-select-header">
+        <div class="brand-mark">O</div>
+        <div>
+          <p class="eyebrow">Odyssey Bot dashboard</p>
+          <h1>Choose a Discord server</h1>
+          <p class="muted">Settings, tickets, commands, and moderation data stay scoped to the server you choose.</p>
+        </div>
+      </header>
+
+      <section class="surface server-select-panel" aria-live="polite">
+        <div class="section-title">
+          <div>
+            <h2>Manageable servers</h2>
+            <p>Only servers where Odyssey Bot is currently installed appear here.</p>
+          </div>
+          <button type="button" id="refresh-servers" class="secondary-button compact">Refresh</button>
+        </div>
+        <div id="server-select-status" class="server-select-status">Loading Discord servers...</div>
+        <div id="server-grid" class="server-grid"></div>
+      </section>
+
+      <footer class="server-select-footer">
+        <span>Use the server switcher in the dashboard to change later.</span>
+        <button type="button" id="server-logout" class="text-button">Log out</button>
+      </footer>
+    </main>
+  </body>
+</html>
