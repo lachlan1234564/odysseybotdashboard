@@ -9,6 +9,22 @@ export interface GuildSettings {
   adminRoleIds: string[];
 }
 
+export interface LoggingSettings {
+  guildId: string;
+  enabled: boolean;
+  channelId: string | null;
+  members: boolean;
+  messages: boolean;
+  voice: boolean;
+  channels: boolean;
+  roles: boolean;
+  server: boolean;
+  invites: boolean;
+  threads: boolean;
+  moderation: boolean;
+  dashboard: boolean;
+}
+
 export interface Branding {
   guildId: string;
   serverName: string;
@@ -371,6 +387,15 @@ export interface VerificationSettings {
   guildId: string;
   enabled: boolean;
   verifiedRoleId: string | null;
+  verificationChannelId: string | null;
+  verificationChannelName: string;
+  verificationEmbedMessageId: string | null;
+  embedTitle: string;
+  embedDescription: string;
+  embedColor: string;
+  buttonText: string;
+  successMessage: string;
+  failureMessage: string;
   action: "allow" | "flag" | "deny" | "assign_role";
   logChannelId: string | null;
   minAccountAgeDays: number;
@@ -378,13 +403,53 @@ export interface VerificationSettings {
   vpnCheckEnabled: boolean;
   vpnFailClosed: boolean;
   recordRetentionHours: number;
+  publicChannelIds: string[];
+  publicCategoryIds: string[];
+  hiddenChannelIds: string[];
+  hiddenCategoryIds: string[];
+  lockAllChannels: boolean;
+  autoCreateChannel: boolean;
+  lockVerificationChannel: boolean;
+  updateEmbedOnSetup: boolean;
+  applyPermissionsImmediately: boolean;
+  permissionsApplied: boolean;
+  lastSetupAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface VerificationPermissionBackup {
+  guildId: string;
+  channelId: string;
+  targetId: string;
+  targetType: 0 | 1;
+  allow: string;
+  deny: string;
+  existed: boolean;
+}
+
+export interface VerificationSetupResult {
+  dryRun: boolean;
+  verificationChannelId: string | null;
+  verificationMessageId: string | null;
+  verificationUrl: string;
+  channelCreated: boolean;
+  embedPosted: boolean;
+  embedUpdated: boolean;
+  permissionChangesPlanned: number;
+  permissionsApplied: number;
+  permissionsFailed: number;
+  visibleChannelIds: string[];
+  hiddenChannelIds: string[];
+  skippedChannelIds: string[];
+  warnings: string[];
+  failures: Array<{ channelId: string; message: string }>;
 }
 
 export interface VerificationRecord {
   id: number;
   guildId: string;
   userId: string;
-  status: "passed" | "flagged" | "denied";
+  status: "pending" | "passed" | "flagged" | "denied";
   reasonCodes: string[];
   riskScore: number;
   accountCreatedAt: string;
@@ -392,6 +457,18 @@ export interface VerificationRecord {
   vpnDetected: boolean | null;
   verifiedAt: string;
   expiresAt: string;
+  reviewedBy: string | null;
+  reviewedAt: string | null;
+  staffNote: string;
+}
+
+export interface RolePanelOption {
+  roleId: string;
+  label: string;
+  description: string;
+  emoji: string;
+  category: string;
+  requiredRoleId: string | null;
 }
 
 export interface RolePanel {
@@ -399,13 +476,89 @@ export interface RolePanel {
   guildId: string;
   name: string;
   channelId: string | null;
+  layout: "buttons" | "dropdown";
   title: string;
   description: string;
   color: string;
   active: boolean;
+  maxSelectedPerCategory: number;
+  removeRoleOnSelect: boolean;
+  requiredRoleId: string | null;
+  messageId: string | null;
+  logChannelId: string | null;
+  options: RolePanelOption[];
   roleIds: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export interface ModerationCase {
+  id: number;
+  guildId: string;
+  caseNumber: number;
+  targetUserId: string;
+  moderatorId: string;
+  actionType: "warn" | "timeout" | "untimeout" | "kick" | "ban" | "unban" | "clear" | "role_punishment" | "message_delete" | "manual" | string;
+  reason: string;
+  durationSeconds: number | null;
+  evidenceUrl: string;
+  status: "active" | "expired" | "reversed" | "deleted" | "resolved";
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Giveaway {
+  id: number;
+  guildId: string;
+  channelId: string;
+  messageId: string | null;
+  prize: string;
+  description: string;
+  winnersCount: number;
+  endsAt: string;
+  requiredRoleId: string | null;
+  boosterBonusEntries: number;
+  bonusRoleId: string | null;
+  bonusRoleEntries: number;
+  status: "draft" | "active" | "ended" | "cancelled";
+  winnerUserIds: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GiveawayEntry {
+  giveawayId: number;
+  guildId: string;
+  userId: string;
+  entries: number;
+  createdAt: string;
+}
+
+export interface TicketTranscriptMessage {
+  id: string;
+  authorId: string;
+  authorTag: string;
+  createdAt: string;
+  content: string;
+  attachments: string[];
+  embeds: number;
+}
+
+export interface TicketTranscript {
+  id: number;
+  guildId: string;
+  ticketId: number;
+  channelId: string;
+  channelName: string;
+  openerId: string;
+  closedBy: string;
+  closeReason: string;
+  messageCount: number;
+  transcriptJson: TicketTranscriptMessage[];
+  transcriptText: string;
+  createdAt: string;
 }
 
 export interface StickyMessage {

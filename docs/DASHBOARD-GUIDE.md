@@ -132,7 +132,7 @@ The Security dropdown contains:
 - **Anti Raid:** watches unusual join waves.
 - **Anti Nuke:** watches bursts of destructive administrative actions.
 - **Role Protection:** watches role permissions, protected-role assignments, renames, deletions, and mass role changes.
-- **Verification:** creates privacy-conscious Discord OAuth links that can confirm user ID, account age, and server membership. Optional VPN/proxy checks stay disabled until a provider is configured.
+- **Verification:** builds a complete Discord OAuth gate with a verified role, verification channel/embed, public and hidden areas, dry-run permission preview, setup/repost controls, reversible permission backups, and recent records. Optional VPN/proxy checks stay disabled until a provider is configured.
 
 Use alert or log-only actions first.
 
@@ -487,7 +487,7 @@ The bot records warnings and moderation actions in the database. You can view th
 |---------|---------------------|--------------|
 | `/ping` | Everyone | Confirm the bot is online and show gateway latency |
 | `/help` | Everyone | List commands by category with permission labels |
-| `/server-info` | Everyone | View server stats and bot setup overview |
+| `/server info` | Everyone | View server stats and bot setup overview |
 | `/user-info member` | Everyone | View account age, join date, roles, and warnings |
 | `/automod-status` | Bot admins | View current Auto Mod rules and link settings |
 | `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |

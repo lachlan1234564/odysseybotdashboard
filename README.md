@@ -5,6 +5,7 @@ Odyssey Bot is a modular Discord administration bot built with TypeScript, disco
 This README is a quick reference. The same beginner-friendly guides below are rendered inside the authenticated dashboard under **Docs / Help**, which is the easiest place to read them:
 
 - **[Setup and Railway deployment](docs/SETUP.md)** — Get the bot running from scratch.
+- **[Download and setup from GitHub](docs/DOWNLOAD_AND_SETUP.md)** — Clone/download, configure `.env`, invite the bot, and run locally.
 - **[Dashboard and feature guide](docs/DASHBOARD-GUIDE.md)** — Learn every dashboard page and feature.
 - **[Staff dashboard access](docs/STAFF-ACCESS.md)** — Give staff safe access without leaking credentials.
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)** — Fix common problems step by step.
@@ -60,7 +61,7 @@ The bot and dashboard share the same TypeScript config and database layer.
 |---------|----------------|--------------|
 | `/ping` | Everyone | Confirm the bot is online and show gateway latency |
 | `/help` | Everyone | List commands by category with permission labels |
-| `/server-info` | Everyone | View server stats and bot setup overview |
+| `/server info` | Everyone | View server stats and bot setup overview |
 | `/user-info member` | Everyone | View account age, join date, roles, and warnings |
 | `/automod-status` | Bot admins | View current Auto Mod rules and link settings |
 | `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |
@@ -68,6 +69,8 @@ The bot and dashboard share the same TypeScript config and database layer.
 | `/custom name [text] [reason] [target]` | Configurable per command | Run a dashboard-created command |
 | `/ticket-panel [panel] [channel]` | Bot admins | Post a saved ticket panel |
 | `/reaction-roles panel [channel]` | Bot admins | Post a saved self-service role panel |
+| `/giveaway start/end/reroll/cancel` | Manage Server | Create and manage restart-safe giveaways |
+| `/case view/search/create/edit/note` | Moderate Members | View and manage moderation cases |
 | `/announce template [channel]` | Bot admins | Preview and confirm an announcement |
 | `/close-request [reason]` | Ticket staff | Ask the ticket opener/community to approve closure |
 | `/lockdown [channel]` | Bot admins | Lock text channels — prevent @everyone from sending messages |
@@ -83,14 +86,18 @@ The bot and dashboard share the same TypeScript config and database layer.
 
 - **Command Studio:** Build custom actions (plain messages, embeds, channel sends, role management, ticket panels, announcements) with permissions, cooldowns, and live preview.
 - **Ticket Studio:** Create ticket types with routing, staff roles, welcome messages, and lifecycle rules. Compose them into panels (dropdown or buttons) or multi-panel menus.
+- **Ticket Transcripts:** Closed tickets are saved as database-backed transcripts with message metadata and optional transcript-channel download files.
 - **Announcements:** Save embed or plain-text templates with a preview-and-confirm flow in Discord.
 - **Social Promotion:** Build and publish guild-specific embed or plain-text social directories with safe links, uploads, and live preview.
 - **Automation:** Configure channel-specific link policies, invite blocking, role panels, sticky messages, and scheduled announcements.
+- **Role Panels 2.0:** Publish button or dropdown self-service role panels with categories, optional required roles, emojis, descriptions, and safer role hierarchy validation.
+- **Giveaways:** Create durable giveaways, collect entries through Discord buttons, end early, cancel, or reroll winners.
 - **Member messages:** Configure public welcomes, optional DMs, safe auto-roles, and goodbye messages.
-- **Security:** Configure anti-raid, anti-nuke, role protection, and optional privacy-conscious Discord OAuth member verification.
-- **Moderation:** View warnings and recorded actions.
+- **Security:** Configure anti-raid, anti-nuke, role protection, and a privacy-conscious Discord OAuth verification gate with reversible channel permissions.
+- **Moderation:** View warnings, raw moderation actions, and structured moderation cases.
 - **Server Settings:** Configure channels, categories, staff roles, admin roles, and muted role.
 - **Appearance:** Set fallback branding, colors, and images.
+- **Server Logs:** Configure a private, per-guild audit feed for member, message-change, voice, channel, role, server, invite, thread, moderation, and dashboard events. Normal message sends are never logged.
 
 ### Infrastructure
 
@@ -101,6 +108,17 @@ The bot and dashboard share the same TypeScript config and database layer.
 - Image URLs and local PNG, JPEG, GIF, or WebP uploads up to 8 MB
 - Local SQLite and Railway PostgreSQL support
 
+### Logging Intents and Permissions
+
+For complete server logging, enable **Server Members Intent** and **Message Content Intent**
+in the Discord Developer Portal. The bot also subscribes to guild invite, voice state,
+webhook, and emoji/sticker gateway events.
+
+Give the bot role **View Audit Log** to attribute administrative actions where Discord
+provides an audit entry. In the private logging channel, grant **View Channel**,
+**Read Message History**, **Send Messages**, and **Embed Links**. Events still log with
+an unknown executor when audit-log access is unavailable.
+
 ---
 
 ## MVP Limitations
@@ -109,7 +127,7 @@ The bot and dashboard share the same TypeScript config and database layer.
 - The dashboard uses one shared admin password. Discord OAuth is available only for member verification; per-staff OAuth dashboard accounts are not implemented yet.
 - Dashboard sessions and command cooldowns are stored in memory and reset when the process restarts.
 - Uploaded files require a persistent Railway volume in production.
-- Ticket logging records events and can export the newest 100 messages to a downloadable transcript card.
+- Ticket logging records events and saves up to the newest 1,000 fetched messages as a dashboard-viewable transcript, with an optional downloadable transcript file in the configured transcript channel.
 - Use one Railway application replica. The bot and dashboard can manage multiple Discord servers from that process.
 - The `deleteUsage` custom command option is stored for future message/prefix command support. Discord slash-command invocations cannot be deleted like messages.
 

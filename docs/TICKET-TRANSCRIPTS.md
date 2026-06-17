@@ -2,9 +2,9 @@
 
 ## In one sentence
 
-When a ticket closes, the bot can export the newest 100 messages as a text file and post a clear archive card.
+When a ticket closes, the bot saves a transcript record for the dashboard and can also post a downloadable text file with a clear archive card.
 
-## Turn transcripts on
+## Turn transcript channel files on
 
 1. Open **Server Settings**.
 2. Set **Default ticket log channel**.
@@ -23,9 +23,9 @@ To use a different channel for one ticket type:
 - Who closed the ticket.
 - Close reason.
 - Message time, author, author ID, text, and attachment links.
-- Up to the newest 100 messages.
+- Up to the newest 1,000 fetched messages.
 
-The transcript is created before the ticket channel is deleted.
+The database transcript is created before the ticket channel is deleted, even if no transcript channel is configured.
 
 ## What the archive card shows
 
@@ -36,6 +36,18 @@ The transcript is created before the ticket channel is deleted.
 - Ticket category, open time, close time, and close reason.
 - Number of exported messages.
 - A **Download Transcript** button when Discord returns an attachment URL.
+
+## Dashboard transcript archive
+
+Open **Tickets > History** and review **Ticket transcripts**. Each saved transcript includes:
+
+- Ticket ID and ticket channel name.
+- Opener and closer IDs.
+- Close reason.
+- Message count.
+- Download link for a plain-text copy.
+
+The dashboard copy is useful when Discord attachment upload fails or no transcript channel is configured.
 
 ## Required permissions
 

@@ -4,6 +4,34 @@ import {
   SlashCommandBuilder
 } from "discord.js";
 
+export const slashCommandNames = [
+  "ping",
+  "help",
+  "server",
+  "user-info",
+  "automod-status",
+  "socials-post",
+  "custom",
+  "close-request",
+  "ticket-panel",
+  "announce",
+  "reaction-roles",
+  "giveaway",
+  "verification",
+  "warn",
+  "warnings",
+  "timeout",
+  "kick",
+  "ban",
+  "clear",
+  "case",
+  "lockdown",
+  "unlockdown",
+  "bot-status"
+] as const;
+
+export type SlashCommandName = typeof slashCommandNames[number];
+
 export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("ping")
@@ -12,8 +40,13 @@ export const commandBuilders = [
     .setName("help")
     .setDescription("List every Odyssey Bot command, its purpose, and who can use it."),
   new SlashCommandBuilder()
-    .setName("server-info")
-    .setDescription("View server stats and bot setup status."),
+    .setName("server")
+    .setDescription("Server information and administration.")
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("info")
+        .setDescription("View server stats and bot setup status.")
+    ),
   new SlashCommandBuilder()
     .setName("user-info")
     .setDescription("View a user's account age, join date, roles, and warning count.")
@@ -108,6 +141,58 @@ export const commandBuilders = [
         .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
     ),
   new SlashCommandBuilder()
+    .setName("giveaway")
+    .setDescription("Create, end, reroll, or cancel giveaways.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("start")
+        .setDescription("Start a giveaway in a selected channel.")
+        .addStringOption((option) => option.setName("prize").setDescription("Prize").setRequired(true).setMaxLength(200))
+        .addIntegerOption((option) => option.setName("minutes").setDescription("How long the giveaway should run").setRequired(true).setMinValue(1).setMaxValue(10080))
+        .addIntegerOption((option) => option.setName("winners").setDescription("Number of winners").setMinValue(1).setMaxValue(20))
+        .addStringOption((option) => option.setName("description").setDescription("Extra giveaway details").setMaxLength(1000))
+        .addRoleOption((option) => option.setName("required_role").setDescription("Optional required role to enter"))
+        .addChannelOption((option) =>
+          option
+            .setName("channel")
+            .setDescription("Channel to post in")
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("end")
+        .setDescription("End an active giveaway early.")
+        .addIntegerOption((option) => option.setName("id").setDescription("Giveaway ID").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("reroll")
+        .setDescription("Pick new winner(s) for a giveaway.")
+        .addIntegerOption((option) => option.setName("id").setDescription("Giveaway ID").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("cancel")
+        .setDescription("Cancel a giveaway without picking winners.")
+        .addIntegerOption((option) => option.setName("id").setDescription("Giveaway ID").setRequired(true).setMinValue(1))
+    ),
+  new SlashCommandBuilder()
+    .setName("verification")
+    .setDescription("Configure or inspect the server verification gate.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("setup")
+        .setDescription("Create or update the verification channel, embed, and permissions.")
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("status")
+        .setDescription("Show the saved verification gate status for this server.")
+    ),
+  new SlashCommandBuilder()
     .setName("warn")
     .setDescription("Warn a server member.")
     .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
@@ -150,6 +235,57 @@ export const commandBuilders = [
       option.setName("amount").setDescription("Messages to delete").setRequired(true).setMinValue(1).setMaxValue(100)
     ),
   new SlashCommandBuilder()
+    .setName("case")
+    .setDescription("View, search, create, and update moderation cases.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("view")
+        .setDescription("View one moderation case.")
+        .addIntegerOption((option) => option.setName("number").setDescription("Case number").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("search")
+        .setDescription("Search recent moderation cases.")
+        .addUserOption((option) => option.setName("member").setDescription("Filter by member"))
+        .addStringOption((option) => option.setName("action").setDescription("Filter by action type"))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("create")
+        .setDescription("Create a manual moderation case.")
+        .addUserOption((option) => option.setName("member").setDescription("Member for this case").setRequired(true))
+        .addStringOption((option) => option.setName("action").setDescription("Action type, such as manual or message_delete").setRequired(true).setMaxLength(40))
+        .addStringOption((option) => option.setName("reason").setDescription("Reason").setMaxLength(1000))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("edit")
+        .setDescription("Edit a case reason or status.")
+        .addIntegerOption((option) => option.setName("number").setDescription("Case number").setRequired(true).setMinValue(1))
+        .addStringOption((option) => option.setName("reason").setDescription("New reason").setMaxLength(1000))
+        .addStringOption((option) =>
+          option
+            .setName("status")
+            .setDescription("New case status")
+            .addChoices(
+              { name: "Active", value: "active" },
+              { name: "Expired", value: "expired" },
+              { name: "Reversed", value: "reversed" },
+              { name: "Deleted", value: "deleted" },
+              { name: "Resolved", value: "resolved" }
+            )
+        )
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("note")
+        .setDescription("Add or replace a staff note on a case.")
+        .addIntegerOption((option) => option.setName("number").setDescription("Case number").setRequired(true).setMinValue(1))
+        .addStringOption((option) => option.setName("note").setDescription("Staff note").setRequired(true).setMaxLength(1000))
+    ),
+  new SlashCommandBuilder()
     .setName("lockdown")
     .setDescription("Lock all text channels — prevents @everyone from sending messages.")
     .addChannelOption((option) =>
@@ -173,3 +309,17 @@ export const commandBuilders = [
 ] as const;
 
 export const commandData = commandBuilders.map((command) => command.toJSON());
+
+export function assertUniqueCommandNames(
+  commands: ReadonlyArray<{ name: string }> = commandData
+): void {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  for (const command of commands) {
+    if (seen.has(command.name)) duplicates.add(command.name);
+    seen.add(command.name);
+  }
+  if (duplicates.size > 0) {
+    throw new Error(`Duplicate top-level slash commands: ${[...duplicates].join(", ")}`);
+  }
+}

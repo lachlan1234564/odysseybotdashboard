@@ -2,6 +2,7 @@ import {
   ChannelType,
   ChatInputCommandInteraction,
   GuildMember,
+  MessageFlags,
   PermissionFlagsBits,
   TextChannel
 } from "discord.js";
@@ -23,6 +24,11 @@ import { renderEmbedMessage } from "./messages.js";
 import { postTicketPanel, prepareTicketCloseRequest } from "./tickets.js";
 import { sendGuildLog } from "./utils.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
+import {
+  deferCommandReply,
+  replyEphemeral,
+  replyToCommand
+} from "./interactions.js";
 
 const cooldowns = new Map<string, number>();
 
@@ -151,27 +157,30 @@ function formatReason(config: CustomCommand["actionConfig"], variables: Placehol
 
 export async function handleCustomCommand(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId || !interaction.guild) {
-    await interaction.reply({ content: "Custom commands only work in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "Custom commands only work in a server.");
     return;
   }
 
   const name = interaction.options.getString("name", true);
   const command = await getCustomCommand(interaction.guildId, name);
   if (!command || !command.enabled) {
-    await interaction.reply({ content: `No enabled custom command named \`${name}\` exists.`, ephemeral: true });
+    await replyEphemeral(interaction, `No enabled custom command named \`${name}\` exists.`);
     return;
   }
 
+  await deferCommandReply(interaction, command.replyVisibility === "private");
   const member = await interaction.guild.members.fetch(interaction.user.id);
   const denial = await checkAccess(interaction, command, member);
   if (denial) {
-    await interaction.reply({ content: denial, ephemeral: true });
+    await replyToCommand(interaction, { content: denial });
     return;
   }
 
   const remaining = checkCooldown(command, interaction.guildId, interaction.user.id);
   if (remaining > 0) {
-    await interaction.reply({ content: `That command is on cooldown for ${remaining} more second(s).`, ephemeral: true });
+    await replyToCommand(interaction, {
+      content: `That command is on cooldown for ${remaining} more second(s).`
+    });
     return;
   }
 
@@ -193,17 +202,17 @@ async function handleActionSequence(
   variables: PlaceholderValues
 ): Promise<void> {
   if (!command.actionConfig.actionSequence?.length) {
-    await interaction.reply({ content: "This sequence has no actions configured.", ephemeral: true });
+    await replyToCommand(interaction, "This sequence has no actions configured.");
     return;
   }
   const ephemeral = command.replyVisibility === "private";
-  await interaction.deferReply({ ephemeral });
+  await deferCommandReply(interaction, ephemeral);
   const results: string[] = [];
   for (const item of command.actionConfig.actionSequence) {
     const result = await runSingleAction(interaction, item.actionType, {
       ...emptyActionLike(item),
       ...item
-    } as CustomCommand["actionConfig"], variables, { skipReply: true, ephemeral });
+    } as CustomCommand["actionConfig"], variables, { skipReply: true, ephemeral: ephemeral });
     if (result) results.push(result);
   }
   await interaction.editReply({ content: results.length ? results.join("\n").slice(0, 2000) : "Sequence completed." });
@@ -243,15 +252,19 @@ async function runSingleAction(
   opts: { skipReply?: boolean; ephemeral?: boolean } = {}
 ): Promise<string | undefined> {
   const ephemeral = opts.ephemeral ?? false;
+  const replyFlags = ephemeral ? MessageFlags.Ephemeral : undefined;
 
   if (actionType === "reply_message") {
     if (opts.skipReply) {
-      await interaction.followUp({ content: replacePlaceholders(config.content, variables) || "No message configured.", ephemeral });
+      await interaction.followUp({
+        content: replacePlaceholders(config.content, variables) || "No message configured.",
+        flags: replyFlags
+      });
       return "Sent reply.";
     }
-    await interaction.reply({
+    await replyToCommand(interaction, {
       content: replacePlaceholders(config.content, variables) || "This command has no message configured.",
-      ephemeral
+      flags: replyFlags
     });
     return undefined;
   }
@@ -259,19 +272,19 @@ async function runSingleAction(
   if (actionType === "reply_embed") {
     const msg = renderEmbedMessage(config.embed, variables);
     if (opts.skipReply) {
-      await interaction.followUp({ ...msg, ephemeral });
+      await interaction.followUp({ ...msg, flags: replyFlags });
       return "Sent embed.";
     }
-    await interaction.reply({ ...msg, ephemeral });
+    await replyToCommand(interaction, { ...msg, flags: replyFlags });
     return undefined;
   }
 
   if (actionType === "send_ephemeral") {
     if (opts.skipReply) {
-      await interaction.followUp({ content: replacePlaceholders(config.content, variables), ephemeral: true });
+      await interaction.followUp({ content: replacePlaceholders(config.content, variables), flags: MessageFlags.Ephemeral });
       return "Sent ephemeral.";
     }
-    await interaction.reply({ content: replacePlaceholders(config.content, variables), ephemeral: true });
+    await replyToCommand(interaction, { content: replacePlaceholders(config.content, variables), flags: MessageFlags.Ephemeral });
     return undefined;
   }
 
@@ -281,7 +294,7 @@ async function runSingleAction(
     const content = replacePlaceholders(config.content, variables);
     const msg = embedHasContentConfig(config.embed) ? renderEmbedMessage(config.embed, variables) : { content };
     await targetUser.send(msg).catch(() => undefined);
-    if (!opts.skipReply) await interaction.reply({ content: `DM sent to ${targetUser}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `DM sent to ${targetUser}.`, flags: replyFlags });
     return `DM sent to ${targetUser}.`;
   }
 
@@ -289,7 +302,7 @@ async function runSingleAction(
     const channelId = config.targetChannelId;
     const channel = channelId ? await interaction.guild!.channels.fetch(channelId).catch(() => null) : null;
     if (!channel || !channel.isTextBased() || channel.isDMBased() || !("send" in channel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "The configured destination channel is unavailable.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "The configured destination channel is unavailable.", flags: MessageFlags.Ephemeral });
       return "Destination channel unavailable.";
     }
     const message = embedHasContentConfig(config.embed)
@@ -304,9 +317,9 @@ async function runSingleAction(
     );
     if (missingPermission) {
       if (!opts.skipReply) {
-        await interaction.reply({
+        await replyToCommand(interaction, {
           content: `I need the **${missingPermission}** permission in the destination channel.`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
       return `Destination permission missing: ${missingPermission}.`;
@@ -317,10 +330,10 @@ async function runSingleAction(
       allowedMentions: ping ? { parse: ["everyone"] } : { parse: [] }
     }).then(() => true).catch(() => false);
     if (!sent) {
-      if (!opts.skipReply) await interaction.reply({ content: "I could not send to that channel.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "I could not send to that channel.", flags: MessageFlags.Ephemeral });
       return "Destination send failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `Sent to ${channel}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `Sent to ${channel}.`, flags: replyFlags });
     return `Sent to ${channel}.`;
   }
 
@@ -328,14 +341,14 @@ async function runSingleAction(
     const roleId = config.roleId;
     const role = roleId ? await interaction.guild!.roles.fetch(roleId).catch(() => null) : null;
     if (!role) {
-      if (!opts.skipReply) await interaction.reply({ content: "The configured role is unavailable.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "The configured role is unavailable.", flags: MessageFlags.Ephemeral });
       return "Role unavailable.";
     }
     const targetMember = config.targetUserId
       ? await interaction.guild!.members.fetch(config.targetUserId).catch(() => null)
       : await interaction.guild!.members.fetch(interaction.user.id);
     if (!targetMember) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target member not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target member not found.", flags: MessageFlags.Ephemeral });
       return "Member not found.";
     }
     try {
@@ -346,10 +359,10 @@ async function runSingleAction(
         else await targetMember.roles.add(role, formatReason(config, variables));
       }
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not modify role. Check hierarchy and permissions.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not modify role. Check hierarchy and permissions.", flags: MessageFlags.Ephemeral });
       return "Role modification failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${actionType === "add_role" ? "Added" : actionType === "remove_role" ? "Removed" : "Toggled"} ${role} for ${targetMember}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${actionType === "add_role" ? "Added" : actionType === "remove_role" ? "Removed" : "Toggled"} ${role} for ${targetMember}.`, flags: replyFlags });
     return `${actionType} completed.`;
   }
 
@@ -358,33 +371,33 @@ async function runSingleAction(
       ? await interaction.guild!.members.fetch(config.targetUserId).catch(() => null)
       : await interaction.guild!.members.fetch(interaction.user.id);
     if (!targetMember) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target member not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target member not found.", flags: MessageFlags.Ephemeral });
       return "Member not found.";
     }
     const roles = (await Promise.all(config.roleIds.map((id) => interaction.guild!.roles.fetch(id)))).filter(Boolean);
     if (!roles.length) {
-      if (!opts.skipReply) await interaction.reply({ content: "None of the configured roles were found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "None of the configured roles were found.", flags: MessageFlags.Ephemeral });
       return "Roles not found.";
     }
     try {
       if (actionType === "add_roles") await targetMember.roles.add(roles as any, formatReason(config, variables));
       else await targetMember.roles.remove(roles as any, formatReason(config, variables));
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not modify roles. Check hierarchy and permissions.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not modify roles. Check hierarchy and permissions.", flags: MessageFlags.Ephemeral });
       return "Role modification failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${actionType === "add_roles" ? "Added" : "Removed"} ${roles.length} role(s) for ${targetMember}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${actionType === "add_roles" ? "Added" : "Removed"} ${roles.length} role(s) for ${targetMember}.`, flags: replyFlags });
     return `${actionType} completed.`;
   }
 
   if (actionType === "post_ticket_panel") {
     const panelId = config.ticketPanelId;
     if (!panelId || !interaction.channel || !("send" in interaction.channel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "The saved ticket panel or current channel is unavailable.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "The saved ticket panel or current channel is unavailable.", flags: MessageFlags.Ephemeral });
       return "Panel unavailable.";
     }
     await postTicketPanel(interaction.guild!, panelId, interaction.channel as any);
-    if (!opts.skipReply) await interaction.reply({ content: "Ticket panel posted.", ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: "Ticket panel posted.", flags: replyFlags });
     return "Panel posted.";
   }
 
@@ -397,7 +410,7 @@ async function runSingleAction(
       ? await buildAnnouncementMessage(interaction.guild!, templateId, channel)
       : null;
     if (!template || !built || !channel || !channel.isTextBased() || channel.isDMBased() || !("send" in channel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "The saved announcement or destination channel is unavailable.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "The saved announcement or destination channel is unavailable.", flags: MessageFlags.Ephemeral });
       return "Announcement unavailable.";
     }
     const { message, pingType: templatePingType } = built;
@@ -407,9 +420,9 @@ async function runSingleAction(
     const missingPermission = getMissingAnnouncementPermission(interaction.guild!, channel, message, pingType);
     if (missingPermission) {
       if (!opts.skipReply) {
-        await interaction.reply({
+        await replyToCommand(interaction, {
           content: `I need the **${missingPermission}** permission in the announcement channel.`,
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
       return `Announcement permission missing: ${missingPermission}.`;
@@ -418,10 +431,10 @@ async function runSingleAction(
     sendPayload.allowedMentions = ping ? { parse: ["everyone"] } : { parse: [] };
     const sent = await channel.send(sendPayload).then(() => true).catch(() => false);
     if (!sent) {
-      if (!opts.skipReply) await interaction.reply({ content: "I could not send that announcement.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "I could not send that announcement.", flags: MessageFlags.Ephemeral });
       return "Announcement send failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `Announcement sent to ${channel}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `Announcement sent to ${channel}.`, flags: replyFlags });
     return "Announcement sent.";
   }
 
@@ -460,10 +473,10 @@ async function runSingleAction(
         footerText: type?.footerText || "", footerIconUrl: type?.footerIconUrl || "", timestamp: true, fields: [{ name: "Opened by", value: `<@${interaction.user.id}>`, inline: false }]
       }, variables);
       await channel.send({ ...rendered, content: interaction.user.toString() });
-      if (!opts.skipReply) await interaction.reply({ content: `Ticket created: ${channel}`, ephemeral });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: `Ticket created: ${channel}`, flags: replyFlags });
       return "Ticket created.";
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not create ticket channel.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not create ticket channel.", flags: MessageFlags.Ephemeral });
       return "Ticket creation failed.";
     }
   }
@@ -475,17 +488,17 @@ async function runSingleAction(
       "community"
     );
     if (prepared.error || !prepared.payload) {
-      if (!opts.skipReply) await interaction.reply({ content: prepared.error ?? "Could not create the close request.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: prepared.error ?? "Could not create the close request.", flags: MessageFlags.Ephemeral });
       return prepared.error ?? "Close request failed.";
     }
-    if (opts.skipReply) await interaction.followUp({ ...prepared.payload, ephemeral: false });
-    else await interaction.reply(prepared.payload);
+    if (opts.skipReply) await interaction.followUp({ ...prepared.payload, flags: undefined });
+    else await replyToCommand(interaction, prepared.payload);
     return "Close request submitted.";
   }
 
   if (actionType === "lock_channel" || actionType === "unlock_channel") {
     if (!(interaction.channel instanceof TextChannel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "This action only works in text channels.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "This action only works in text channels.", flags: MessageFlags.Ephemeral });
       return "Not a text channel.";
     }
     try {
@@ -499,61 +512,61 @@ async function runSingleAction(
         });
       }
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not change channel permissions.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not change channel permissions.", flags: MessageFlags.Ephemeral });
       return "Permission change failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: actionType === "lock_channel" ? "Channel locked." : "Channel unlocked.", ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: actionType === "lock_channel" ? "Channel locked." : "Channel unlocked.", flags: replyFlags });
     return `${actionType} completed.`;
   }
 
   if (actionType === "rename_channel") {
     if (!(interaction.channel instanceof TextChannel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "This action only works in text channels.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "This action only works in text channels.", flags: MessageFlags.Ephemeral });
       return "Not a text channel.";
     }
     const newName = replacePlaceholders(config.newName, variables).toLowerCase().replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 90);
     if (!newName) {
-      if (!opts.skipReply) await interaction.reply({ content: "Provide a valid new channel name.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Provide a valid new channel name.", flags: MessageFlags.Ephemeral });
       return "Invalid name.";
     }
     try {
       await interaction.channel.setName(newName, formatReason(config, variables));
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not rename channel.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not rename channel.", flags: MessageFlags.Ephemeral });
       return "Rename failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `Channel renamed to #${newName}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `Channel renamed to #${newName}.`, flags: replyFlags });
     return "Renamed.";
   }
 
   if (actionType === "move_channel") {
     if (!(interaction.channel instanceof TextChannel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "This action only works in text channels.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "This action only works in text channels.", flags: MessageFlags.Ephemeral });
       return "Not a text channel.";
     }
     const category = config.newCategoryId ? await interaction.guild!.channels.fetch(config.newCategoryId).catch(() => null) : null;
     if (!category || category.type !== ChannelType.GuildCategory) {
-      if (!opts.skipReply) await interaction.reply({ content: "The target category was not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "The target category was not found.", flags: MessageFlags.Ephemeral });
       return "Category not found.";
     }
     try {
       await interaction.channel.setParent(category.id, { lockPermissions: false });
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not move channel.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not move channel.", flags: MessageFlags.Ephemeral });
       return "Move failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `Moved to ${category.name}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `Moved to ${category.name}.`, flags: replyFlags });
     return "Moved.";
   }
 
   if (actionType === "add_user_to_channel" || actionType === "remove_user_from_channel") {
     if (!(interaction.channel instanceof TextChannel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "This action only works in text channels.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "This action only works in text channels.", flags: MessageFlags.Ephemeral });
       return "Not a text channel.";
     }
     const targetUser = config.targetUserId ? await interaction.client.users.fetch(config.targetUserId).catch(() => null) : null;
     if (!targetUser) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target user not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target user not found.", flags: MessageFlags.Ephemeral });
       return "User not found.";
     }
     try {
@@ -565,74 +578,74 @@ async function runSingleAction(
         await interaction.channel.permissionOverwrites.delete(targetUser.id);
       }
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Could not change user permissions.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Could not change user permissions.", flags: MessageFlags.Ephemeral });
       return "Permission change failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${targetUser} ${actionType === "add_user_to_channel" ? "added to" : "removed from"} channel.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${targetUser} ${actionType === "add_user_to_channel" ? "added to" : "removed from"} channel.`, flags: replyFlags });
     return `${actionType} completed.`;
   }
 
   if (actionType === "timeout_user") {
     const targetMember = config.targetUserId ? await interaction.guild!.members.fetch(config.targetUserId).catch(() => null) : null;
     if (!targetMember) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target member not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target member not found.", flags: MessageFlags.Ephemeral });
       return "Member not found.";
     }
     if (!targetMember.moderatable) {
-      if (!opts.skipReply) await interaction.reply({ content: "I cannot timeout that member. Check hierarchy.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "I cannot timeout that member. Check hierarchy.", flags: MessageFlags.Ephemeral });
       return "Not moderatable.";
     }
     const minutes = config.durationMinutes ?? 60;
     try {
       await targetMember.timeout(minutes * 60_000, formatReason(config, variables));
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Timeout failed.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Timeout failed.", flags: MessageFlags.Ephemeral });
       return "Timeout failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${targetMember} timed out for ${minutes} minute(s).`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${targetMember} timed out for ${minutes} minute(s).`, flags: replyFlags });
     return "Timed out.";
   }
 
   if (actionType === "remove_timeout") {
     const targetMember = config.targetUserId ? await interaction.guild!.members.fetch(config.targetUserId).catch(() => null) : null;
     if (!targetMember) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target member not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target member not found.", flags: MessageFlags.Ephemeral });
       return "Member not found.";
     }
     try {
       await targetMember.timeout(null, formatReason(config, variables));
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Remove timeout failed.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Remove timeout failed.", flags: MessageFlags.Ephemeral });
       return "Failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `Timeout removed from ${targetMember}.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `Timeout removed from ${targetMember}.`, flags: replyFlags });
     return "Timeout removed.";
   }
 
   if (actionType === "kick_user") {
     const targetMember = config.targetUserId ? await interaction.guild!.members.fetch(config.targetUserId).catch(() => null) : null;
     if (!targetMember) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target member not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target member not found.", flags: MessageFlags.Ephemeral });
       return "Member not found.";
     }
     if (!targetMember.kickable) {
-      if (!opts.skipReply) await interaction.reply({ content: "I cannot kick that member. Check hierarchy.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "I cannot kick that member. Check hierarchy.", flags: MessageFlags.Ephemeral });
       return "Not kickable.";
     }
     try {
       await targetMember.kick(formatReason(config, variables));
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Kick failed.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Kick failed.", flags: MessageFlags.Ephemeral });
       return "Kick failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${targetMember} was kicked.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${targetMember} was kicked.`, flags: replyFlags });
     return "Kicked.";
   }
 
   if (actionType === "ban_user") {
     const targetUser = config.targetUserId ? await interaction.client.users.fetch(config.targetUserId).catch(() => null) : null;
     if (!targetUser) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target user not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target user not found.", flags: MessageFlags.Ephemeral });
       return "User not found.";
     }
     try {
@@ -641,41 +654,41 @@ async function runSingleAction(
         reason: formatReason(config, variables)
       });
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Ban failed.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Ban failed.", flags: MessageFlags.Ephemeral });
       return "Ban failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${targetUser.tag} was banned.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${targetUser.tag} was banned.`, flags: replyFlags });
     return "Banned.";
   }
 
   if (actionType === "unban_user") {
     const targetUser = config.targetUserId ? await interaction.client.users.fetch(config.targetUserId).catch(() => null) : null;
     if (!targetUser) {
-      if (!opts.skipReply) await interaction.reply({ content: "Target user not found.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Target user not found.", flags: MessageFlags.Ephemeral });
       return "User not found.";
     }
     try {
       await interaction.guild!.members.unban(targetUser.id, formatReason(config, variables));
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Unban failed. The user may not be banned.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Unban failed. The user may not be banned.", flags: MessageFlags.Ephemeral });
       return "Unban failed.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: `${targetUser.tag} was unbanned.`, ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: `${targetUser.tag} was unbanned.`, flags: replyFlags });
     return "Unbanned.";
   }
 
   if (actionType === "purge_messages") {
     if (!(interaction.channel instanceof TextChannel)) {
-      if (!opts.skipReply) await interaction.reply({ content: "This action only works in text channels.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "This action only works in text channels.", flags: MessageFlags.Ephemeral });
       return "Not a text channel.";
     }
     const amount = config.amount ?? 10;
     try {
       const deleted = await interaction.channel.bulkDelete(amount, true);
-      if (!opts.skipReply) await interaction.reply({ content: `Deleted ${deleted.size} messages.`, ephemeral });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: `Deleted ${deleted.size} messages.`, flags: replyFlags });
       return `Deleted ${deleted.size} messages.`;
     } catch {
-      if (!opts.skipReply) await interaction.reply({ content: "Purge failed. Messages may be older than 14 days.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "Purge failed. Messages may be older than 14 days.", flags: MessageFlags.Ephemeral });
       return "Purge failed.";
     }
   }
@@ -684,20 +697,20 @@ async function runSingleAction(
     const roleId = config.roleId;
     const member = await interaction.guild!.members.fetch(interaction.user.id);
     if (!roleId || !member.roles.cache.has(roleId)) {
-      if (!opts.skipReply) await interaction.reply({ content: "You do not have the required role to run this command.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "You do not have the required role to run this command.", flags: MessageFlags.Ephemeral });
       return "Missing required role.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: "Role requirement satisfied.", ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: "Role requirement satisfied.", flags: replyFlags });
     return "Role check passed.";
   }
 
   if (actionType === "require_permission") {
     const requiredPerms = config.content.trim() as keyof typeof PermissionFlagsBits;
     if (!requiredPerms || !interaction.memberPermissions?.has(PermissionFlagsBits[requiredPerms] as any)) {
-      if (!opts.skipReply) await interaction.reply({ content: "You do not have the required permission to run this command.", ephemeral: true });
+      if (!opts.skipReply) await replyToCommand(interaction, { content: "You do not have the required permission to run this command.", flags: MessageFlags.Ephemeral });
       return "Missing required permission.";
     }
-    if (!opts.skipReply) await interaction.reply({ content: "Permission requirement satisfied.", ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: "Permission requirement satisfied.", flags: replyFlags });
     return "Permission check passed.";
   }
 
@@ -729,7 +742,7 @@ async function runSingleAction(
         }
       }
     }
-    if (!opts.skipReply) await interaction.reply({ content: "Action logged.", ephemeral });
+    if (!opts.skipReply) await replyToCommand(interaction, { content: "Action logged.", flags: replyFlags });
     return "Logged.";
   }
 

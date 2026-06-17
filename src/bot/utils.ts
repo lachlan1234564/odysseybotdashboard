@@ -4,6 +4,7 @@ import {
   ColorResolvable,
   EmbedBuilder,
   GuildMember,
+  MessageFlags,
   PermissionFlagsBits
 } from "discord.js";
 import {
@@ -66,7 +67,17 @@ export async function isBotAdmin(interaction: AdminInteraction): Promise<boolean
 
 export async function requireBotAdmin(interaction: AdminInteraction): Promise<boolean> {
   if (await isBotAdmin(interaction)) return true;
-  await interaction.reply({ content: "You are not allowed to use this bot admin command.", ephemeral: true });
+  const payload = {
+    content: "You are not allowed to use this bot admin command.",
+    flags: MessageFlags.Ephemeral as const
+  };
+  if (interaction.deferred) {
+    await interaction.editReply({ content: payload.content });
+  } else if (interaction.replied) {
+    await interaction.followUp(payload);
+  } else {
+    await interaction.reply(payload);
+  }
   return false;
 }
 

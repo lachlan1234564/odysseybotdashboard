@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Odyssey Bot Control</title>
+    <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" type="module"></script>
   </head>
@@ -33,15 +34,17 @@
           </div>
           <button class="nav-item" data-page="announcements"><span>04</span>Announcements</button>
           <button class="nav-item" data-page="socials"><span>05</span>Social Promotion</button>
-          <button class="nav-item" data-page="moderation"><span>06</span>Moderation</button>
+          <button class="nav-item" data-page="giveaways"><span>06</span>Giveaways</button>
+          <button class="nav-item" data-page="moderation"><span>07</span>Moderation</button>
         </nav>
         <div class="nav-label">Configuration</div>
         <nav>
-          <button class="nav-item" data-page="settings"><span>07</span>Server Settings</button>
-          <button class="nav-item" data-page="branding"><span>08</span>Appearance</button>
-          <button class="nav-item" data-page="welcome"><span>09</span>Welcome &amp; Goodbye</button>
+          <button class="nav-item" data-page="settings"><span>08</span>Server Settings</button>
+          <button class="nav-item" data-page="logging"><span>09</span>Server Logs</button>
+          <button class="nav-item" data-page="branding"><span>10</span>Appearance</button>
+          <button class="nav-item" data-page="welcome"><span>11</span>Welcome &amp; Goodbye</button>
           <div class="nav-group">
-            <button class="nav-item nav-parent" data-nav-toggle="security"><span>10</span>Security<i></i></button>
+            <button class="nav-item nav-parent" data-nav-toggle="security"><span>12</span>Security<i></i></button>
             <div class="nav-submenu" data-nav-menu="security">
               <button data-page="security" data-security-view="anti-raid">Anti Raid</button>
               <button data-page="security" data-security-view="anti-nuke">Anti Nuke</button>
@@ -50,7 +53,7 @@
             </div>
           </div>
           <div class="nav-group">
-            <button class="nav-item nav-parent" data-nav-toggle="automation"><span>11</span>Automation<i></i></button>
+            <button class="nav-item nav-parent" data-nav-toggle="automation"><span>12</span>Automation<i></i></button>
             <div class="nav-submenu" data-nav-menu="automation">
               <button data-page="automation" data-automation-view="auto-mod">Auto Mod</button>
               <button data-page="automation" data-automation-view="role-panels">Role Panels</button>
@@ -61,7 +64,7 @@
         </nav>
         <div class="nav-label">Help</div>
         <nav>
-          <button class="nav-item" data-page="docs"><span>12</span>Docs / Help</button>
+          <button class="nav-item" data-page="docs"><span>13</span>Docs / Help</button>
         </nav>
         <div class="sidebar-footer">
           <div class="connection-dot"></div>
@@ -81,7 +84,14 @@
             </div>
             <div id="dashboard-search-results" class="dashboard-search-results hidden" role="listbox"></div>
           </div>
-          <div class="topbar-actions"><span id="status" class="status"><i></i>Connected</span></div>
+          <div class="topbar-actions">
+            <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch color theme">
+              <svg class="theme-icon theme-icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+              <svg class="theme-icon theme-icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.5 15.2A8.5 8.5 0 0 1 8.8 3.5 8.5 8.5 0 1 0 20.5 15.2Z"/></svg>
+              <span class="theme-label">Dark</span>
+            </button>
+            <span id="status" class="status"><i></i>Connected</span>
+          </div>
         </header>
 
         <section class="page active" id="page-overview">
@@ -94,7 +104,7 @@
                 <p>Commands execute through <code>/custom name</code> with optional text, reason, and target inputs. True top-level commands still require Discord registration and a deploy sync.</p>
                 <button class="secondary-button jump-button" data-jump="custom">Open Command Studio</button>
               </div>
-              <div class="command-demo"><span>/custom</span><strong>server-info</strong><small>text: optional input</small></div>
+              <div class="command-demo"><span>/custom</span><strong>rules</strong><small>text: optional input</small></div>
             </article>
             <article class="surface checklist-card">
               <div class="section-title"><div><p class="eyebrow">Launch checklist</p><h2>Production-shaped MVP</h2></div></div>
@@ -117,7 +127,7 @@
         <section class="page" id="page-custom">
           <div class="page-intro">
             <div><span class="badge">Stable slash entrypoint</span><h2>Command Studio</h2><p>Design a command action, scope who can run it, and see the Discord response before saving.</p></div>
-            <div class="topbar-actions"><button class="secondary-button" data-doc-topic="custom-commands">Custom Commands docs</button><button class="secondary-button" data-doc-topic="command-studio-variables">Variables reference</button><button class="secondary-button new-editor" data-editor="custom">New command</button></div>
+            <div class="topbar-actions"><button class="secondary-button" data-doc-topic="custom-commands">Custom Commands docs</button><button class="secondary-button" data-doc-topic="commands">Variables reference</button><button class="secondary-button new-editor" data-editor="custom">New command</button></div>
           </div>
           <div class="builder-layout">
             <form id="custom-form" class="builder-stack">
@@ -125,8 +135,8 @@
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">01</span><h3>Command identity</h3><p>What people discover in autocomplete.</p></div><label class="switch"><input name="enabled" type="checkbox" checked><span></span><strong class="switch-state">Enabled</strong></label></div>
                 <div class="form-grid">
-                  <label class="field">Command name<input name="name" required maxlength="32" autocomplete="off" placeholder="server-info"><small>Lowercase letters, numbers, hyphens, and underscores only. Spaces are converted to hyphens.</small><span class="field-error" data-error-for="name"></span></label>
-                  <label class="field">Description<input name="description" maxlength="100" placeholder="Shows useful server information"><small>Shown in the dashboard and future command sync metadata.</small></label>
+                  <label class="field">Command name<input name="name" required maxlength="32" autocomplete="off" placeholder="rules"><small>Lowercase letters, numbers, hyphens, and underscores only. Spaces are converted to hyphens.</small><span class="field-error" data-error-for="name"></span></label>
+                  <label class="field">Description<input name="description" maxlength="100" placeholder="Shows the server rules"><small>Shown in the dashboard and future command sync metadata.</small></label>
                 </div>
               </section>
 
@@ -421,6 +431,7 @@
 
           <div class="ticket-view" id="ticket-view-history">
             <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Activity</p><h3>Recent tickets</h3></div></div><div id="ticket-history" class="table-wrap"></div></article>
+            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Archive</p><h3>Ticket transcripts</h3><p>Closed ticket transcripts saved by Odyssey Bot.</p></div></div><div id="ticket-transcripts" class="table-wrap"></div></article>
           </div>
 
           <div class="ticket-view" id="ticket-view-close-requests">
@@ -507,9 +518,39 @@
           </div>
         </section>
 
+        <section class="page" id="page-giveaways">
+          <div class="page-intro">
+            <div><span class="badge">Community rewards</span><h2>Giveaways</h2><p>Create restart-safe giveaways with role requirements, bonus entries, and winner history.</p></div>
+          </div>
+          <div class="builder-layout">
+            <form id="giveaway-form" class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Create giveaway</h3><p>Save as draft, then start it when the preview looks right.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Prize<input name="prize" required maxlength="200" placeholder="Nitro, merch, custom role"></label>
+                  <label class="field">Channel<select name="channelId" data-channel-select="text" required></select></label>
+                  <label class="field span-2">Description<textarea name="description" rows="4" maxlength="1000" placeholder="How to enter, eligibility, and extra notes."></textarea></label>
+                  <label class="field">Winners<input name="winnersCount" type="number" min="1" max="20" value="1"></label>
+                  <label class="field">Ends at<input name="endsAt" type="datetime-local" required></label>
+                  <label class="field">Required role<select name="requiredRoleId" data-role-select></select></label>
+                  <label class="field">Booster bonus entries<input name="boosterBonusEntries" type="number" min="0" max="20" value="0"></label>
+                  <label class="field">Bonus role<select name="bonusRoleId" data-role-select></select></label>
+                  <label class="field">Bonus role entries<input name="bonusRoleEntries" type="number" min="0" max="20" value="0"></label>
+                </div>
+              </section>
+              <div class="sticky-actions"><button type="submit">Save giveaway draft</button></div>
+            </form>
+            <aside class="preview-column">
+              <section class="surface preview-surface"><div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Giveaway embed</h3></div><span class="live-pill">Live</span></div><div id="giveaway-preview" class="discord-stage"></div></section>
+              <section class="surface saved-surface"><div class="section-title"><div><p class="eyebrow">Library</p><h3>Giveaways</h3></div><span id="giveaway-count" class="count-pill">0</span></div><div id="giveaway-list" class="item-list"></div></section>
+            </aside>
+          </div>
+        </section>
+
         <section class="page" id="page-moderation">
           <div class="page-intro"><div><span class="badge">Audit trail</span><h2>Moderation</h2><p>Warnings and actions recorded by the bot, kept compact and searchable by Discord ID.</p></div></div>
           <div class="data-stack">
+            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Case system</p><h3>Moderation cases</h3><p>Structured case records created by moderation commands and manual staff actions.</p></div></div><div id="cases-table" class="table-wrap"></div></article>
             <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Warnings</p><h3>Recent warnings</h3></div></div><div id="warnings-table" class="table-wrap"></div></article>
             <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Actions</p><h3>Moderation history</h3></div></div><div id="actions-table" class="table-wrap"></div></article>
           </div>
@@ -518,7 +559,7 @@
         <section class="page" id="page-settings">
           <div class="page-intro">
             <div><span class="badge">Discord resources</span><h2>Server settings</h2><p>Global channel and role defaults shared by commands and ticket workflows.</p></div>
-            <div class="topbar-actions"><button class="secondary-button" data-doc-topic="railway-hosting">Railway Hosting docs</button><button class="secondary-button" data-doc-topic="setup">Setup reference</button><button class="secondary-button" data-doc-topic="troubleshooting">Troubleshooting</button></div>
+            <div class="topbar-actions"><button class="secondary-button" data-doc-topic="railway-hosting">Railway Hosting docs</button><button class="secondary-button" data-doc-topic="setup">Setup reference</button><button class="secondary-button" data-doc-topic="missing-permissions">Troubleshooting</button></div>
           </div>
           <form id="settings-form" class="settings-layout">
             <section class="surface form-section"><div class="section-title"><div><span class="step">01</span><h3>Logging and routing</h3></div></div><div class="form-grid">
@@ -536,6 +577,66 @@
           </form>
         </section>
 
+        <section class="page" id="page-logging">
+          <div class="page-intro">
+            <div>
+              <span class="badge">Server audit feed</span>
+              <h2>Server logs</h2>
+              <p>Choose what Odyssey Bot records. Normal messages being sent are never logged.</p>
+            </div>
+          </div>
+          <form id="logging-form" class="settings-layout logging-layout">
+            <section class="surface form-section logging-hero-card">
+              <div class="section-title">
+                <div>
+                  <span class="step">01</span><h3>Logging destination</h3>
+                  <p>All enabled categories are delivered to one private staff channel.</p>
+                </div>
+                <label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
+              </div>
+              <div class="form-grid">
+                <label class="field">Logging channel<select name="channelId" data-channel-select="text"></select><small>Odyssey Bot needs View Channel, Send Messages, and Embed Links here.</small><span class="field-error" data-error-for="channelId"></span></label>
+                <div class="logging-assurance">
+                  <strong>Privacy boundary</strong>
+                  <span>Message edit and delete events include available message content. Ordinary message sends are not collected or copied.</span>
+                </div>
+              </div>
+            </section>
+
+            <section class="surface form-section">
+              <div class="section-title">
+                <div><span class="step">02</span><h3>Event categories</h3><p>Disable categories you do not need. Each event is sent as one compact embed.</p></div>
+              </div>
+              <div class="logging-category-grid">
+                <label class="check-card"><input name="members" type="checkbox"><span><strong>Members</strong><small>Joins, leaves, server nicknames, role changes, screening, and timeouts. Global profile changes are ignored.</small></span></label>
+                <label class="check-card"><input name="messages" type="checkbox"><span><strong>Message changes</strong><small>Edits, deletes, and bulk deletes only. Never normal sends.</small></span></label>
+                <label class="check-card"><input name="voice" type="checkbox"><span><strong>Voice</strong><small>Joins, leaves, moves, mute, deaf, camera, and streaming state.</small></span></label>
+                <label class="check-card"><input name="channels" type="checkbox"><span><strong>Channels</strong><small>Create, delete, name, topic, permissions, slowmode, NSFW, and category changes.</small></span></label>
+                <label class="check-card"><input name="roles" type="checkbox"><span><strong>Roles</strong><small>Create, delete, name, colour, permissions, position, hoist, and mentionable changes.</small></span></label>
+                <label class="check-card"><input name="server" type="checkbox"><span><strong>Server</strong><small>Guild settings, icon, banner, boosts, emojis, stickers, and webhooks.</small></span></label>
+                <label class="check-card"><input name="invites" type="checkbox"><span><strong>Invites</strong><small>Invite creation and deletion, including inviter when Discord provides it.</small></span></label>
+                <label class="check-card"><input name="threads" type="checkbox"><span><strong>Threads</strong><small>Create, delete, archive, lock, rename, slowmode, and auto-archive changes.</small></span></label>
+                <label class="check-card"><input name="moderation" type="checkbox"><span><strong>Moderation</strong><small>Bans, unbans, kicks, timeouts, and their audit-log executor when available.</small></span></label>
+                <label class="check-card"><input name="dashboard" type="checkbox"><span><strong>Dashboard changes</strong><small>Successful settings, command, ticket, module, and appearance updates.</small></span></label>
+              </div>
+            </section>
+
+            <section class="surface logging-capability-card">
+              <div>
+                <p class="eyebrow">Discord requirements</p>
+                <h3>For complete coverage</h3>
+                <p>Enable Server Members Intent and Message Content Intent in the Developer Portal. Grant View Audit Log, View Channel, Read Message History, Send Messages, and Embed Links.</p>
+              </div>
+              <span class="logging-no-message-pill">No message-send logging</span>
+            </section>
+
+            <div class="sticky-actions ticket-save-actions">
+              <div id="logging-save-status" class="form-save-status hidden" role="status" aria-live="polite"></div>
+              <button type="submit">Save server logging</button>
+            </div>
+          </form>
+        </section>
+
         <section class="page" id="page-branding">
           <div class="page-intro">
             <div><span class="badge">Visual identity</span><h2>Appearance</h2><p>Set reusable colors, media, panel defaults, and see the result before saving.</p></div>
@@ -547,7 +648,7 @@
                 <div class="section-title"><div><span class="step">01</span><h3>Brand identity</h3><p>Used as reusable defaults across server messages.</p></div></div>
                 <div class="form-grid">
                   <label class="field">Bot nickname in this server<input name="serverName" required maxlength="32" value="Odyssey Bot"><small>Saving updates Odyssey Bot's Discord nickname in the selected server. Discord requires Change Nickname permission.</small><span class="field-error" data-error-for="serverName"></span></label>
-                  <label class="field">Dashboard accent<div class="color-control"><input name="accentColor" type="color" value="#7785ff"><input name="accentColorText" value="#7785FF" maxlength="7"></div><small>Updates dashboard highlights for the active server.</small></label>
+                  <label class="field">Dashboard accent<div class="color-control"><input name="accentColor" type="color" value="#c58b4b"><input name="accentColorText" value="#C58B4B" maxlength="7"></div><small>Updates dashboard highlights for the active server.</small></label>
                   <label class="field">Footer text<input name="footerText" maxlength="200" placeholder="Powered by Odyssey Bot"></label>
                   <label class="field">Ticket button style<select name="ticketButtonStyle"><option value="secondary">Neutral gray</option><option value="primary">Discord blue</option><option value="success">Success green</option></select><small>Used by ticket panels displayed as buttons.</small></label>
                   <label class="field span-2">Embed icon<div class="media-control"><input name="embedIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedIconUrl">Upload</button></div><span class="field-error" data-error-for="embedIconUrl"></span></label>
@@ -738,40 +839,122 @@
               </form>
             </div>
             <div class="security-view security-full-span" id="security-view-verification">
-              <form id="verification-form" class="builder-stack">
-                <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">04</span><h3>Discord member verification</h3><p>Confirm Discord identity and server membership with a transparent consent flow.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
-                  <div class="privacy-disclosure">
-                    <strong>Privacy-first design</strong>
-                    <p>Odyssey Bot checks Discord account age, server membership, and optional VPN/proxy risk signals. It does not fingerprint devices or claim to detect alternate accounts. Records contain only the Discord user ID, result, reason codes, and expiry data.</p>
-                  </div>
-                  <div id="verification-provider-status" class="provider-status-grid"></div>
-                  <div class="form-grid">
-                    <label class="field">Verified role<select name="verifiedRoleId" data-role-select></select><small>Assigned after verification passes. Leave blank to skip auto-role assignment.</small></label>
-                    <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select></label>
-                    <label class="field">Action<select name="action"><option value="allow">Allow all (record only)</option><option value="flag">Flag for review (default)</option><option value="deny">Deny if any risk signal</option><option value="assign_role">Assign verified role</option></select><small>Default is Flag for review - safe for production.</small></label>
-                    <label class="field">Min account age (days)<input name="minAccountAgeDays" type="number" min="0" max="3650" value="0"><small>0 disables. Flags accounts newer than this many days.</small></label>
-                    <label class="field">Min server time (days)<input name="minServerDays" type="number" min="0" max="3650" value="0"><small>0 disables. Flags members who joined less than this many days ago.</small></label>
-                  </div>
-                  <div class="option-grid">
-                    <label class="check-card"><input name="vpnCheckEnabled" type="checkbox"><span><strong>VPN / proxy check</strong><small>Disabled unless VPN provider env vars are set.</small></span></label>
-                    <label class="check-card"><input name="vpnFailClosed" type="checkbox"><span><strong>Fail if VPN check unavailable</strong><small>Leave off to avoid blocking during outages.</small></span></label>
-                    <label class="field">Record retention (hours)<input name="recordRetentionHours" type="number" min="1" max="8760" value="168"></label>
-                  </div>
-                </section>
-                <div class="sticky-actions"><button type="submit">Save verification settings</button></div>
-              </form>
-
-              <section class="surface form-section verification-link-panel">
-                <div class="section-title"><div><h3>Create a verification link</h3><p>Links expire after 24 hours. Give this URL to members who need to verify.</p></div><button type="button" id="create-verification-link">Create link</button></div>
-                <div class="copy-row">
-                  <input id="verification-link" readonly placeholder="Create a link to show it here">
-                  <button type="button" class="secondary-button" id="copy-verification-link">Copy</button>
-                </div>
+              <section id="verification-readiness" class="surface diagnostics-panel" aria-live="polite">
+                <div class="section-title"><div><span class="step">Check</span><h3>Verification readiness</h3><p>Checking OAuth, role hierarchy, public URL, and Discord permissions.</p></div></div>
               </section>
 
-              <article class="surface table-card">
-                <div class="section-title"><div><p class="eyebrow">Recent verifications</p><h3>Verification records</h3><p>Only limited risk records are stored. Reason codes explain decisions. Records expire automatically.</p></div></div>
+              <div class="verification-gate-layout">
+                <form id="verification-form" class="builder-stack">
+                  <section class="surface form-section">
+                    <div class="section-title">
+                      <div><span class="step">01</span><h3>Gate identity</h3><p>Choose the role that unlocks the server and where members begin.</p></div>
+                      <label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
+                    </div>
+                    <div class="privacy-disclosure">
+                      <strong>Privacy-first verification</strong>
+                      <p>Odyssey Bot confirms Discord identity and server membership. Optional VPN checks are disclosed. Raw IPs and browser/device fingerprints are not stored.</p>
+                    </div>
+                    <div id="verification-provider-status" class="provider-status-grid"></div>
+                    <div class="form-grid">
+                      <label class="field">Verified / community role<select name="verifiedRoleId" data-role-select></select><small>Only assigned after verification passes. The bot role must be above it.</small><span class="field-error" data-error-for="verifiedRoleId"></span></label>
+                      <label class="field">Existing verification channel<select name="verificationChannelId" data-channel-select="text"></select><small>Choose one, or leave blank and enable automatic creation.</small><span class="field-error" data-error-for="verificationChannelId"></span></label>
+                      <label class="field">New channel name<input name="verificationChannelName" maxlength="100" value="verify"><small>Used only if Odyssey Bot creates the channel.</small><span class="field-error" data-error-for="verificationChannelName"></span></label>
+                      <label class="field">Verification log channel<select name="logChannelId" data-channel-select="text"></select><small>Receives setup, pass, fail, and role assignment events.</small><span class="field-error" data-error-for="logChannelId"></span></label>
+                    </div>
+                  </section>
+
+                  <section class="surface form-section">
+                    <div class="section-title"><div><span class="step">02</span><h3>Verification message</h3><p>Customize the embed and public button shown in Discord.</p></div></div>
+                    <div class="form-grid">
+                      <label class="field span-2">Embed title<input name="embedTitle" maxlength="256" value="Verify to Access the Server"><span class="field-error" data-error-for="embedTitle"></span></label>
+                      <label class="field span-2">Embed description<textarea name="embedDescription" rows="5" maxlength="4000">Click the button below to verify your Discord account. Once verified, you will receive the community role and unlock the rest of the server.</textarea><span class="field-error" data-error-for="embedDescription"></span></label>
+                      <label class="field">Embed colour<div class="color-control"><input name="embedColor" type="color" value="#c58b4b"><input name="embedColorText" value="#C58B4B" maxlength="7"></div><span class="field-error" data-error-for="embedColor"></span></label>
+                      <label class="field">Button text<input name="buttonText" maxlength="80" value="Verify Me"><span class="field-error" data-error-for="buttonText"></span></label>
+                      <label class="field span-2">Success message<textarea name="successMessage" rows="2" maxlength="1000">Verification passed. You can return to Discord.</textarea></label>
+                      <label class="field span-2">Failed message<textarea name="failureMessage" rows="2" maxlength="1000">Verification did not meet this server's requirements. Contact server staff if you need help.</textarea></label>
+                    </div>
+                  </section>
+
+                  <section class="surface form-section verification-permissions-card">
+                    <div class="section-title"><div><span class="step">03</span><h3>Unverified visibility</h3><p>Hidden selections override public selections. Existing staff and user overwrites are preserved.</p></div></div>
+                    <div class="inline-alert warning">
+                      <strong>Permission changes affect your live Discord server.</strong>
+                      Run the dry preview first. Odyssey Bot backs up every overwrite it changes so safe disable can restore it later.
+                    </div>
+                    <div class="form-grid">
+                      <label class="field">Public categories<select name="publicCategoryIds" data-channel-select="category" multiple size="7"></select><small>Unverified users can see these categories and synced children.</small></label>
+                      <label class="field">Public channels<select name="publicChannelIds" data-channel-select="all" multiple size="7"></select><small>Individual exceptions visible before verification.</small></label>
+                      <label class="field">Always hidden categories<select name="hiddenCategoryIds" data-channel-select="category" multiple size="7"></select><small>These remain hidden from unverified users.</small></label>
+                      <label class="field">Always hidden channels<select name="hiddenChannelIds" data-channel-select="all" multiple size="7"></select><small>Hidden takes precedence over public.</small><span class="field-error" data-error-for="hiddenChannelIds"></span></label>
+                    </div>
+                    <div class="option-grid verification-option-grid">
+                      <label class="check-card"><input name="lockAllChannels" type="checkbox" checked><span><strong>Lock the server by default</strong><small>Hide normal areas from @everyone except public and verification areas.</small></span></label>
+                      <label class="check-card"><input name="autoCreateChannel" type="checkbox" checked><span><strong>Create the verification channel</strong><small>Create it during setup if the saved channel is missing.</small></span></label>
+                      <label class="check-card"><input name="lockVerificationChannel" type="checkbox" checked><span><strong>Read-only verification channel</strong><small>Members can read and click the button but cannot chat there.</small></span></label>
+                      <label class="check-card"><input name="updateEmbedOnSetup" type="checkbox" checked><span><strong>Update the saved embed</strong><small>Edit the existing verification message when setup runs.</small></span></label>
+                      <label class="check-card"><input name="applyPermissionsImmediately" type="checkbox"><span><strong>Apply when settings are saved</strong><small>Off is safer: save first, preview, then run setup manually.</small></span></label>
+                    </div>
+                    <div id="verification-visibility-summary" class="verification-visibility-summary"></div>
+                  </section>
+
+                  <section class="surface form-section">
+                    <div class="section-title"><div><span class="step">04</span><h3>Risk checks and retention</h3><p>Choose how disclosed risk signals affect role assignment.</p></div></div>
+                    <div class="form-grid">
+                      <label class="field">Risk action<select name="action"><option value="allow">Allow and record signals</option><option value="flag">Hold for staff review (default)</option><option value="deny">Deny if any risk signal</option><option value="assign_role">Assign role and record signals</option></select></label>
+                      <label class="field">Record retention (hours)<input name="recordRetentionHours" type="number" min="1" max="8760" value="168"></label>
+                      <label class="field">Minimum account age (days)<input name="minAccountAgeDays" type="number" min="0" max="3650" value="0"><small>0 disables this signal.</small></label>
+                      <label class="field">Minimum server time (days)<input name="minServerDays" type="number" min="0" max="3650" value="0"><small>0 disables this signal.</small></label>
+                    </div>
+                    <div class="option-grid">
+                      <label class="check-card"><input name="vpnCheckEnabled" type="checkbox"><span><strong>VPN / proxy check</strong><small>Runs only when the optional provider is configured.</small></span></label>
+                      <label class="check-card"><input name="vpnFailClosed" type="checkbox"><span><strong>Fail if provider is unavailable</strong><small>Usually leave this off to avoid blocking during provider outages.</small></span></label>
+                    </div>
+                  </section>
+
+                  <div class="sticky-actions ticket-save-actions">
+                    <div id="verification-save-status" class="form-save-status hidden" role="status" aria-live="polite"></div>
+                    <button type="submit">Save verification settings</button>
+                  </div>
+                </form>
+
+                <aside class="builder-stack verification-side">
+                  <section class="surface preview-card">
+                    <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Verification panel</h3><p>This is how the Discord message will look.</p></div><span class="live-pill">Live</span></div>
+                    <div id="verification-preview" class="discord-stage"></div>
+                    <div class="verification-role-preview"><span>Role after passing</span><strong id="verification-role-preview">Not configured</strong></div>
+                  </section>
+
+                  <section class="surface form-section verification-actions-card">
+                    <div class="section-title"><div><p class="eyebrow">Setup controls</p><h3>Preview, apply, or repair</h3><p>Save the form before applying live Discord changes.</p></div></div>
+                    <div id="verification-setup-status" class="verification-setup-status"></div>
+                    <div class="verification-action-stack">
+                      <button type="button" class="secondary-button" id="preview-verification-setup">Dry run / preview changes</button>
+                      <button type="button" id="apply-verification-setup">Apply verification setup</button>
+                      <button type="button" class="secondary-button" id="repost-verification-embed">Repost / update embed</button>
+                      <button type="button" class="danger-button" id="disable-verification-mode">Disable and restore permissions</button>
+                    </div>
+                    <div id="verification-setup-result" class="verification-setup-result hidden" aria-live="polite"></div>
+                  </section>
+
+                  <section class="surface form-section verification-link-panel">
+                    <div class="section-title"><div><h3>Stable server link</h3><p>This public link is used by the Discord verification button.</p></div><button type="button" class="secondary-button compact" id="copy-stable-verification-link">Copy</button></div>
+                    <input id="stable-verification-link" readonly placeholder="Set VERIFY_PUBLIC_BASE_URL to generate this link">
+                    <details>
+                      <summary>Temporary one-off link <span>24 hours</span></summary>
+                      <div class="details-body">
+                        <div class="copy-row">
+                          <input id="verification-link" readonly placeholder="Create a temporary link">
+                          <button type="button" class="secondary-button" id="copy-verification-link">Copy</button>
+                        </div>
+                        <button type="button" id="create-verification-link">Create temporary link</button>
+                      </div>
+                    </details>
+                  </section>
+                </aside>
+              </div>
+
+              <article class="surface table-card verification-record-card">
+                <div class="section-title"><div><p class="eyebrow">Recent verifications</p><h3>Verification records</h3><p>Limited records contain Discord user ID, result, disclosed reason codes, and expiry. Raw IPs and fingerprints are not stored.</p></div></div>
                 <div id="verification-records" class="table-wrap"></div>
               </article>
             </div>
@@ -787,9 +970,15 @@
           <div class="automation-view active" id="automation-view-auto-mod">
             <form id="auto-mod-form" class="settings-layout">
               <section id="automod-diagnostics" class="surface diagnostics-panel" aria-live="polite">
-                <div class="section-title"><div><span class="step">Check</span><h3>Discord readiness</h3><p>Checking intents and permissions for this server…</p></div></div>
+                <div class="diagnostic-header">
+                  <div class="diagnostic-heading">
+                    <span class="diagnostic-indicator" aria-hidden="true"><span class="diagnostic-spinner"></span></span>
+                    <div><span class="diagnostic-eyebrow">Checking</span><h3>Checking Discord readiness</h3><p>AutoMod settings are ready to edit while the live permission check runs.</p></div>
+                  </div>
+                  <span class="diagnostic-state">Checking…</span>
+                </div>
               </section>
-              <section class="surface form-section">
+              <section id="automod-rules-card" class="surface form-section">
                 <div class="section-title"><div><span class="step">01</span><h3>Auto Mod rules</h3><p>Choose exactly what the bot should detect. Administrators are ignored automatically.</p></div><label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
                 <div class="option-grid">
                   <label class="check-card"><input name="blockInvites" type="checkbox"><span><strong>Discord invites</strong><small>Detect discord.gg and Discord invite URLs.</small></span></label>
@@ -813,7 +1002,7 @@
                   <label class="field">Ignored roles<select name="ignoredRoleIds" data-role-select multiple size="6"></select></label>
                   <label class="field span-2">Ignored user IDs<textarea name="ignoredUserIds" rows="2" placeholder="123456789012345678 987654321098765432"></textarea></label>
                 </div>
-                <div class="field-builder-header automod-rule-header"><div><strong>Channel-specific link rules</strong><small>Allow selected domains in a channel while continuing to block Discord invites or explicitly blocked domains.</small></div><button type="button" class="secondary-button compact" id="add-automod-link-rule">Add channel rule</button></div>
+                <div id="automod-link-rules-section" class="field-builder-header automod-rule-header"><div><strong>Channel-specific link rules</strong><small>Allow selected domains in a channel while continuing to block Discord invites or explicitly blocked domains.</small></div><button type="button" class="secondary-button compact" id="add-automod-link-rule">Add channel rule</button></div>
                 <div id="automod-link-rules" class="field-builder"></div>
                 <span class="field-error" data-error-for="linkChannelRules"></span>
               </section>
@@ -826,15 +1015,22 @@
               <form id="role-panel-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Button role panel</h3><p>Members click a button to add or remove one of the approved roles.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Role panel</h3><p>Create button or dropdown role menus with simple categories and previews.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
                   <div class="form-grid">
                     <label class="field">Panel name<input name="name" required maxlength="100" placeholder="Community Roles"></label>
                     <label class="field">Post channel<select name="channelId" data-channel-select="text"></select></label>
+                    <label class="field">Layout<select name="layout"><option value="buttons">Buttons</option><option value="dropdown">Dropdown menu</option></select><small>Buttons are best for a few roles. Dropdowns are cleaner for larger menus.</small></label>
+                    <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select><small>Optional. Falls back to the mod log channel.</small></label>
                     <label class="field span-2">Discord title<input name="title" required maxlength="256" value="Choose your roles"></label>
                     <label class="field span-2">Description<textarea name="description" rows="4" maxlength="4000" placeholder="Click a button to add or remove a role."></textarea></label>
                     <label class="field">Color<div class="color-control"><input name="color" type="color" value="#5865f2"><input name="colorText" value="#5865F2" maxlength="7"></div></label>
-                    <label class="field">Roles<select name="roleIds" data-role-select multiple size="8"></select><small>The bot role must be above every selected role.</small><span class="field-error" data-error-for="roleIds"></span></label>
+                    <label class="field">Global required role<select name="requiredRoleId" data-role-select></select><small>Optional role required before claiming any role on this panel.</small></label>
+                    <label class="field">Max per category<input name="maxSelectedPerCategory" type="number" min="0" max="25" value="0"><small>0 means unlimited unless category replacement is enabled.</small></label>
+                    <label class="check-card"><input name="removeRoleOnSelect" type="checkbox"><span><strong>Replace within category</strong><small>When enabled, selecting one role removes older roles in the same category.</small></span></label>
+                    <label class="field span-2">Roles<select name="roleIds" data-role-select multiple size="8"></select><small>The bot role must be above every selected role. Select roles, then customize how each option appears below.</small><span class="field-error" data-error-for="roleIds"></span></label>
                   </div>
+                  <div class="field-builder-header"><div><strong>Role options</strong><small>Labels, descriptions, categories, and emojis shown on the live panel.</small></div></div>
+                  <div id="role-panel-options" class="role-option-grid"></div>
                 </section>
                 <div class="sticky-actions"><button type="submit">Save role panel</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
               </form>
@@ -895,24 +1091,24 @@
         <section class="page" id="page-docs">
           <div class="page-intro">
             <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run Odyssey Bot, from first setup to troubleshooting.</p></div>
-            <div class="topbar-actions"><input type="search" id="docs-search" placeholder="Search docs..."></div>
+            <div class="topbar-actions"><button type="button" id="docs-search-trigger" class="docs-search-trigger"><span>Search docs</span><kbd>⌘K</kbd></button></div>
           </div>
           <section class="docs-hero surface">
             <div>
-              <p class="eyebrow">Start from GitHub</p>
-              <h3>Download, configure, and launch Odyssey Bot</h3>
-              <p>The guide uses the real scripts from this repository and keeps every secret in your local <code>.env</code> file.</p>
+              <p class="eyebrow">Setup guide system</p>
+              <h3>Find the right setup step without hunting through the repo</h3>
+              <p>Docs are grouped by first setup, feature guides, feature references, and troubleshooting. Code blocks use the real scripts from this project and secrets stay in your local <code>.env</code>.</p>
             </div>
             <div class="docs-hero-actions">
               <button type="button" data-doc-topic="quick-start">Open Quick Start</button>
               <button type="button" class="secondary-button" data-doc-topic="setup">Full setup guide</button>
-              <button type="button" class="secondary-button" data-doc-topic="railway-hosting">Railway hosting</button>
+              <button type="button" class="secondary-button" data-doc-topic="cloudflare-verification-setup">Cloudflare verification</button>
             </div>
-            <div class="docs-command-strip"><code>git clone &lt;YOUR_GITHUB_REPO_URL&gt;</code><code>pnpm install</code><code>pnpm dev</code></div>
+            <div class="docs-command-strip"><code>git clone &lt;YOUR_GITHUB_REPO_URL&gt;</code><code>pnpm install</code><code>pnpm db:setup</code><code>pnpm dev</code></div>
           </section>
           <div class="docs-browser">
             <aside class="surface docs-topic-panel">
-              <div class="section-title"><div><p class="eyebrow">Knowledge base</p><h3>Topics</h3></div></div>
+              <div class="section-title"><div><p class="eyebrow">Knowledge base</p><h3>Docs library</h3><p>Use the categories or search by feature, error, or setup step.</p></div></div>
               <div id="docs-topic-list" class="docs-topic-list"></div>
             </aside>
             <article class="surface docs-article">
@@ -920,6 +1116,34 @@
                 <div class="empty-state"><strong>Loading documentation</strong><span>The help center is preparing your topics.</span></div>
               </div>
             </article>
+            <aside id="docs-page-toc" class="surface docs-page-toc">
+              <div class="section-title"><div><p class="eyebrow">On this page</p><h3>Contents</h3></div></div>
+              <div class="empty-state"><strong>Pick a guide</strong><span>A section list appears after a docs page opens.</span></div>
+            </aside>
+          </div>
+          <div id="docs-search-modal" class="docs-search-modal hidden" aria-hidden="true">
+            <div class="docs-search-backdrop" data-docs-search-close></div>
+            <section class="docs-search-dialog" role="dialog" aria-modal="true" aria-labelledby="docs-search-title">
+              <div class="docs-search-input-row">
+                <label class="hidden" for="docs-search">Search documentation</label>
+                <input type="search" id="docs-search" autocomplete="off" spellcheck="false" placeholder="Search docs, setup steps, or errors...">
+                <button type="button" id="docs-search-close" class="docs-search-close" aria-label="Close docs search">×</button>
+              </div>
+              <div class="docs-search-body">
+                <div class="docs-search-heading">
+                  <div>
+                    <p class="eyebrow">Command palette</p>
+                    <h3 id="docs-search-title">Search documentation</h3>
+                  </div>
+                  <span>Use ↑ ↓ and Enter</span>
+                </div>
+                <div id="docs-search-results" class="docs-search-results"></div>
+              </div>
+              <div class="docs-search-footer">
+                <span>Enter to open</span>
+                <span>Esc to close</span>
+              </div>
+            </section>
           </div>
           <div class="docs-layout hidden docs-legacy-source">
             <aside class="docs-toc surface">

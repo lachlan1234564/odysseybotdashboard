@@ -4,16 +4,16 @@ import {
   ChannelType
 } from "discord.js";
 import { requireBotAdmin } from "./utils.js";
+import { deferCommandReply, replyEphemeral, replyToCommand } from "./interactions.js";
 
 export async function handleLockdown(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guild) {
-    await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command only works in a server.");
     return;
   }
 
+  await deferCommandReply(interaction);
   if (!(await requireBotAdmin(interaction))) return;
-
-  await interaction.deferReply({ ephemeral: true });
 
   const channels = interaction.guild.channels.cache.filter(
     (channel) => channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement
@@ -45,18 +45,17 @@ export async function handleLockdown(interaction: ChatInputCommandInteraction): 
     .setDescription(`${locked} channel(s) locked.${failed > 0 ? ` ${failed} failed (check bot permissions).` : ""}`)
     .setFooter({ text: `Lockdown by ${interaction.user.username}` });
 
-  await interaction.editReply({ embeds: [embed] });
+  await replyToCommand(interaction, { embeds: [embed] });
 }
 
 export async function handleUnlockdown(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guild) {
-    await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command only works in a server.");
     return;
   }
 
+  await deferCommandReply(interaction);
   if (!(await requireBotAdmin(interaction))) return;
-
-  await interaction.deferReply({ ephemeral: true });
 
   const channels = interaction.guild.channels.cache.filter(
     (channel) => channel.type === ChannelType.GuildText || channel.type === ChannelType.GuildAnnouncement
@@ -88,7 +87,7 @@ export async function handleUnlockdown(interaction: ChatInputCommandInteraction)
     .setDescription(`${unlocked} channel(s) unlocked.${failed > 0 ? ` ${failed} failed (check bot permissions).` : ""}`)
     .setFooter({ text: `Unlocked by ${interaction.user.username}` });
 
-  await interaction.editReply({ embeds: [embed] });
+  await replyToCommand(interaction, { embeds: [embed] });
 }
 
 export async function handleBotStatus(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -113,5 +112,5 @@ export async function handleBotStatus(interaction: ChatInputCommandInteraction):
     )
     .setFooter({ text: "Odyssey Bot diagnostics" });
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await replyEphemeral(interaction, { embeds: [embed] });
 }

@@ -6,6 +6,7 @@ import {
   ChatInputCommandInteraction,
   Guild,
   GuildTextBasedChannel,
+  MessageFlags,
   PermissionFlagsBits
 } from "discord.js";
 import { getAnnouncement, getBranding, getGuildSettings } from "../database/index.js";
@@ -14,6 +15,7 @@ import { replacePlaceholders } from "../shared/placeholders.js";
 import { renderEmbedMessage, type RenderedMessage } from "./messages.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
 import { isBotAdmin, requireBotAdmin } from "./utils.js";
+import { deferCommandReply, replyEphemeral, replyToCommand } from "./interactions.js";
 
 export async function buildAnnouncementMessage(
   guild: Guild,
@@ -72,9 +74,10 @@ export function getMissingAnnouncementPermission(
 
 export async function handleAnnounce(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId || !interaction.guild) {
-    await interaction.reply({ content: "This command can only be used in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command can only be used in a server.");
     return;
   }
+  await deferCommandReply(interaction);
   if (!(await requireBotAdmin(interaction))) return;
 
   const templateId = Number(interaction.options.getString("template", true));
@@ -83,7 +86,7 @@ export async function handleAnnounce(interaction: ChatInputCommandInteraction): 
     getGuildSettings(interaction.guildId)
   ]);
   if (!template) {
-    await interaction.reply({ content: "That announcement template no longer exists.", ephemeral: true });
+    await replyToCommand(interaction, "That announcement template no longer exists.");
     return;
   }
 
@@ -91,7 +94,7 @@ export async function handleAnnounce(interaction: ChatInputCommandInteraction): 
     ?? template.targetChannelId
     ?? settings.announcementChannelId;
   if (!channelId) {
-    await interaction.reply({ content: "Choose a channel or configure an announcement channel in the dashboard.", ephemeral: true });
+    await replyToCommand(interaction, "Choose a channel or configure an announcement channel in the dashboard.");
     return;
   }
   const targetChannel = await interaction.guild.channels.fetch(channelId).catch(() => null);
@@ -101,7 +104,7 @@ export async function handleAnnounce(interaction: ChatInputCommandInteraction): 
     targetChannel?.isTextBased() && !targetChannel.isDMBased() ? targetChannel : null
   );
   if (!built) {
-    await interaction.reply({ content: "That announcement template no longer exists.", ephemeral: true });
+    await replyToCommand(interaction, "That announcement template no longer exists.");
     return;
   }
   const { message } = built;
@@ -117,12 +120,11 @@ export async function handleAnnounce(interaction: ChatInputCommandInteraction): 
       .setStyle(ButtonStyle.Secondary)
   );
 
-  await interaction.reply({
+  await replyToCommand(interaction, {
     content: [`Preview for <#${channelId}>`, message.content].filter(Boolean).join("\n\n"),
     embeds: message.embeds,
     files: message.files,
-    components: [buttons],
-    ephemeral: true
+    components: [buttons]
   });
 }
 
@@ -141,7 +143,7 @@ export async function handleAnnouncementButton(interaction: ButtonInteraction): 
   }
 
   if (!(await isBotAdmin(interaction))) {
-    await interaction.reply({ content: "You are not allowed to post announcements.", ephemeral: true });
+    await interaction.reply({ content: "You are not allowed to post announcements.", flags: MessageFlags.Ephemeral });
     return;
   }
 

@@ -2,12 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { Router, type Request } from "express";
-import { PermissionFlagsBits, REST, Routes } from "discord.js";
+import { ChannelType, PermissionFlagsBits, REST, Routes } from "discord.js";
 import multer from "multer";
 import { marked } from "marked";
 import { z } from "zod";
 import {
   createAnnouncement,
+  createGiveaway,
+  createModerationCase,
   createRolePanel,
   createScheduledAnnouncement,
   createStickyMessage,
@@ -29,8 +31,12 @@ import {
   getAutoModSettings,
   getAnnouncement,
   getBranding,
+  getGiveaway,
   getGuildSettings,
+  getLoggingSettings,
+  getModerationCase,
   getOverview,
+  getTicketTranscript,
   getTicketPanel,
   getRolePanel,
   getScheduledAnnouncement,
@@ -40,6 +46,9 @@ import {
   getWelcomeSettings,
   listAnnouncements,
   listCustomCommands,
+  listGiveaways,
+  listGiveawayEntries,
+  listModerationCases,
   listModerationActions,
   listRolePanels,
   listScheduledAnnouncements,
@@ -47,6 +56,7 @@ import {
   listRecentTickets,
   listTicketPanels,
   listTicketCloseRequests,
+  listTicketTranscripts,
   listTicketTypes,
   listWarnings,
   listVerificationRecords,
@@ -57,11 +67,15 @@ import {
   saveBranding,
   resetBranding,
   saveGuildSettings,
+  saveLoggingSettings,
   saveSocialPromotionSettings,
   saveVerificationSettings,
   saveWelcomeSettings,
   updateAnnouncement,
   updateCustomCommand,
+  updateGiveaway,
+  updateModerationCase,
+  updateVerificationRecordReview,
   updateTicketPanel,
   updateTicketType,
   updateRolePanel,
@@ -84,6 +98,27 @@ import { emptyActionConfig, emptyEmbedConfig } from "../shared/types.js";
 import { customCommandNeedsTrustedAccess } from "../shared/security.js";
 import { isValidCommandName, normalizeCommandName } from "../shared/validation.js";
 import { resolveGuildSelection, type ManageableGuild } from "./guild-selection.js";
+import {
+  AutoModReadinessCache,
+  type AutoModReadinessResult,
+  buildUnavailableReadiness,
+  retryReadinessRequest
+} from "./auto-mod-readiness.js";
+import {
+  docsAnchorId,
+  type DocsTopicDefinition,
+  searchDocsIndex
+} from "./docs-search.js";
+import {
+  assignVerifiedRole,
+  buildStableVerificationUrl,
+  logVerificationFailure,
+  restoreVerificationPermissions,
+  runVerificationSetup,
+  sanitizeVerificationChannelName,
+  sendVerificationEventLog,
+  VerificationSetupError
+} from "../shared/verification-gate.js";
 
 const config = loadDashboardConfig();
 const router = Router();
@@ -91,42 +126,72 @@ const rest = new REST({ version: "10", timeout: 5_000, retries: 1 }).setToken(co
 const loginAttempts = new Map<string, { count: number; blockedUntil: number }>();
 type DiscordGuildSummary = ManageableGuild;
 let guildCache: { expiresAt: number; guilds: DiscordGuildSummary[] } | null = null;
+const autoModReadinessCache = new AutoModReadinessCache(2 * 60_000);
+const autoModReadinessInFlight = new Map<string, Promise<AutoModReadinessResult>>();
 const uploadsPath = resolveUploadsPath(config.UPLOADS_DIR);
 fs.mkdirSync(uploadsPath, { recursive: true });
 const docsPath = path.join(config.projectRoot, "docs");
-const docsTopics = [
-  { slug: "quick-start", title: "Quick Start", description: "Download from GitHub, configure, and launch the bot for the first time.", files: ["QUICK-START.md"] },
-  { slug: "getting-started", title: "Getting Started", description: "Understand the project, its processes, and the first configuration steps.", files: ["GETTING-STARTED.md"] },
-  { slug: "setup", title: "Setup", description: "Discord application, environment variables, database, and command registration.", files: ["SETUP.md"] },
-  { slug: "dashboard-guide", title: "Dashboard Guide", description: "A tour of every current dashboard area and safe testing workflow.", files: ["DASHBOARD-GUIDE.md"] },
-  { slug: "custom-commands", title: "Custom Commands", description: "Build actions, permissions, placeholders, cooldowns, and embeds.", files: ["COMMAND-BUILDER.md", "ACTION-TEMPLATES.md", "VARIABLES.md"] },
-  { slug: "command-builder", title: "Command Builder", description: "Create and validate database-backed commands in Command Studio.", files: ["COMMAND-BUILDER.md"] },
-  { slug: "action-templates", title: "Action Templates", description: "Choose message, role, ticket, channel, moderation, and sequence actions.", files: ["ACTION-TEMPLATES.md"] },
-  { slug: "tickets", title: "Tickets", description: "Ticket types, public panels, close requests, and history.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md", "TICKET-CLOSE.md"] },
-  { slug: "ticket-setup", title: "Ticket Setup", description: "Build a complete ticket workflow in the correct order.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md"] },
-  { slug: "ticket-panels", title: "Ticket Panels", description: "Build the public messages members use to open tickets.", files: ["TICKET-PANELS.md"] },
-  { slug: "ticket-types", title: "Ticket Types", description: "Configure ticket routing, staff, access, lifecycle, and welcome messages.", files: ["TICKET-TYPES.md"] },
-  { slug: "close-requests", title: "Close Requests", description: "Use the ticket button or /close-request staff approval workflow.", files: ["TICKET-CLOSE.md"] },
-  { slug: "staff-access", title: "Staff Access", description: "Give staff dashboard access without sharing bot secrets.", files: ["STAFF-ACCESS.md"] },
-  { slug: "railway-hosting", title: "Railway Hosting", description: "Deploy the long-running bot, dashboard, PostgreSQL, and uploads.", files: ["RAILWAY-HOSTING.md"] },
-  { slug: "modlogs", title: "Modlogs", description: "Configure and read moderation, ticket, and security logs.", files: ["MODLOGS.md", "SECURITY-LOGS.md"] },
-  { slug: "welcome-messages", title: "Welcome & Goodbye", description: "Configure public welcomes, DMs, embeds, auto-roles, and leave messages.", files: ["WELCOME.md"] },
-  { slug: "security-overview", title: "Security Overview", description: "Understand safe defaults before enabling automated actions.", files: ["SECURITY-OVERVIEW.md"] },
-  { slug: "anti-raid", title: "Anti Raid", description: "Detect suspicious join waves and choose a response.", files: ["ANTI-RAID.md"] },
-  { slug: "anti-nuke", title: "Anti Nuke", description: "Monitor destructive audit-log activity and protect the server.", files: ["ANTI-NUKE.md"] },
-  { slug: "role-protection", title: "Role Protection", description: "Detect dangerous role changes and protected-role assignments.", files: ["ROLE-PROTECTION.md"] },
-  { slug: "auto-mod", title: "Auto Mod", description: "Block invites, suspicious links, caps, spam, and mass mentions.", files: ["AUTO-MOD.md"] },
-  { slug: "role-panels", title: "Role Panels", description: "Let members add or remove approved roles with buttons.", files: ["ROLE-PANELS.md"] },
-  { slug: "sticky-messages", title: "Sticky Messages", description: "Keep an important message at the bottom of a busy channel.", files: ["STICKY-MESSAGES.md"] },
-  { slug: "scheduled-announcements", title: "Scheduled Announcements", description: "Send announcement templates once or on a repeating schedule.", files: ["SCHEDULED-ANNOUNCEMENTS.md"] },
-  { slug: "social-promotion", title: "Social Promotion", description: "Build, preview, and publish a safe directory of community links.", files: ["SOCIAL-PROMOTION.md"] },
-  { slug: "ticket-transcripts", title: "Ticket Transcripts", description: "Export the latest ticket messages when a ticket closes.", files: ["TICKET-TRANSCRIPTS.md"] },
-  { slug: "permissions", title: "Permissions", description: "Discord permissions, role hierarchy, and dashboard access rules.", files: ["PERMISSIONS.md"] },
-  { slug: "troubleshooting", title: "Troubleshooting", description: "Solve common bot, dashboard, upload, database, and hosting problems.", files: ["TROUBLESHOOTING.md"] },
-  { slug: "cloudflare-verification-setup", title: "Cloudflare Verification Setup", description: "Set up Cloudflare Tunnel with separate verify/admin hostnames and OAuth.", files: ["cloudflare-verification-setup.md"] },
-  { slug: "verification-process", title: "Verification Process", description: "How privacy-conscious Discord identity and membership verification works.", files: ["verification-process.md"] },
-  { slug: "command-studio-variables", title: "Command Studio Variables", description: "All available placeholders for custom commands, tickets, and templates.", files: ["command-studio-variables.md"] }
-] as const;
+const docsTopics: readonly DocsTopicDefinition[] = [
+  { slug: "introduction", title: "Introduction", description: "What Odyssey Bot does, what the dashboard controls, and how the pieces fit together.", files: ["GETTING-STARTED.md", "QUICK-START.md"], path: "Overview → Introduction", category: "Overview", aliases: ["start here", "what is odyssey bot", "overview"] },
+  { slug: "dashboard-guide", title: "Dashboard Overview", description: "A guided tour of the current dashboard pages and safe testing workflow.", files: ["DASHBOARD-GUIDE.md"], path: "Overview → Dashboard overview", category: "Overview", aliases: ["dashboard overview", "dashboard guide", "pages"] },
+  { slug: "features", title: "Features", description: "A plain-language map of the bot modules and where to configure them.", files: ["DASHBOARD-GUIDE.md", "SECURITY-OVERVIEW.md"], path: "Overview → Features", category: "Overview", aliases: ["feature overview", "what can the bot do"], defaultHash: "dashboard-pages-overview" },
+
+  { slug: "quick-start", title: "Getting Started", description: "Download from GitHub, install dependencies, and launch the bot/dashboard locally.", files: ["DOWNLOAD_AND_SETUP.md", "QUICK-START.md", "GETTING-STARTED.md"], path: "First steps → Getting started", category: "First steps", aliases: ["quick start", "install", "run bot", "download github", "download and setup"] },
+  { slug: "setup", title: "Server Setup", description: "Create the Discord app, invite the bot, initialize the database, and register slash commands.", files: ["SETUP.md"], path: "First steps → Server setup", category: "First steps", aliases: ["setup", "slash commands", "discord application", "database setup"] },
+  { slug: "permissions", title: "Permissions and Intents", description: "Required Discord permissions, privileged intents, and role hierarchy rules.", files: ["PERMISSIONS.md", "SETUP.md"], path: "First steps → Permissions and intents", category: "First steps", aliases: ["missing permissions", "role hierarchy", "intents", "developer portal"], defaultHash: "required-bot-permissions-by-feature" },
+  { slug: "environment-variables", title: "Environment Variables", description: "What belongs in .env, what stays in the dashboard, and which values are optional.", files: ["SETUP.md", "RAILWAY-HOSTING.md"], path: "First steps → Environment variables", category: "First steps", aliases: ["env", ".env", "database url", "dashboard password", "oauth secret"], defaultHash: "step-6-create-your-env-file" },
+  { slug: "staff-access", title: "Staff Access", description: "Give staff dashboard access safely without sharing bot tokens or local secrets.", files: ["STAFF-ACCESS.md"], path: "First steps → Staff access", category: "First steps", aliases: ["staff login", "dashboard access", "share with staff"], hiddenFromNav: true },
+  { slug: "railway-hosting", title: "Railway Hosting", description: "Run the bot/dashboard as a long-running Railway service with shared storage.", files: ["RAILWAY-HOSTING.md"], path: "First steps → Railway hosting", category: "First steps", aliases: ["host bot", "production deploy", "railway"], hiddenFromNav: true },
+
+  {
+    slug: "cloudflare-verification-setup",
+    title: "Cloudflare Verification Setup",
+    description: "Set up Cloudflare Tunnel with separate public verification and protected admin hostnames.",
+    files: ["cloudflare-verification-setup.md"],
+    path: "Guides → Cloudflare verification setup",
+    category: "Guides",
+    aliases: ["cloudfare verification setup", "cloudflare tunnel", "oauth redirect", "discord oauth redirect", "verify hostname"],
+    sections: [
+      { title: "Requirements", hash: "requirements", aliases: ["accounts you need", "requirements"] },
+      { title: "Discord Developer Portal", hash: "discord-developer-portal", aliases: ["oauth redirect", "redirect url", "discord oauth redirect"] },
+      { title: "Cloudflare Tunnel", hash: "cloudflare-tunnel", aliases: ["cloudflare tunnel", "cloudfare tunnel"] },
+      { title: "DNS records", hash: "dns-records", aliases: ["dns", "dns records"] },
+      { title: "Cloudflare Access policy", hash: "cloudflare-access-policy", aliases: ["cloudflare access", "admin access policy"] },
+      { title: ".env settings", hash: "env-settings", aliases: ["env", "verify public base url", "trust proxy"] },
+      { title: "OAuth redirect URL", hash: "oauth-redirect-url", aliases: ["oauth redirect", "discord redirect url"] },
+      { title: "Verification flow", hash: "verification-flow", aliases: ["apply verification gate", "verify flow"] },
+      { title: "Privacy summary", hash: "privacy-summary", aliases: ["privacy", "stored data"] }
+    ]
+  },
+  { slug: "verification-process", title: "Verification Setup", description: "Configure the dashboard verification gate, verified role, visibility rules, and privacy-safe checks.", files: ["verification-process.md", "VERIFICATION-PRIVACY.md"], path: "Guides → Verification setup", category: "Guides", aliases: ["verification setup", "verify page", "oauth", "verified role"] },
+  { slug: "ticket-setup", title: "Ticket Setup", description: "Create ticket types, attach them to panels, post the panel, and verify close/transcript behavior.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md", "TICKET-CLOSE.md", "TICKET-TRANSCRIPTS.md"], path: "Guides → Ticket setup", category: "Guides", aliases: ["tickets", "support setup", "ticket panel setup", "requests", "close requests", "ticket close requests", "request review"] },
+  { slug: "modlogs", title: "Logging Setup", description: "Choose the log channel, enable event categories, and understand what is intentionally ignored.", files: ["MODLOGS.md", "SECURITY-LOGS.md"], path: "Guides → Logging setup", category: "Guides", aliases: ["logging", "logging setup", "logs", "audit logs", "server logs", "mod logs"] },
+  { slug: "auto-mod", title: "AutoMod Setup", description: "Configure invite blocking, suspicious links, caps, spam, mass mentions, and exemptions.", files: ["AUTO-MOD.md"], path: "Guides → AutoMod setup", category: "Guides", aliases: ["automod", "automod setup", "auto moderation", "invite blocker", "spam filters"] },
+  { slug: "role-panels", title: "Role Panel Setup", description: "Create safe self-service role buttons and test role hierarchy before publishing.", files: ["ROLE-PANELS.md"], path: "Guides → Role panel setup", category: "Guides", aliases: ["roles", "role panels", "reaction roles", "button roles", "self roles"] },
+  { slug: "giveaways", title: "Giveaway Setup", description: "Create restart-safe giveaways, collect entries, end early, cancel, and reroll winners.", files: ["GIVEAWAYS.md"], path: "Guides → Giveaway setup", category: "Guides", aliases: ["giveaways", "giveaway setup", "reroll", "winners"] },
+  { slug: "moderation-setup", title: "Moderation Setup", description: "Use warnings, timeouts, kicks, bans, clears, and moderation records safely.", files: ["DASHBOARD-GUIDE.md", "MODLOGS.md"], path: "Guides → Moderation setup", category: "Guides", aliases: ["moderation", "warn", "kick", "ban", "timeout"], defaultHash: "moderation" },
+  { slug: "custom-commands", title: "Commands Setup", description: "Build command actions, permissions, placeholders, cooldowns, embeds, and channel sends.", files: ["COMMAND-BUILDER.md", "ACTION-TEMPLATES.md", "command-studio-variables.md", "PLAINTEXT-REPLIES.md", "EMBED-REPLIES.md", "CHANNEL-SENDS.md", "ROLE-ACTIONS.md"], path: "Guides → Commands setup", category: "Guides", aliases: ["commands", "custom commands", "command setup", "command builder"] },
+
+  { slug: "verification", title: "Verification", description: "Feature reference for member verification, OAuth, visibility, privacy, and records.", files: ["verification-process.md", "VERIFICATION-PRIVACY.md"], path: "Features → Verification", category: "Features", aliases: ["verify feature", "verified role feature"], defaultHash: "member-flow" },
+  { slug: "tickets", title: "Tickets", description: "Feature reference for ticket types, public panels, close requests, history, and transcripts.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md", "TICKET-CLOSE.md", "TICKET-TRANSCRIPTS.md"], path: "Features → Tickets", category: "Features", aliases: ["support tickets", "ticket types", "ticket close requests", "requests", "close requests"] },
+  { slug: "logging", title: "Logging", description: "Feature reference for server event logs, moderation logs, security logs, and dashboard changes.", files: ["MODLOGS.md", "SECURITY-LOGS.md"], path: "Features → Logging", category: "Features", aliases: ["server logs", "audit feed", "event logging"] },
+  { slug: "automod", title: "AutoMod", description: "Feature reference for message rules, link rules, bypasses, actions, and safe testing.", files: ["AUTO-MOD.md"], path: "Features → AutoMod", category: "Features", aliases: ["automod feature", "auto moderation rules"] },
+  { slug: "role-panels-feature", title: "Role Panels", description: "Feature reference for self-service roles, button panels, hierarchy, and member testing.", files: ["ROLE-PANELS.md", "ROLE-PROTECTION.md"], path: "Features → Role panels", category: "Features", aliases: ["reaction roles feature", "self roles feature"] },
+  { slug: "moderation", title: "Moderation", description: "Feature reference for moderation commands, warning history, and audit visibility.", files: ["DASHBOARD-GUIDE.md", "MODLOGS.md"], path: "Features → Moderation", category: "Features", aliases: ["warnings", "moderation records"], defaultHash: "moderation" },
+  { slug: "moderation-cases", title: "Moderation Cases", description: "Feature reference for case numbers, case search, manual cases, notes, and statuses.", files: ["MODERATION-CASES.md"], path: "Features → Moderation cases", category: "Features", aliases: ["cases", "case system", "moderation cases"] },
+  { slug: "commands", title: "Commands", description: "Feature reference for command builder fields, action templates, variables, and role actions.", files: ["COMMAND-BUILDER.md", "ACTION-TEMPLATES.md", "VARIABLES.md", "command-studio-variables.md"], path: "Features → Commands", category: "Features", aliases: ["custom command reference", "command variables"] },
+  { slug: "social-promotion", title: "Socials", description: "Feature reference for the social promotion embed, link safety, images, and channel sending.", files: ["SOCIAL-PROMOTION.md"], path: "Features → Socials", category: "Features", aliases: ["socials", "social promotion"] },
+  { slug: "welcome-messages", title: "Welcome and Boost Messages", description: "Configure joins, leaves, DMs, boost messages, and automatic roles.", files: ["WELCOME.md"], path: "Features → Welcome and boost messages", category: "Features", aliases: ["welcome", "goodbye", "boost messages", "auto roles"], hiddenFromNav: true },
+  { slug: "security-overview", title: "Security Safeguards", description: "Understand anti-raid, anti-nuke, role protection, and safe rollout basics.", files: ["SECURITY-OVERVIEW.md", "ANTI-RAID.md", "ANTI-NUKE.md", "ROLE-PROTECTION.md"], path: "Features → Security safeguards", category: "Features", aliases: ["security guide", "anti raid", "anti nuke"], hiddenFromNav: true },
+  { slug: "role-protection", title: "Role Protection", description: "Detect protected-role assignment and dangerous role changes.", files: ["ROLE-PROTECTION.md"], path: "Features → Role protection", category: "Features", aliases: ["anti role", "role security", "protected roles"], hiddenFromNav: true },
+
+  { slug: "discord-readiness-issues", title: "Discord Readiness Issues", description: "What to check when Discord resources or readiness checks cannot be loaded.", files: ["TROUBLESHOOTING.md"], path: "Troubleshooting → Discord readiness issues", category: "Troubleshooting", aliases: ["discord readiness", "readiness unavailable"], defaultHash: "discord-readiness-issues" },
+  { slug: "oauth-redirect-issues", title: "OAuth Redirect Issues", description: "Fix mismatched Discord OAuth redirect URLs and verification callback problems.", files: ["TROUBLESHOOTING.md", "cloudflare-verification-setup.md"], path: "Troubleshooting → OAuth redirect issues", category: "Troubleshooting", aliases: ["oauth redirect", "invalid redirect uri"], defaultHash: "oauth-redirect-issues" },
+  { slug: "cloudflare-tunnel-issues", title: "Cloudflare Tunnel Issues", description: "Troubleshoot tunnels, hostnames, Access policies, and proxy configuration.", files: ["TROUBLESHOOTING.md", "cloudflare-verification-setup.md"], path: "Troubleshooting → Cloudflare tunnel issues", category: "Troubleshooting", aliases: ["cloudflare tunnel", "cloudfare tunnel", "502"], defaultHash: "cloudflare-tunnel-issues" },
+  { slug: "missing-permissions", title: "Missing Permissions", description: "Resolve missing Discord permissions for tickets, logs, roles, moderation, and verification.", files: ["TROUBLESHOOTING.md", "PERMISSIONS.md"], path: "Troubleshooting → Missing permissions", category: "Troubleshooting", aliases: ["permission errors", "bot cannot send", "manage messages"], defaultHash: "missing-permissions" },
+  { slug: "bot-offline", title: "Bot Offline", description: "Check startup, token, intents, command registration, Railway process, and local dev commands.", files: ["TROUBLESHOOTING.md", "SETUP.md"], path: "Troubleshooting → Bot offline", category: "Troubleshooting", aliases: ["bot offline", "application did not respond", "commands not appearing"], defaultHash: "bot-offline" },
+  { slug: "role-hierarchy-issues", title: "Role Hierarchy Issues", description: "Fix failed role assignment, verification, moderation, and role panel actions.", files: ["TROUBLESHOOTING.md", "PERMISSIONS.md"], path: "Troubleshooting → Role hierarchy issues", category: "Troubleshooting", aliases: ["role hierarchy", "role above bot", "role actions failing"], defaultHash: "role-hierarchy-issues" }
+];
 
 function logDashboardRoute(input: {
   route: string;
@@ -154,9 +219,18 @@ function readDocsMarkdown(files: readonly string[]): string {
 }
 
 function renderDocsMarkdown(markdown: string): string {
+  const used = new Map<string, number>();
   return String(marked.parse(markdown, { gfm: true }))
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
-    .replace(/\son\w+="[^"]*"/gi, "");
+    .replace(/\son\w+="[^"]*"/gi, "")
+    .replace(/<h([1-4])>([\s\S]*?)<\/h\1>/gi, (_match, level: string, inner: string) => {
+      const text = inner.replace(/<[^>]+>/g, "");
+      const base = docsAnchorId(text);
+      const count = used.get(base) ?? 0;
+      used.set(base, count + 1);
+      const id = count ? `${base}-${count}` : base;
+      return `<h${level} id="${id}" class="docs-heading">${inner}<a class="docs-heading-anchor" href="#${id}" aria-label="Link to this section">#</a></h${level}>`;
+    });
 }
 const upload = multer({
   storage: multer.diskStorage({
@@ -189,6 +263,47 @@ const settingsSchema = z.object({
   staffRoleIds: idArray,
   mutedRoleId: optionalId,
   adminRoleIds: idArray
+});
+
+const loggingSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  channelId: optionalId,
+  members: z.boolean().default(true),
+  messages: z.boolean().default(true),
+  voice: z.boolean().default(true),
+  channels: z.boolean().default(true),
+  roles: z.boolean().default(true),
+  server: z.boolean().default(true),
+  invites: z.boolean().default(true),
+  threads: z.boolean().default(true),
+  moderation: z.boolean().default(true),
+  dashboard: z.boolean().default(true)
+}).superRefine((value, context) => {
+  if (value.enabled && !value.channelId) {
+    context.addIssue({
+      code: "custom",
+      path: ["channelId"],
+      message: "Choose a Discord text channel before enabling server logging."
+    });
+  }
+  if (value.enabled && ![
+    value.members,
+    value.messages,
+    value.voice,
+    value.channels,
+    value.roles,
+    value.server,
+    value.invites,
+    value.threads,
+    value.moderation,
+    value.dashboard
+  ].some(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["enabled"],
+      message: "Enable at least one logging category."
+    });
+  }
 });
 
 const brandingSchema = z.object({
@@ -579,6 +694,17 @@ function hashVerificationToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+function verificationRedirectUri(req: Request): string {
+  return config.DISCORD_OAUTH_REDIRECT_URI
+    ?? `${config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+}
+
+function verificationResultUrl(result: string, guildId?: string): string {
+  const query = new URLSearchParams({ result });
+  if (guildId) query.set("guild", guildId);
+  return `/verify.html?${query.toString()}`;
+}
+
 function discordAccountCreatedAt(userId: string): Date {
   return new Date(Number((BigInt(userId) >> 22n) + 1420070400000n));
 }
@@ -698,13 +824,13 @@ async function sendDiscordMessage(
   body: Record<string, unknown>,
   files: UploadFile[] = [],
   action = "Could not send the Discord message."
-): Promise<void> {
+): Promise<unknown> {
   try {
     const channel = await rest.get(Routes.channel(channelId)) as { guild_id?: string };
     if (channel.guild_id !== guildId) {
       throw publicRequestError("That channel does not belong to the server currently selected in the dashboard.");
     }
-    await rest.post(Routes.channelMessages(channelId), {
+    return await rest.post(Routes.channelMessages(channelId), {
       body,
       files
     });
@@ -713,6 +839,68 @@ async function sendDiscordMessage(
     logDiscordError(action, error);
     throw publicRequestError(friendlyDiscordError(error, action), 502);
   }
+}
+
+function dashboardActionLabel(method: string, pathValue: string): string {
+  const cleanPath = pathValue
+    .replace(/\/\d+(?=\/|$)/g, "/:id")
+    .replace(/^\/|\/$/g, "");
+  const labels: Record<string, string> = {
+    "PUT settings": "Server settings changed",
+    "PUT logging": "Server logging settings changed",
+    "PUT branding": "Appearance settings changed",
+    "DELETE branding": "Appearance settings reset",
+    "POST custom-commands": "Custom command created",
+    "PUT custom-commands/:id": "Custom command updated",
+    "DELETE custom-commands/:id": "Custom command deleted",
+    "POST ticket-types": "Ticket type created",
+    "PUT ticket-types/:id": "Ticket type updated",
+    "DELETE ticket-types/:id": "Ticket type deleted",
+    "POST ticket-panels": "Ticket panel created",
+    "PUT ticket-panels/:id": "Ticket panel updated",
+    "DELETE ticket-panels/:id": "Ticket panel deleted",
+    "POST announcements": "Announcement template created",
+    "PUT announcements/:id": "Announcement template updated",
+    "DELETE announcements/:id": "Announcement template deleted",
+    "PUT socials": "Social promotion settings changed",
+    "PUT welcome": "Welcome, goodbye, or boost settings changed",
+    "PUT anti-raid": "Anti-raid settings changed",
+    "PUT anti-nuke": "Anti-nuke settings changed",
+    "PUT anti-role": "Role protection settings changed",
+    "PUT auto-mod": "Auto Mod settings changed",
+    "PUT verification": "Verification settings changed",
+    "POST verification/link": "Temporary verification link created",
+    "POST verification/dry-run": "Verification setup previewed",
+    "POST verification/setup": "Verification setup applied",
+    "POST verification/repost": "Verification embed updated",
+    "POST verification/disable": "Verification mode disabled"
+  };
+  return labels[`${method} ${cleanPath}`] ?? `Dashboard ${method} /${cleanPath}`;
+}
+
+async function sendDashboardChangeLog(
+  guildId: string,
+  method: string,
+  pathValue: string
+): Promise<void> {
+  const settings = await getLoggingSettings(guildId);
+  if (!settings.enabled || !settings.dashboard || !settings.channelId) return;
+  const title = dashboardActionLabel(method, pathValue);
+  await sendDiscordMessage(guildId, settings.channelId, {
+    embeds: [{
+      color: 0xA17A58,
+      author: { name: "Odyssey Bot • Dashboard" },
+      title,
+      description: "A successful configuration change was made from the protected dashboard.",
+      fields: [
+        { name: "Source", value: "Authenticated dashboard session", inline: true },
+        { name: "Request", value: `\`${method} ${pathValue.replace(/\/\d+(?=\/|$)/g, "/:id")}\``, inline: true }
+      ],
+      footer: { text: `Guild ID: ${guildId}` },
+      timestamp: new Date().toISOString()
+    }],
+    allowed_mentions: { parse: [] }
+  }, [], "Could not send the dashboard change log.");
 }
 
 async function validateTicketTypeReferences(
@@ -876,9 +1064,9 @@ router.get("/verify/:token/start", async (req, res, next) => {
 
     const state = crypto.randomBytes(24).toString("base64url");
     req.session.verificationTokenHash = tokenHash;
+    req.session.verificationGuildId = link.guildId;
     req.session.verificationOAuthState = state;
-    const redirectUri = config.DISCORD_OAUTH_REDIRECT_URI
-      ?? `${config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+    const redirectUri = verificationRedirectUri(req);
     const authorization = new URL("https://discord.com/oauth2/authorize");
     authorization.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
     authorization.searchParams.set("response_type", "code");
@@ -891,26 +1079,74 @@ router.get("/verify/:token/start", async (req, res, next) => {
   }
 });
 
+router.get("/verify/server/:guildId/start", async (req, res, next) => {
+  try {
+    if (!config.DISCORD_CLIENT_SECRET || !config.VERIFY_PUBLIC_BASE_URL) {
+      throw publicRequestError("Discord OAuth verification is not configured.", 503);
+    }
+    const guildId = z.string().regex(/^\d{17,20}$/).parse(req.params.guildId);
+    const settings = await getVerificationSettings(guildId);
+    if (!settings.enabled) throw publicRequestError("Verification is currently disabled for this server.", 403);
+
+    const state = crypto.randomBytes(24).toString("base64url");
+    delete req.session.verificationTokenHash;
+    req.session.verificationGuildId = guildId;
+    req.session.verificationOAuthState = state;
+    const authorization = new URL("https://discord.com/oauth2/authorize");
+    authorization.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
+    authorization.searchParams.set("response_type", "code");
+    authorization.searchParams.set("scope", "identify guilds.members.read");
+    authorization.searchParams.set("redirect_uri", verificationRedirectUri(req));
+    authorization.searchParams.set("state", state);
+    res.redirect(authorization.toString());
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/verify/result", async (req, res, next) => {
+  try {
+    const guildId = z.string().regex(/^\d{17,20}$/).parse(req.query.guild);
+    const result = z.enum(["passed", "failed", "flagged", "role_failed", "error"]).parse(req.query.result);
+    const settings = await getVerificationSettings(guildId);
+    const messages: Record<typeof result, string> = {
+      passed: settings.successMessage,
+      failed: settings.failureMessage,
+      flagged: "Verification needs staff review. You have not received the community role yet.",
+      role_failed: "Verification passed, but the community role could not be assigned. Contact server staff.",
+      error: "Verification could not be completed. Ask staff for a new link or try again later."
+    };
+    res.json({ result, message: messages[result] });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/verify/callback", async (req, res, next) => {
+  let activeGuildId = req.session.verificationGuildId;
   try {
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const state = typeof req.query.state === "string" ? req.query.state : "";
     const tokenHash = req.session.verificationTokenHash;
-    if (!code || !state || !tokenHash || state !== req.session.verificationOAuthState) {
+    if (!code || !state || (!tokenHash && !activeGuildId) || state !== req.session.verificationOAuthState) {
       throw publicRequestError("The verification session is invalid or expired.", 400);
     }
     delete req.session.verificationTokenHash;
     delete req.session.verificationOAuthState;
+    delete req.session.verificationGuildId;
 
-    const link = await getVerificationLink(tokenHash);
-    if (!link) throw publicRequestError("This verification link is invalid or expired.", 404);
-    const settings = await getVerificationSettings(link.guildId);
+    if (tokenHash) {
+      const link = await getVerificationLink(tokenHash);
+      if (!link) throw publicRequestError("This verification link is invalid or expired.", 404);
+      activeGuildId = link.guildId;
+    }
+    if (!activeGuildId) throw publicRequestError("The verification server could not be resolved.", 400);
+    const settings = await getVerificationSettings(activeGuildId);
     if (!settings.enabled || !config.DISCORD_CLIENT_SECRET) {
       throw publicRequestError("Verification is not currently available.", 503);
     }
 
-    const redirectUri = config.DISCORD_OAUTH_REDIRECT_URI
-      ?? `${config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+    const redirectUri = verificationRedirectUri(req);
     const tokenResponse = await fetch("https://discord.com/api/v10/oauth2/token", {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -938,8 +1174,9 @@ router.get("/verify/callback", async (req, res, next) => {
 
     let serverJoinedAt: string | null = null;
     let serverAgeDays = 0;
+    let memberMissing = false;
     try {
-      const member = await rest.get(Routes.guildMember(link.guildId, user.id)) as { joined_at?: string };
+      const member = await rest.get(Routes.guildMember(activeGuildId, user.id)) as { joined_at?: string };
       if (member?.joined_at) {
         serverJoinedAt = new Date(member.joined_at).toISOString();
         serverAgeDays = Math.floor((Date.now() - new Date(member.joined_at).getTime()) / 86_400_000);
@@ -947,8 +1184,9 @@ router.get("/verify/callback", async (req, res, next) => {
     } catch (error) {
       const errorCode = error && typeof error === "object" && "code" in error ? Number(error.code) : null;
       if (errorCode === 10007) {
-        res.redirect("/verify.html?result=failed");
-        return;
+        memberMissing = true;
+      } else {
+        throw error;
       }
     }
 
@@ -956,12 +1194,16 @@ router.get("/verify/callback", async (req, res, next) => {
     let riskScore = 0;
     let status: "passed" | "flagged" | "denied" = "passed";
 
+    if (memberMissing) {
+      reasonCodes.push("not_server_member");
+      riskScore += 100;
+    }
     if (accountAgeDays < settings.minAccountAgeDays) {
       reasonCodes.push("new_discord_account");
       riskScore += 30;
     }
 
-    if (settings.minServerDays > 0 && serverAgeDays < settings.minServerDays) {
+    if (!memberMissing && settings.minServerDays > 0 && serverAgeDays < settings.minServerDays) {
       reasonCodes.push("recent_server_member");
       riskScore += 20;
     }
@@ -984,15 +1226,15 @@ router.get("/verify/callback", async (req, res, next) => {
       }
     }
 
-    if (settings.action === "deny" && reasonCodes.length > 0) {
+    if (memberMissing || (settings.action === "deny" && reasonCodes.length > 0)) {
       status = "denied";
-    } else if (reasonCodes.length > 0) {
+    } else if (settings.action === "flag" && reasonCodes.length > 0) {
       status = "flagged";
     }
 
     const expiresAt = new Date(Date.now() + settings.recordRetentionHours * 3_600_000).toISOString();
     await createVerificationRecord({
-      guildId: link.guildId,
+      guildId: activeGuildId,
       userId: user.id,
       status,
       reasonCodes,
@@ -1004,20 +1246,42 @@ router.get("/verify/callback", async (req, res, next) => {
     });
 
     if (status === "denied") {
-      res.redirect("/verify.html?result=failed");
+      await logVerificationFailure({
+        rest,
+        settings,
+        userId: user.id,
+        status,
+        reasonCodes
+      });
+      res.redirect(verificationResultUrl("failed", activeGuildId));
+    } else if (status === "flagged") {
+      await logVerificationFailure({
+        rest,
+        settings,
+        userId: user.id,
+        status,
+        reasonCodes
+      });
+      res.redirect(verificationResultUrl("flagged", activeGuildId));
     } else {
+      let roleAssigned = true;
       if (settings.verifiedRoleId) {
-        try {
-          await rest.put(Routes.guildMemberRole(link.guildId, user.id, settings.verifiedRoleId));
-        } catch {
-          // role assignment failed, but verification passed
-        }
+        const assignment = await assignVerifiedRole({ rest, settings, userId: user.id });
+        roleAssigned = assignment.assigned;
       }
-      res.redirect("/verify.html?result=passed");
+      if (!settings.verifiedRoleId) {
+        await sendVerificationEventLog(
+          rest,
+          settings,
+          "Member verification passed",
+          `<@${user.id}> passed verification. No verified role is configured.`
+        );
+      }
+      res.redirect(verificationResultUrl(roleAssigned ? "passed" : "role_failed", activeGuildId));
     }
   } catch (error) {
     logErrorStack("Discord OAuth verification callback failed", error);
-    res.redirect("/verify.html?result=error");
+    res.redirect(verificationResultUrl("error", activeGuildId));
   }
 });
 
@@ -1073,29 +1337,71 @@ router.use(async (req, res, next) => {
   }
 });
 
+router.use((req, res, next) => {
+  if (!["POST", "PUT", "PATCH", "DELETE"].includes(req.method)) {
+    next();
+    return;
+  }
+  const guildId = res.locals.guildId as string;
+  res.on("finish", () => {
+    if (res.statusCode < 200 || res.statusCode >= 400) return;
+    sendDashboardChangeLog(guildId, req.method, req.path).catch((error) => {
+      logError(`Dashboard change logging failed (${req.method} ${req.path})`, error);
+    });
+  });
+  next();
+});
+
 router.get("/docs", (req, res) => {
-  const search = typeof req.query.search === "string" ? req.query.search.trim().toLowerCase() : "";
-  const topics = docsTopics.filter((topic) => {
-    if (!search) return true;
-    const markdown = readDocsMarkdown(topic.files).toLowerCase();
-    return topic.title.toLowerCase().includes(search)
-      || topic.description.toLowerCase().includes(search)
-      || markdown.includes(search);
-  }).map(({ slug, title, description }) => ({ slug, title, description }));
-  res.json(topics);
+  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+  if (search) {
+    res.json(searchDocsIndex(search, docsTopics, (topic) => readDocsMarkdown(topic.files)));
+    return;
+  }
+  res.json(docsTopics.filter((topic) => !topic.hiddenFromNav).map(({ slug, title, navTitle, description, path, category, defaultHash }) => ({
+    slug,
+    title,
+    navTitle,
+    description,
+    path,
+    category,
+    defaultHash,
+    kind: "page"
+  })));
 });
 
 router.get("/docs/:slug", (req, res) => {
-  const topic = docsTopics.find((candidate) => candidate.slug === req.params.slug);
+  const topicIndex = docsTopics.findIndex((candidate) => candidate.slug === req.params.slug);
+  const topic = docsTopics[topicIndex];
   if (!topic) {
     res.status(404).json({ error: "Documentation topic not found." });
     return;
   }
   const markdown = readDocsMarkdown(topic.files);
+  const visibleTopics = docsTopics.filter((candidate) => !candidate.hiddenFromNav);
+  const visibleTopicIndex = visibleTopics.findIndex((candidate) => candidate.slug === topic.slug);
+  const previous = visibleTopicIndex >= 0 ? visibleTopics[visibleTopicIndex - 1] : null;
+  const next = visibleTopicIndex >= 0 ? visibleTopics[visibleTopicIndex + 1] : null;
   res.json({
     slug: topic.slug,
     title: topic.title,
+    navTitle: topic.navTitle,
     description: topic.description,
+    path: topic.path,
+    category: topic.category,
+    defaultHash: topic.defaultHash,
+    previous: previous ? {
+      slug: previous.slug,
+      title: previous.title,
+      path: previous.path,
+      defaultHash: previous.defaultHash
+    } : null,
+    next: next ? {
+      slug: next.slug,
+      title: next.title,
+      path: next.path,
+      defaultHash: next.defaultHash
+    } : null,
     html: renderDocsMarkdown(markdown)
   });
 });
@@ -1180,6 +1486,28 @@ router.get("/settings", async (_req, res) => {
 router.put("/settings", async (req, res) => {
   const input = settingsSchema.parse(req.body);
   res.json(await saveGuildSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+router.get("/logging", async (_req, res) => {
+  res.json(await getLoggingSettings(res.locals.guildId));
+});
+
+router.put("/logging", async (req, res) => {
+  const input = loggingSettingsSchema.parse(req.body);
+  if (input.channelId) {
+    const channel = await rest.get(Routes.channel(input.channelId)) as {
+      guild_id?: string;
+      type?: number;
+    };
+    if (channel.guild_id !== res.locals.guildId || ![0, 5].includes(channel.type ?? -1)) {
+      throw publicRequestError(
+        "The selected logging channel is missing, is not a text channel, or belongs to another server.",
+        400,
+        { channelId: "Choose a text or announcement channel from the selected Discord server." }
+      );
+    }
+  }
+  res.json(await saveLoggingSettings({ guildId: res.locals.guildId, ...input }));
 });
 
 router.get("/branding", async (_req, res) => {
@@ -1570,14 +1898,54 @@ router.post("/test/ticket-panel", async (req, res, next) => {
 });
 
 router.get("/moderation", async (_req, res) => {
-  const [warnings, actions] = await Promise.all([
+  const [warnings, actions, cases] = await Promise.all([
     listWarnings(res.locals.guildId, undefined, 100),
-    listModerationActions(res.locals.guildId, 100)
+    listModerationActions(res.locals.guildId, 100),
+    listModerationCases(res.locals.guildId, { limit: 100 })
   ]);
   res.json({
     warnings,
-    actions
+    actions,
+    cases
   });
+});
+
+const moderationCaseSchema = z.object({
+  targetUserId: z.string().regex(/^\d{17,20}$/),
+  moderatorId: z.string().regex(/^\d{17,20}$/).default("dashboard"),
+  actionType: z.string().trim().min(1).max(40),
+  reason: z.string().max(1000).default(""),
+  durationSeconds: z.coerce.number().int().min(0).max(2_419_200).nullable().default(null),
+  evidenceUrl: urlOrEmpty,
+  status: z.enum(["active", "expired", "reversed", "deleted", "resolved"]).default("active"),
+  notes: z.string().max(2000).default("")
+});
+
+router.get("/moderation/cases", async (req, res) => {
+  const filters = z.object({
+    targetUserId: z.string().regex(/^\d{17,20}$/).optional(),
+    moderatorId: z.string().regex(/^\d{17,20}$/).optional(),
+    actionType: z.string().max(40).optional(),
+    status: z.string().max(40).optional()
+  }).parse(req.query);
+  res.json(await listModerationCases(res.locals.guildId, { ...filters, limit: 100 }));
+});
+
+router.post("/moderation/cases", async (req, res) => {
+  const input = moderationCaseSchema.parse(req.body);
+  res.status(201).json(await createModerationCase({ guildId: res.locals.guildId, ...input }));
+});
+
+router.put("/moderation/cases/:caseNumber", async (req, res) => {
+  const caseNumber = parseId(req.params.caseNumber);
+  if (!caseNumber) return res.status(400).json({ error: "Invalid case number." });
+  const input = z.object({
+    reason: z.string().max(1000).optional(),
+    notes: z.string().max(2000).optional(),
+    status: z.enum(["active", "expired", "reversed", "deleted", "resolved"]).optional()
+  }).parse(req.body);
+  const result = await updateModerationCase(res.locals.guildId, caseNumber, input);
+  return result ? res.json(result) : res.status(404).json({ error: "Moderation case not found." });
 });
 
 const welcomeSchema = z.object({
@@ -1871,33 +2239,38 @@ function channelPermissionsForBot(
   return permissions;
 }
 
-router.get("/auto-mod/diagnostics", async (_req, res) => {
-  const startedAt = performance.now();
-  const guildId = res.locals.guildId;
-  try {
-    const settings = await getAutoModSettings(guildId);
-    const [member, roles, channels, application] = await Promise.all([
-      withTimeout(
-        rest.get(Routes.guildMember(guildId, "@me")) as Promise<DiscordMemberPermissions>,
-        6_000,
+function discordReadinessGet<T>(route: `/${string}`, label: string): Promise<T> {
+  return retryReadinessRequest(
+    () => withTimeout(rest.get(route) as Promise<T>, 5_250, label),
+    2,
+    175
+  );
+}
+
+async function refreshAutoModReadiness(guildId: string): Promise<AutoModReadinessResult> {
+  const settings = await getAutoModSettings(guildId);
+  const [member, roles, channels, application] = await withTimeout(
+    Promise.all([
+      discordReadinessGet<DiscordMemberPermissions>(
+        Routes.guildMember(guildId, "@me"),
         "Discord bot member lookup"
       ),
-      withTimeout(
-        rest.get(Routes.guildRoles(guildId)) as Promise<DiscordRolePermissions[]>,
-        6_000,
+      discordReadinessGet<DiscordRolePermissions[]>(
+        Routes.guildRoles(guildId),
         "Discord role lookup"
       ),
-      withTimeout(
-        rest.get(Routes.guildChannels(guildId)) as Promise<DiscordChannelPermissions[]>,
-        6_000,
+      discordReadinessGet<DiscordChannelPermissions[]>(
+        Routes.guildChannels(guildId),
         "Discord channel lookup"
       ),
-      withTimeout(
-        rest.get(Routes.currentApplication()) as Promise<{ flags?: number }>,
-        6_000,
+      discordReadinessGet<{ flags?: number }>(
+        Routes.currentApplication(),
         "Discord application lookup"
       )
-    ]);
+    ]),
+    12_000,
+    "Discord readiness refresh"
+  );
     const applicationFlags = BigInt(application.flags ?? 0);
     const guildMembersIntentFlags = (1n << 14n) | (1n << 15n);
     const messageContentIntentFlags = (1n << 18n) | (1n << 19n);
@@ -1947,8 +2320,12 @@ router.get("/auto-mod/diagnostics", async (_req, res) => {
     ) {
       warnings.push(`Odyssey Bot cannot send embeds in #${logChannel.name}. Check View Channel, Send Messages, and Embed Links.`);
     }
-    const response = {
+    const response: AutoModReadinessResult = {
       ok: warnings.length === 0,
+      status: warnings.length === 0 ? "ready" : "warning",
+      summary: warnings.length === 0
+        ? "Discord intents and permissions are ready for AutoMod."
+        : "Discord is connected, but some intents or permissions need attention.",
       warnings,
       checks: [
         { label: "Message Content Intent", ok: (applicationFlags & messageContentIntentFlags) !== 0n },
@@ -1967,8 +2344,62 @@ router.get("/auto-mod/diagnostics", async (_req, res) => {
           name: roles.find((role) => role.id === id)?.name ?? "Deleted or unavailable role"
         })),
         ignoredUserIds: settings.ignoredUserIds
-      }
+      },
+      checkedAt: new Date().toISOString()
     };
+  autoModReadinessCache.set(guildId, response);
+  return response;
+}
+
+function getAutoModReadinessRefresh(guildId: string): Promise<AutoModReadinessResult> {
+  const existing = autoModReadinessInFlight.get(guildId);
+  if (existing) return existing;
+  const refresh = refreshAutoModReadiness(guildId).finally(() => {
+    if (autoModReadinessInFlight.get(guildId) === refresh) {
+      autoModReadinessInFlight.delete(guildId);
+    }
+  });
+  autoModReadinessInFlight.set(guildId, refresh);
+  return refresh;
+}
+
+function autoModReadinessFailureCopy(error: unknown): { summary?: string; warning?: string } {
+  const code = error && typeof error === "object" && "code" in error
+    ? Number((error as { code?: unknown }).code)
+    : undefined;
+  if ([10004, 10007, 50001].includes(code ?? 0)) {
+    return {
+      summary: "Odyssey Bot could not access the selected Discord server.",
+      warning: "Confirm the bot is still installed in this server and can view its channels. Saved AutoMod settings remain available."
+    };
+  }
+  if (code === 50013) {
+    return {
+      summary: "Discord responded, but Odyssey Bot is missing access needed for the readiness check.",
+      warning: "Review the bot role and channel permissions. Saved AutoMod settings can still be edited and saved."
+    };
+  }
+  return {};
+}
+
+router.get("/auto-mod/diagnostics", async (req, res) => {
+  const startedAt = performance.now();
+  const guildId = res.locals.guildId;
+  const force = req.query.force === "true";
+  const cached = force ? null : autoModReadinessCache.getFresh(guildId);
+  if (cached) {
+    logDashboardRoute({
+      route: "GET /api/auto-mod/diagnostics",
+      guildId,
+      startedAt,
+      status: 200
+    });
+    res.json({ ...cached, cached: true });
+    return;
+  }
+
+  try {
+    const response = await getAutoModReadinessRefresh(guildId);
     logDashboardRoute({
       route: "GET /api/auto-mod/diagnostics",
       guildId,
@@ -1977,6 +2408,11 @@ router.get("/auto-mod/diagnostics", async (_req, res) => {
     });
     res.json(response);
   } catch (error) {
+    const response = buildUnavailableReadiness(
+      autoModReadinessCache.getLast(guildId),
+      new Date().toISOString(),
+      autoModReadinessFailureCopy(error)
+    );
     logDashboardRoute({
       route: "GET /api/auto-mod/diagnostics",
       guildId,
@@ -1984,15 +2420,7 @@ router.get("/auto-mod/diagnostics", async (_req, res) => {
       status: 200,
       error
     });
-    res.status(200).json({
-      ok: false,
-      unavailable: true,
-      warnings: [
-        "Discord readiness could not be checked because Discord did not respond in time. AutoMod settings can still be edited and saved."
-      ],
-      checks: [],
-      exemptions: null
-    });
+    res.status(200).json(response);
   }
 });
 
@@ -2014,29 +2442,247 @@ router.put("/auto-mod", async (req, res) => {
   }
   const settings = await saveAutoModSettings({ guildId: res.locals.guildId, ...input });
   updateAutoModSettingsCache(settings);
+  autoModReadinessCache.delete(res.locals.guildId);
   res.json(settings);
 });
 
 const verificationSettingsSchema = z.object({
   enabled: z.boolean().default(false),
   verifiedRoleId: optionalId,
+  verificationChannelId: optionalId,
+  verificationChannelName: z.string()
+    .trim()
+    .min(1, "Enter a verification channel name.")
+    .max(100)
+    .transform(sanitizeVerificationChannelName),
+  embedTitle: z.string().trim().min(1).max(256),
+  embedDescription: z.string().trim().min(1).max(4000),
+  embedColor: color,
+  buttonText: z.string().trim().min(1).max(80),
+  successMessage: z.string().trim().min(1).max(1000),
+  failureMessage: z.string().trim().min(1).max(1000),
   action: z.enum(["allow", "flag", "deny", "assign_role"]).default("flag"),
   logChannelId: optionalId,
   minAccountAgeDays: z.coerce.number().int().min(0).max(3650).default(0),
   minServerDays: z.coerce.number().int().min(0).max(3650).default(0),
   vpnCheckEnabled: z.boolean().default(false),
   vpnFailClosed: z.boolean().default(false),
-  recordRetentionHours: z.coerce.number().int().min(1).max(8760).default(168)
+  recordRetentionHours: z.coerce.number().int().min(1).max(8760).default(168),
+  publicChannelIds: idArray,
+  publicCategoryIds: idArray,
+  hiddenChannelIds: idArray,
+  hiddenCategoryIds: idArray,
+  lockAllChannels: z.boolean().default(true),
+  autoCreateChannel: z.boolean().default(true),
+  lockVerificationChannel: z.boolean().default(true),
+  updateEmbedOnSetup: z.boolean().default(true),
+  applyPermissionsImmediately: z.boolean().default(false)
+}).superRefine((value, context) => {
+  if (value.enabled && !value.verifiedRoleId) {
+    context.addIssue({
+      code: "custom",
+      path: ["verifiedRoleId"],
+      message: "Choose the role members receive after verification."
+    });
+  }
+  if (value.enabled && !value.autoCreateChannel && !value.verificationChannelId) {
+    context.addIssue({
+      code: "custom",
+      path: ["verificationChannelId"],
+      message: "Choose an existing verification channel or enable automatic creation."
+    });
+  }
+  if (value.publicChannelIds.some((id) => value.hiddenChannelIds.includes(id))) {
+    context.addIssue({
+      code: "custom",
+      path: ["hiddenChannelIds"],
+      message: "A channel cannot be both public and hidden."
+    });
+  }
+  if (value.publicCategoryIds.some((id) => value.hiddenCategoryIds.includes(id))) {
+    context.addIssue({
+      code: "custom",
+      path: ["hiddenCategoryIds"],
+      message: "A category cannot be both public and hidden."
+    });
+  }
 });
+
+type VerificationDiscordChannel = { id: string; name: string; type: number };
+type VerificationDiscordRole = {
+  id: string;
+  name: string;
+  permissions: string;
+  position: number;
+  managed: boolean;
+};
+
+async function verificationDiscordState(
+  guildId: string,
+  settings: Awaited<ReturnType<typeof getVerificationSettings>>
+) {
+  try {
+    const [channelsValue, rolesValue, memberValue] = await Promise.all([
+      rest.get(Routes.guildChannels(guildId)),
+      rest.get(Routes.guildRoles(guildId)),
+      rest.get(Routes.guildMember(guildId, config.DISCORD_CLIENT_ID))
+    ]);
+    const channels = channelsValue as VerificationDiscordChannel[];
+    const roles = rolesValue as VerificationDiscordRole[];
+    const member = memberValue as { roles: string[] };
+    const roleMap = new Map(roles.map((role) => [role.id, role]));
+    const verifiedRole = settings.verifiedRoleId ? roleMap.get(settings.verifiedRoleId) : null;
+    const botHighestPosition = Math.max(
+      0,
+      ...member.roles.map((roleId) => roleMap.get(roleId)?.position ?? 0)
+    );
+    let permissions = BigInt(roleMap.get(guildId)?.permissions ?? "0");
+    for (const roleId of member.roles) permissions |= BigInt(roleMap.get(roleId)?.permissions ?? "0");
+    const administrator = (permissions & PermissionFlagsBits.Administrator) !== 0n;
+    const permissionChecks = [
+      ["Manage Channels", PermissionFlagsBits.ManageChannels],
+      ["Manage Roles", PermissionFlagsBits.ManageRoles],
+      ["View Channels", PermissionFlagsBits.ViewChannel],
+      ["Send Messages", PermissionFlagsBits.SendMessages],
+      ["Embed Links", PermissionFlagsBits.EmbedLinks]
+    ].map(([label, permission]) => ({
+      label: String(label),
+      ok: administrator || (permissions & (permission as bigint)) !== 0n
+    }));
+    const warnings: string[] = [];
+    if (!settings.verifiedRoleId) warnings.push("Choose a verified/community role.");
+    else if (!verifiedRole) warnings.push("The configured verified role no longer exists.");
+    else if (verifiedRole.managed) warnings.push("Discord-managed roles cannot be assigned by the bot.");
+    else if (verifiedRole.position >= botHighestPosition) {
+      warnings.push("Move the Odyssey Bot role above the verified/community role.");
+    }
+    if (!permissionChecks.every((check) => check.ok)) {
+      warnings.push("Odyssey Bot is missing one or more permissions required for verification setup.");
+    }
+    if (
+      settings.verificationChannelId
+      && !channels.some((channel) =>
+        channel.id === settings.verificationChannelId && channel.type === ChannelType.GuildText
+      )
+    ) {
+      warnings.push("The saved verification channel is missing or is not a text channel.");
+    }
+    return {
+      available: true,
+      roleManageable: Boolean(
+        verifiedRole
+        && !verifiedRole.managed
+        && verifiedRole.position < botHighestPosition
+      ),
+      channelExists: Boolean(
+        settings.verificationChannelId
+        && channels.some((channel) => channel.id === settings.verificationChannelId)
+      ),
+      permissionChecks,
+      warnings
+    };
+  } catch (error) {
+    logDiscordError("Verification readiness check failed", error);
+    return {
+      available: false,
+      roleManageable: false,
+      channelExists: false,
+      permissionChecks: [],
+      warnings: ["Discord readiness could not be checked. The saved verification settings are still available."]
+    };
+  }
+}
+
+async function validateVerificationReferences(
+  guildId: string,
+  input: z.infer<typeof verificationSettingsSchema>
+): Promise<void> {
+  let channels: VerificationDiscordChannel[];
+  let roles: VerificationDiscordRole[];
+  try {
+    [channels, roles] = await Promise.all([
+      rest.get(Routes.guildChannels(guildId)) as Promise<VerificationDiscordChannel[]>,
+      rest.get(Routes.guildRoles(guildId)) as Promise<VerificationDiscordRole[]>
+    ]);
+  } catch (error) {
+    logDiscordError("Verification reference validation failed", error);
+    throw publicRequestError(
+      "Discord channels and roles could not be validated. Wait a moment and try again.",
+      503
+    );
+  }
+  const channelMap = new Map(channels.map((channel) => [channel.id, channel]));
+  const roleMap = new Map(roles.map((role) => [role.id, role]));
+  if (input.verifiedRoleId) {
+    const role = roleMap.get(input.verifiedRoleId);
+    if (!role || role.managed || role.id === guildId) {
+      throw publicRequestError(
+        "The selected verified role is missing or cannot be managed.",
+        400,
+        { verifiedRoleId: "Choose a normal role from the selected Discord server." }
+      );
+    }
+  }
+  if (
+    input.verificationChannelId
+    && channelMap.get(input.verificationChannelId)?.type !== ChannelType.GuildText
+  ) {
+    throw publicRequestError(
+      "The selected verification channel is missing or is not a text channel.",
+      400,
+      { verificationChannelId: "Choose a text channel from the selected Discord server." }
+    );
+  }
+  if (input.logChannelId && ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(
+    channelMap.get(input.logChannelId)?.type as ChannelType
+  )) {
+    throw publicRequestError(
+      "The verification log channel must be a text or announcement channel.",
+      400,
+      { logChannelId: "Choose a current text channel from the selected Discord server." }
+    );
+  }
+  const invalidPublicChannel = input.publicChannelIds.find((id) => {
+    const type = channelMap.get(id)?.type;
+    return type === undefined || type === ChannelType.GuildCategory;
+  });
+  const invalidHiddenChannel = input.hiddenChannelIds.find((id) => {
+    const type = channelMap.get(id)?.type;
+    return type === undefined || type === ChannelType.GuildCategory;
+  });
+  const invalidCategory = [...input.publicCategoryIds, ...input.hiddenCategoryIds]
+    .find((id) => channelMap.get(id)?.type !== ChannelType.GuildCategory);
+  if (invalidPublicChannel || invalidHiddenChannel || invalidCategory) {
+    throw publicRequestError(
+      "One or more verification visibility selections are missing or belong to another server.",
+      400,
+      {
+        publicChannelIds: "Refresh the dashboard and choose current server channels.",
+        publicCategoryIds: "Choose current server categories."
+      }
+    );
+  }
+}
 
 router.get("/verification", async (_req, res) => {
   const [settings, records] = await Promise.all([
     getVerificationSettings(res.locals.guildId),
     listVerificationRecords(res.locals.guildId)
   ]);
+  const readiness = await verificationDiscordState(res.locals.guildId, settings);
+  let stableUrl: string | null = null;
+  if (config.VERIFY_PUBLIC_BASE_URL) {
+    try {
+      stableUrl = buildStableVerificationUrl(config.VERIFY_PUBLIC_BASE_URL, res.locals.guildId);
+    } catch {
+      stableUrl = null;
+    }
+  }
   res.json({
     settings,
     records,
+    readiness,
+    stableUrl,
     oauthConfigured: Boolean(config.DISCORD_CLIENT_SECRET),
     oauthRedirectConfigured: Boolean(config.DISCORD_OAUTH_REDIRECT_URI),
     vpnProviderConfigured: Boolean(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY),
@@ -2048,11 +2694,11 @@ router.get("/verification", async (_req, res) => {
 
 router.put("/verification", async (req, res) => {
   const input = verificationSettingsSchema.parse(req.body);
-  if (input.enabled && !config.DISCORD_CLIENT_SECRET) {
+  if (input.enabled && (!config.DISCORD_CLIENT_SECRET || !config.VERIFY_PUBLIC_BASE_URL)) {
     throw publicRequestError(
-      "Add DISCORD_CLIENT_SECRET and a redirect URI before enabling verification.",
+      "Add DISCORD_CLIENT_SECRET, DISCORD_OAUTH_REDIRECT_URI, and VERIFY_PUBLIC_BASE_URL before enabling verification.",
       400,
-      { enabled: "Discord OAuth is not configured on this dashboard." }
+      { enabled: "Discord OAuth or the public verification hostname is not configured." }
     );
   }
   if (input.vpnCheckEnabled && !(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY)) {
@@ -2062,31 +2708,229 @@ router.put("/verification", async (req, res) => {
       { vpnCheckEnabled: "The optional VPN/proxy provider is not configured." }
     );
   }
-  res.json(await saveVerificationSettings({ guildId: res.locals.guildId, ...input }));
+  await validateVerificationReferences(res.locals.guildId, input);
+  const current = await getVerificationSettings(res.locals.guildId);
+  const saved = await saveVerificationSettings({
+    ...current,
+    guildId: res.locals.guildId,
+    ...input,
+    updatedBy: "dashboard"
+  });
+  await sendVerificationEventLog(
+    rest,
+    saved,
+    saved.enabled ? "Verification settings updated" : "Verification disabled",
+    "Verification configuration was changed from the protected dashboard."
+  );
+  if (saved.enabled && saved.applyPermissionsImmediately) {
+    const guildSettings = await getGuildSettings(res.locals.guildId);
+    const setup = await runVerificationSetup({
+      rest,
+      guildId: res.locals.guildId,
+      botUserId: config.DISCORD_CLIENT_ID,
+      settings: saved,
+      trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
+      publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL!,
+      updatedBy: "dashboard"
+    });
+    res.json({ settings: await getVerificationSettings(res.locals.guildId), setup });
+    return;
+  }
+  res.json({ settings: saved, setup: null });
 });
 
 router.post("/verification/link", async (req, res) => {
   const settings = await getVerificationSettings(res.locals.guildId);
   if (!settings.enabled) throw publicRequestError("Enable verification before creating a link.");
-  if (!config.DISCORD_CLIENT_SECRET) throw publicRequestError("Discord OAuth verification is not configured.", 503);
+  if (!config.DISCORD_CLIENT_SECRET || !config.VERIFY_PUBLIC_BASE_URL) {
+    throw publicRequestError("Discord OAuth or VERIFY_PUBLIC_BASE_URL is not configured.", 503);
+  }
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 24 * 3_600_000).toISOString();
   await createVerificationLink(res.locals.guildId, hashVerificationToken(token), expiresAt);
-  const baseUrl = (config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`).replace(/\/$/, "");
+  const baseUrl = config.VERIFY_PUBLIC_BASE_URL.replace(/\/$/, "");
+  await sendVerificationEventLog(
+    rest,
+    settings,
+    "Temporary verification link created",
+    "An authenticated dashboard session created a 24-hour verification link."
+  );
   res.status(201).json({
     url: `${baseUrl}/verify/${token}`,
     expiresAt
   });
 });
 
+router.post("/verification/records/:id/review", async (req, res, next) => {
+  try {
+    const recordId = parseId(req.params.id);
+    if (!recordId) return res.status(400).json({ error: "Invalid verification record ID." });
+    const input = z.object({
+      decision: z.enum(["approve", "deny"]),
+      note: z.string().max(1000).default("")
+    }).parse(req.body);
+    const settings = await getVerificationSettings(res.locals.guildId);
+    const reviewed = await updateVerificationRecordReview({
+      guildId: res.locals.guildId,
+      recordId,
+      status: input.decision === "approve" ? "passed" : "denied",
+      reviewedBy: "dashboard",
+      staffNote: input.note
+    });
+    if (!reviewed) return res.status(404).json({ error: "Verification record not found." });
+    if (input.decision === "approve" && settings.verifiedRoleId) {
+      const assignment = await assignVerifiedRole({ rest, settings, userId: reviewed.userId });
+      if (!assignment.assigned) {
+        return res.status(207).json({
+          record: reviewed,
+          warning: assignment.reason ?? "Record approved, but the verified role could not be assigned."
+        });
+      }
+    }
+    await sendVerificationEventLog(
+      rest,
+      settings,
+      input.decision === "approve" ? "Verification manually approved" : "Verification manually denied",
+      `<@${reviewed.userId}> was ${input.decision === "approve" ? "approved" : "denied"} from the dashboard.`
+    );
+    return res.json({ record: reviewed });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/verification/dry-run", async (_req, res) => {
+  const settings = await getVerificationSettings(res.locals.guildId);
+  if (!config.VERIFY_PUBLIC_BASE_URL) {
+    throw publicRequestError("Set VERIFY_PUBLIC_BASE_URL before previewing verification setup.", 503);
+  }
+  const guildSettings = await getGuildSettings(res.locals.guildId);
+  const result = await runVerificationSetup({
+    rest,
+    guildId: res.locals.guildId,
+    botUserId: config.DISCORD_CLIENT_ID,
+    settings,
+    trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
+    publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+    dryRun: true,
+    updatedBy: "dashboard"
+  });
+  res.json(result);
+});
+
+router.post("/verification/setup", async (_req, res) => {
+  const settings = await getVerificationSettings(res.locals.guildId);
+  if (!config.VERIFY_PUBLIC_BASE_URL) {
+    throw publicRequestError("Set VERIFY_PUBLIC_BASE_URL before applying verification setup.", 503);
+  }
+  const guildSettings = await getGuildSettings(res.locals.guildId);
+  const result = await runVerificationSetup({
+    rest,
+    guildId: res.locals.guildId,
+    botUserId: config.DISCORD_CLIENT_ID,
+    settings,
+    trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
+    publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+    updatedBy: "dashboard"
+  });
+  res.json(result);
+});
+
+router.post("/verification/repost", async (_req, res) => {
+  const settings = await getVerificationSettings(res.locals.guildId);
+  if (!config.VERIFY_PUBLIC_BASE_URL) {
+    throw publicRequestError("Set VERIFY_PUBLIC_BASE_URL before posting the verification embed.", 503);
+  }
+  const guildSettings = await getGuildSettings(res.locals.guildId);
+  const result = await runVerificationSetup({
+    rest,
+    guildId: res.locals.guildId,
+    botUserId: config.DISCORD_CLIENT_ID,
+    settings,
+    trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
+    publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+    applyPermissions: false,
+    postEmbed: true,
+    forceEmbedUpdate: true,
+    updatedBy: "dashboard"
+  });
+  res.json(result);
+});
+
+router.post("/verification/disable", async (req, res) => {
+  const restorePermissions = z.boolean().default(true).parse(req.body?.restorePermissions);
+  const current = await getVerificationSettings(res.locals.guildId);
+  const disabled = await saveVerificationSettings({
+    ...current,
+    enabled: false,
+    updatedBy: "dashboard"
+  });
+  const restore = restorePermissions
+    ? await restoreVerificationPermissions({
+        rest,
+        guildId: res.locals.guildId,
+        settings: disabled,
+        updatedBy: "dashboard"
+      })
+    : null;
+  await sendVerificationEventLog(
+    rest,
+    disabled,
+    "Verification mode disabled",
+    restorePermissions
+      ? "Verification enforcement was disabled and saved permission overwrites were restored."
+      : "Verification enforcement was disabled. Existing permission overwrites were left in place."
+  );
+  res.json({ settings: await getVerificationSettings(res.locals.guildId), restore });
+});
+
+const rolePanelOptionSchema = z.object({
+  roleId: z.string().regex(/^\d+$/, "Choose a role."),
+  label: z.string().max(80).default(""),
+  description: z.string().max(100).default(""),
+  emoji: z.string().max(100).default(""),
+  category: z.string().trim().max(80).default("General").transform((value) => value || "General"),
+  requiredRoleId: optionalId
+});
+
 const rolePanelSchema = z.object({
   name: z.string().min(1).max(100),
   channelId: optionalId,
+  layout: z.enum(["buttons", "dropdown"]).default("buttons"),
   title: z.string().min(1).max(256),
   description: z.string().max(4000).default(""),
   color,
   active: z.boolean().default(true),
-  roleIds: idArray.refine((roles) => roles.length > 0, "Choose at least one role.").refine((roles) => roles.length <= 25, "Role panels support up to 25 roles.")
+  maxSelectedPerCategory: z.coerce.number().int().min(0).max(25).default(0),
+  removeRoleOnSelect: z.boolean().default(false),
+  requiredRoleId: optionalId,
+  messageId: optionalId,
+  logChannelId: optionalId,
+  options: z.array(rolePanelOptionSchema).max(25).default([]),
+  roleIds: idArray.default([])
+}).transform((value) => {
+  const options = value.options.length
+    ? value.options
+    : value.roleIds.map((roleId) => ({
+      roleId,
+      label: "",
+      description: "",
+      emoji: "",
+      category: "General",
+      requiredRoleId: null
+    }));
+  return {
+    ...value,
+    options,
+    roleIds: options.map((option) => option.roleId)
+  };
+}).superRefine((value, context) => {
+  if (!value.roleIds.length) {
+    context.addIssue({ code: "custom", path: ["roleIds"], message: "Choose at least one role." });
+  }
+  if (value.roleIds.length > 25) {
+    context.addIssue({ code: "custom", path: ["roleIds"], message: "Role panels support up to 25 roles." });
+  }
 });
 
 async function getRolePanelSafetyIssue(guildId: string, roleIds: string[]): Promise<string | null> {
@@ -2118,7 +2962,7 @@ async function getRolePanelSafetyIssue(guildId: string, roleIds: string[]): Prom
     PermissionFlagsBits.MentionEveryone
   ].reduce((bits, permission) => bits | permission, 0n);
 
-  for (const roleId of roleIds) {
+  for (const roleId of [...new Set(roleIds)]) {
     const role = roleMap.get(roleId);
     if (!role) return `Role ${roleId} no longer exists. Refresh the page and choose another role.`;
     if (role.managed) return `${role.name} is managed by Discord or an integration and cannot be self-assigned.`;
@@ -2172,19 +3016,60 @@ router.post("/role-panels/:id/post", async (req, res, next) => {
     if (!channelId) return res.status(400).json({ error: "Choose a channel or save a default channel on the panel." });
     const roles = await rest.get(Routes.guildRoles(res.locals.guildId)) as Array<{ id: string; name: string }>;
     const roleMap = new Map(roles.map((role) => [role.id, role]));
-    const selected = panel.roleIds.map((roleId) => roleMap.get(roleId)).filter(Boolean).slice(0, 25);
+    const selected = panel.options.filter((option) => roleMap.has(option.roleId)).slice(0, 25);
     if (!selected.length) return res.status(400).json({ error: "None of this panel's roles still exist." });
     const components = [];
-    for (let index = 0; index < selected.length; index += 5) {
+    if (panel.layout === "dropdown") {
+      const maxValues = Math.max(1, Math.min(25, panel.maxSelectedPerCategory || selected.length));
       components.push({
         type: 1,
-        components: selected.slice(index, index + 5).map((role) => ({
-          type: 2,
-          style: 2,
-          custom_id: `role-panel:toggle:${panel.id}:${role!.id}`,
-          label: role!.name.slice(0, 80)
-        }))
+        components: [{
+          type: 3,
+          custom_id: `role-panel:select:${panel.id}`,
+          placeholder: "Choose your roles",
+          min_values: 0,
+          max_values: maxValues,
+          options: selected.map((option) => {
+            const role = roleMap.get(option.roleId)!;
+            const output: Record<string, unknown> = {
+              label: (option.label || role.name).slice(0, 100),
+              value: option.roleId,
+              description: (option.description || option.category || "Toggle this role").slice(0, 100)
+            };
+            if (option.emoji) {
+              try {
+                output.emoji = parseDiscordComponentEmoji(option.emoji);
+              } catch {
+                // Ignore invalid saved emoji rather than blocking panel posting.
+              }
+            }
+            return output;
+          })
+        }]
       });
+    } else {
+      for (let index = 0; index < selected.length; index += 5) {
+        components.push({
+          type: 1,
+          components: selected.slice(index, index + 5).map((option) => {
+            const role = roleMap.get(option.roleId)!;
+            const output: Record<string, unknown> = {
+              type: 2,
+              style: 2,
+              custom_id: `role-panel:toggle:${panel.id}:${role.id}`,
+              label: (option.label || role.name).slice(0, 80)
+            };
+            if (option.emoji) {
+              try {
+                output.emoji = parseDiscordComponentEmoji(option.emoji);
+              } catch {
+                // Ignore invalid saved emoji rather than blocking panel posting.
+              }
+            }
+            return output;
+          })
+        });
+      }
     }
     await sendDiscordMessage(res.locals.guildId, channelId, {
       embeds: [{
@@ -2329,6 +3214,188 @@ router.post("/scheduled-announcements/:id/test", async (req, res, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+const giveawaySchema = z.object({
+  channelId: z.string().regex(/^\d+$/, "Choose a channel."),
+  prize: z.string().trim().min(1).max(200),
+  description: z.string().max(1000).default(""),
+  winnersCount: z.coerce.number().int().min(1).max(20).default(1),
+  endsAt: z.string().datetime(),
+  requiredRoleId: optionalId,
+  boosterBonusEntries: z.coerce.number().int().min(0).max(20).default(0),
+  bonusRoleId: optionalId,
+  bonusRoleEntries: z.coerce.number().int().min(0).max(20).default(0),
+  status: z.enum(["draft", "active"]).default("draft")
+}).superRefine((value, context) => {
+  if (new Date(value.endsAt).getTime() <= Date.now()) {
+    context.addIssue({ code: "custom", path: ["endsAt"], message: "Choose a future end date." });
+  }
+  if (value.bonusRoleEntries > 0 && !value.bonusRoleId) {
+    context.addIssue({ code: "custom", path: ["bonusRoleId"], message: "Choose the role that receives bonus entries." });
+  }
+});
+
+function giveawayPayload(giveaway: {
+  id: number;
+  prize: string;
+  description: string;
+  winnersCount: number;
+  endsAt: string;
+  requiredRoleId: string | null;
+}, entries = 0, ended = false) {
+  const endsAt = Math.floor(new Date(giveaway.endsAt).getTime() / 1000);
+  return {
+    embeds: [{
+      color: ended ? 0x879C68 : 0xC58B4B,
+      title: ended ? `Giveaway ended: ${giveaway.prize}` : `Giveaway: ${giveaway.prize}`,
+      description: [
+        giveaway.description || "Click Enter Giveaway below to join.",
+        "",
+        `**Winners:** ${giveaway.winnersCount}`,
+        ended ? `**Ended:** <t:${endsAt}:R>` : `**Ends:** <t:${endsAt}:R>`,
+        giveaway.requiredRoleId ? `**Required role:** <@&${giveaway.requiredRoleId}>` : "",
+        entries ? `**Entries:** ${entries}` : ""
+      ].filter(Boolean).join("\n"),
+      footer: { text: `Giveaway #${giveaway.id}` },
+      timestamp: new Date(giveaway.endsAt).toISOString()
+    }],
+    components: [{
+      type: 1,
+      components: [{
+        type: 2,
+        style: ended ? 2 : 3,
+        custom_id: `giveaway:enter:${giveaway.id}`,
+        label: ended ? "Giveaway Ended" : "Enter Giveaway",
+        disabled: ended
+      }]
+    }],
+    allowed_mentions: { parse: [] }
+  };
+}
+
+async function finishGiveawayFromDashboard(guildId: string, id: number, reroll = false) {
+  const giveaway = await getGiveaway(id, guildId);
+  if (!giveaway) throw publicRequestError("Giveaway not found.", 404);
+  const entries = await listGiveawayEntries(id, guildId);
+  const weighted = entries.flatMap((entry) => Array.from({ length: Math.max(1, entry.entries) }, () => entry.userId));
+  const winners: string[] = [];
+  while (weighted.length && winners.length < giveaway.winnersCount) {
+    const picked = weighted[Math.floor(Math.random() * weighted.length)]!;
+    if (!winners.includes(picked)) winners.push(picked);
+    for (let index = weighted.length - 1; index >= 0; index -= 1) {
+      if (weighted[index] === picked) weighted.splice(index, 1);
+    }
+  }
+  const ended = await updateGiveaway(id, guildId, { status: "ended", winnerUserIds: winners });
+  if (!ended) throw publicRequestError("Giveaway not found.", 404);
+  if (giveaway.messageId) {
+    await rest.patch(Routes.channelMessage(giveaway.channelId, giveaway.messageId), {
+      body: giveawayPayload(ended, entries.length, true)
+    }).catch((error) => logDiscordError("Could not update ended giveaway message", error));
+  }
+  await sendDiscordMessage(guildId, giveaway.channelId, {
+    content: `${reroll ? "Rerolled" : "Ended"} giveaway **${giveaway.prize}**. Winner(s): ${winners.length ? winners.map((winner) => `<@${winner}>`).join(", ") : "No eligible entries."}`,
+    allowed_mentions: { users: winners }
+  }, [], "Could not send giveaway result message.");
+  return { giveaway: ended, entries, winners };
+}
+
+router.get("/giveaways", async (_req, res) => {
+  const giveaways = await listGiveaways(res.locals.guildId);
+  const entries = await Promise.all(giveaways.map(async (giveaway) => ({
+    giveawayId: giveaway.id,
+    count: (await listGiveawayEntries(giveaway.id, res.locals.guildId)).length
+  })));
+  res.json({ giveaways, entries });
+});
+
+router.post("/giveaways", async (req, res) => {
+  const input = giveawaySchema.parse(req.body);
+  const giveaway = await createGiveaway({
+    guildId: res.locals.guildId,
+    ...input,
+    messageId: null,
+    winnerUserIds: [],
+    createdBy: "dashboard"
+  });
+  res.status(201).json(giveaway);
+});
+
+router.post("/giveaways/:id/start", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    const giveaway = await getGiveaway(id, res.locals.guildId);
+    if (!giveaway) return res.status(404).json({ error: "Giveaway not found." });
+    if (giveaway.status !== "draft") return res.status(400).json({ error: "Only draft giveaways can be started." });
+    const sent = await sendDiscordMessage(
+      res.locals.guildId,
+      giveaway.channelId,
+      giveawayPayload(giveaway),
+      [],
+      "Could not post the giveaway."
+    ) as { id?: string };
+    const updated = await updateGiveaway(id, res.locals.guildId, { status: "active", messageId: sent.id ?? null });
+    return res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/giveaways/:id/end", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    res.json(await finishGiveawayFromDashboard(res.locals.guildId, id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/giveaways/:id/reroll", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    res.json(await finishGiveawayFromDashboard(res.locals.guildId, id, true));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/giveaways/:id/cancel", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const giveaway = await getGiveaway(id, res.locals.guildId);
+  if (!giveaway) return res.status(404).json({ error: "Giveaway not found." });
+  const updated = await updateGiveaway(id, res.locals.guildId, { status: "cancelled" });
+  if (giveaway.messageId) {
+    await rest.patch(Routes.channelMessage(giveaway.channelId, giveaway.messageId), {
+      body: giveawayPayload({ ...giveaway, status: "cancelled" } as typeof giveaway, 0, true)
+    }).catch((error) => logDiscordError("Could not update cancelled giveaway message", error));
+  }
+  res.json(updated);
+});
+
+router.get("/ticket-transcripts", async (_req, res) => {
+  res.json(await listTicketTranscripts(res.locals.guildId));
+});
+
+router.get("/ticket-transcripts/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const transcript = await getTicketTranscript(id, res.locals.guildId);
+  return transcript ? res.json(transcript) : res.status(404).json({ error: "Ticket transcript not found." });
+});
+
+router.get("/ticket-transcripts/:id/download", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const transcript = await getTicketTranscript(id, res.locals.guildId);
+  if (!transcript) return res.status(404).json({ error: "Ticket transcript not found." });
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Content-Disposition", `attachment; filename="${transcript.channelName.replace(/[^a-z0-9-_]/gi, "-") || "ticket"}-transcript.txt"`);
+  res.send(transcript.transcriptText);
 });
 
 export const dashboardApi = router;

@@ -20,15 +20,15 @@ const baseSchema = z.object({
 const discordSchema = baseSchema.extend({
   DISCORD_TOKEN: z.string().min(1, "DISCORD_TOKEN is required"),
   DISCORD_CLIENT_ID: z.string().min(1, "DISCORD_CLIENT_ID is required"),
-  DISCORD_GUILD_ID: z.string().min(1).optional()
+  DISCORD_GUILD_ID: z.string().min(1).optional(),
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  VERIFY_PUBLIC_BASE_URL: z.string().url().optional()
 });
 
 const dashboardSchema = discordSchema.extend({
   DASHBOARD_PASSWORD: z.string().min(8, "DASHBOARD_PASSWORD must be at least 8 characters"),
   DISCORD_CLIENT_SECRET: z.string().min(1).optional(),
   DISCORD_OAUTH_REDIRECT_URI: z.string().url().optional(),
-  PUBLIC_BASE_URL: z.string().url().optional(),
-  VERIFY_PUBLIC_BASE_URL: z.string().url().optional(),
   VPN_CHECK_URL_TEMPLATE: z.string().min(1).optional(),
   VPN_CHECK_API_KEY: z.string().min(1).optional()
 });

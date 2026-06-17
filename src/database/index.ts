@@ -10,14 +10,22 @@ import type {
   CustomCommand,
   CustomCommandActionConfig,
   GuildSettings,
+  LoggingSettings,
+  Giveaway,
+  GiveawayEntry,
+  ModerationCase,
   RolePanel,
+  RolePanelOption,
   ScheduledAnnouncement,
   SocialPromotionSettings,
   StickyMessage,
   TicketCloseRequest,
   TicketPanel,
+  TicketTranscript,
+  TicketTranscriptMessage,
   TicketType,
   VerificationRecord,
+  VerificationPermissionBackup,
   VerificationSettings,
   WelcomeSettings
 } from "../shared/types.js";
@@ -113,6 +121,7 @@ async function ensureGuildRows(guildId: string): Promise<void> {
   await db.run("INSERT INTO auto_mod_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO social_promotion_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO verification_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
+  await db.run("INSERT INTO logging_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
 }
 
 export async function getGuildSettings(guildId: string): Promise<GuildSettings> {
@@ -151,13 +160,71 @@ export async function saveGuildSettings(settings: GuildSettings): Promise<GuildS
   return getGuildSettings(settings.guildId);
 }
 
+export async function getLoggingSettings(guildId: string): Promise<LoggingSettings> {
+  await ensureGuildRows(guildId);
+  const row = (await db.get<Record<string, unknown>>(
+    "SELECT * FROM logging_settings WHERE guild_id = ?",
+    [guildId]
+  ))!;
+  return {
+    guildId,
+    enabled: Boolean(row.enabled),
+    channelId: row.channel_id as string | null,
+    members: Boolean(row.members),
+    messages: Boolean(row.messages),
+    voice: Boolean(row.voice),
+    channels: Boolean(row.channels),
+    roles: Boolean(row.roles),
+    server: Boolean(row.server),
+    invites: Boolean(row.invites),
+    threads: Boolean(row.threads),
+    moderation: Boolean(row.moderation),
+    dashboard: Boolean(row.dashboard)
+  };
+}
+
+export async function saveLoggingSettings(settings: LoggingSettings): Promise<LoggingSettings> {
+  await ensureGuildRows(settings.guildId);
+  await db.run(`
+    UPDATE logging_settings SET
+      enabled = @enabled,
+      channel_id = @channelId,
+      members = @members,
+      messages = @messages,
+      voice = @voice,
+      channels = @channels,
+      roles = @roles,
+      server = @server,
+      invites = @invites,
+      threads = @threads,
+      moderation = @moderation,
+      dashboard = @dashboard,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...settings,
+    enabled: Number(settings.enabled),
+    members: Number(settings.members),
+    messages: Number(settings.messages),
+    voice: Number(settings.voice),
+    channels: Number(settings.channels),
+    roles: Number(settings.roles),
+    server: Number(settings.server),
+    invites: Number(settings.invites),
+    threads: Number(settings.threads),
+    moderation: Number(settings.moderation),
+    dashboard: Number(settings.dashboard)
+  });
+  return getLoggingSettings(settings.guildId);
+}
+
 export async function getBranding(guildId: string): Promise<Branding> {
   await ensureGuildRows(guildId);
   const row = (await db.get<Record<string, unknown>>("SELECT * FROM branding WHERE guild_id = ?", [guildId]))!;
   return {
     guildId,
     serverName: row.server_name as string,
-    accentColor: (row.accent_color as string) ?? "#7785FF",
+    accentColor: (row.accent_color as string) ?? "#C58B4B",
     ticketButtonStyle: (row.ticket_button_style as Branding["ticketButtonStyle"]) ?? "secondary",
     footerText: row.footer_text as string,
     ticketPanelTitle: row.ticket_panel_title as string,
@@ -720,6 +787,308 @@ export async function listModerationActions(guildId: string, limit = 100) {
   `, [guildId, limit]);
 }
 
+function mapModerationCase(row: Record<string, unknown>): ModerationCase {
+  return {
+    id: Number(row.id),
+    guildId: String(row.guild_id ?? row.guildId),
+    caseNumber: Number(row.case_number ?? row.caseNumber),
+    targetUserId: String(row.target_user_id ?? row.targetUserId),
+    moderatorId: String(row.moderator_id ?? row.moderatorId),
+    actionType: String(row.action_type ?? row.actionType),
+    reason: String(row.reason ?? ""),
+    durationSeconds: row.duration_seconds === null || row.duration_seconds === undefined
+      ? null
+      : Number(row.duration_seconds),
+    evidenceUrl: String(row.evidence_url ?? row.evidenceUrl ?? ""),
+    status: (row.status as ModerationCase["status"]) ?? "active",
+    notes: String(row.notes ?? ""),
+    createdAt: String(row.created_at ?? row.createdAt),
+    updatedAt: String(row.updated_at ?? row.updatedAt)
+  };
+}
+
+export async function createModerationCase(input: {
+  guildId: string;
+  targetUserId: string;
+  moderatorId: string;
+  actionType: string;
+  reason?: string;
+  durationSeconds?: number | null;
+  evidenceUrl?: string;
+  status?: ModerationCase["status"];
+  notes?: string;
+}): Promise<ModerationCase> {
+  await ensureGuildRows(input.guildId);
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO moderation_cases (
+      guild_id, case_number, target_user_id, moderator_id, action_type,
+      reason, duration_seconds, evidence_url, status, notes
+    ) VALUES (
+      @guildId,
+      COALESCE((SELECT MAX(case_number) + 1 FROM moderation_cases WHERE guild_id = @guildId), 1),
+      @targetUserId, @moderatorId, @actionType,
+      @reason, @durationSeconds, @evidenceUrl, @status, @notes
+    ) RETURNING *
+  `, {
+    ...input,
+    reason: input.reason ?? "",
+    durationSeconds: input.durationSeconds ?? null,
+    evidenceUrl: input.evidenceUrl ?? "",
+    status: input.status ?? "active",
+    notes: input.notes ?? ""
+  });
+  return mapModerationCase(row!);
+}
+
+export async function listModerationCases(
+  guildId: string,
+  filters: { targetUserId?: string; moderatorId?: string; actionType?: string; status?: string; limit?: number } = {}
+): Promise<ModerationCase[]> {
+  const clauses = ["guild_id = ?"];
+  const params: unknown[] = [guildId];
+  if (filters.targetUserId) {
+    clauses.push("target_user_id = ?");
+    params.push(filters.targetUserId);
+  }
+  if (filters.moderatorId) {
+    clauses.push("moderator_id = ?");
+    params.push(filters.moderatorId);
+  }
+  if (filters.actionType) {
+    clauses.push("action_type = ?");
+    params.push(filters.actionType);
+  }
+  if (filters.status) {
+    clauses.push("status = ?");
+    params.push(filters.status);
+  }
+  params.push(filters.limit ?? 100);
+  const rows = await db.all<Record<string, unknown>>(`
+    SELECT * FROM moderation_cases
+    WHERE ${clauses.join(" AND ")}
+    ORDER BY case_number DESC
+    LIMIT ?
+  `, params);
+  return rows.map(mapModerationCase);
+}
+
+export async function getModerationCase(guildId: string, caseNumber: number): Promise<ModerationCase | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM moderation_cases WHERE guild_id = ? AND case_number = ?",
+    [guildId, caseNumber]
+  );
+  return row ? mapModerationCase(row) : null;
+}
+
+export async function updateModerationCase(
+  guildId: string,
+  caseNumber: number,
+  input: Partial<Pick<ModerationCase, "reason" | "notes" | "status">>
+): Promise<ModerationCase | null> {
+  const current = await getModerationCase(guildId, caseNumber);
+  if (!current) return null;
+  const row = await db.get<Record<string, unknown>>(`
+    UPDATE moderation_cases SET
+      reason = @reason, notes = @notes, status = @status, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId AND case_number = @caseNumber
+    RETURNING *
+  `, {
+    guildId,
+    caseNumber,
+    reason: input.reason ?? current.reason,
+    notes: input.notes ?? current.notes,
+    status: input.status ?? current.status
+  });
+  return row ? mapModerationCase(row) : null;
+}
+
+function mapGiveaway(row: Record<string, unknown>): Giveaway {
+  return {
+    id: Number(row.id),
+    guildId: String(row.guild_id ?? row.guildId),
+    channelId: String(row.channel_id ?? row.channelId),
+    messageId: row.message_id || row.messageId ? String(row.message_id ?? row.messageId) : null,
+    prize: String(row.prize ?? ""),
+    description: String(row.description ?? ""),
+    winnersCount: Number(row.winners_count ?? row.winnersCount ?? 1),
+    endsAt: String(row.ends_at ?? row.endsAt),
+    requiredRoleId: row.required_role_id || row.requiredRoleId ? String(row.required_role_id ?? row.requiredRoleId) : null,
+    boosterBonusEntries: Number(row.booster_bonus_entries ?? row.boosterBonusEntries ?? 0),
+    bonusRoleId: row.bonus_role_id || row.bonusRoleId ? String(row.bonus_role_id ?? row.bonusRoleId) : null,
+    bonusRoleEntries: Number(row.bonus_role_entries ?? row.bonusRoleEntries ?? 0),
+    status: (row.status as Giveaway["status"]) ?? "draft",
+    winnerUserIds: parseJsonArray(row.winner_user_ids as string | null),
+    createdBy: String(row.created_by ?? row.createdBy),
+    createdAt: String(row.created_at ?? row.createdAt),
+    updatedAt: String(row.updated_at ?? row.updatedAt)
+  };
+}
+
+export async function createGiveaway(input: Omit<Giveaway, "id" | "messageId" | "winnerUserIds" | "createdAt" | "updatedAt"> & {
+  messageId?: string | null;
+  winnerUserIds?: string[];
+}): Promise<Giveaway> {
+  await ensureGuildRows(input.guildId);
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO giveaways (
+      guild_id, channel_id, message_id, prize, description, winners_count,
+      ends_at, required_role_id, booster_bonus_entries, bonus_role_id,
+      bonus_role_entries, status, winner_user_ids, created_by
+    ) VALUES (
+      @guildId, @channelId, @messageId, @prize, @description, @winnersCount,
+      @endsAt, @requiredRoleId, @boosterBonusEntries, @bonusRoleId,
+      @bonusRoleEntries, @status, @winnerUserIds, @createdBy
+    ) RETURNING *
+  `, {
+    ...input,
+    messageId: input.messageId ?? null,
+    winnerUserIds: JSON.stringify(input.winnerUserIds ?? [])
+  });
+  return mapGiveaway(row!);
+}
+
+export async function updateGiveaway(
+  id: number,
+  guildId: string,
+  input: Partial<Omit<Giveaway, "id" | "guildId" | "createdAt" | "updatedAt">>
+): Promise<Giveaway | null> {
+  const current = await getGiveaway(id, guildId);
+  if (!current) return null;
+  const next = { ...current, ...input };
+  const row = await db.get<Record<string, unknown>>(`
+    UPDATE giveaways SET
+      channel_id = @channelId, message_id = @messageId, prize = @prize,
+      description = @description, winners_count = @winnersCount, ends_at = @endsAt,
+      required_role_id = @requiredRoleId, booster_bonus_entries = @boosterBonusEntries,
+      bonus_role_id = @bonusRoleId, bonus_role_entries = @bonusRoleEntries,
+      status = @status, winner_user_ids = @winnerUserIds, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND guild_id = @guildId
+    RETURNING *
+  `, {
+    ...next,
+    id,
+    guildId,
+    winnerUserIds: JSON.stringify(next.winnerUserIds)
+  });
+  return row ? mapGiveaway(row) : null;
+}
+
+export async function getGiveaway(id: number, guildId: string): Promise<Giveaway | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM giveaways WHERE id = ? AND guild_id = ?",
+    [id, guildId]
+  );
+  return row ? mapGiveaway(row) : null;
+}
+
+export async function listGiveaways(guildId: string, limit = 100): Promise<Giveaway[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    "SELECT * FROM giveaways WHERE guild_id = ? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, ends_at DESC LIMIT ?",
+    [guildId, limit]
+  );
+  return rows.map(mapGiveaway);
+}
+
+export async function listDueGiveaways(): Promise<Giveaway[]> {
+  const sql = db.dialect === "postgres"
+    ? "SELECT * FROM giveaways WHERE status = 'active' AND ends_at <= CURRENT_TIMESTAMP ORDER BY ends_at"
+    : "SELECT * FROM giveaways WHERE status = 'active' AND datetime(ends_at) <= CURRENT_TIMESTAMP ORDER BY datetime(ends_at)";
+  return (await db.all<Record<string, unknown>>(sql)).map(mapGiveaway);
+}
+
+export async function addGiveawayEntry(input: GiveawayEntry): Promise<void> {
+  await db.run(`
+    INSERT INTO giveaway_entries (giveaway_id, guild_id, user_id, entries)
+    VALUES (@giveawayId, @guildId, @userId, @entries)
+    ON CONFLICT (giveaway_id, user_id) DO UPDATE SET entries = excluded.entries
+  `, { ...input });
+}
+
+export async function removeGiveawayEntry(giveawayId: number, guildId: string, userId: string): Promise<boolean> {
+  return (await db.run(
+    "DELETE FROM giveaway_entries WHERE giveaway_id = ? AND guild_id = ? AND user_id = ?",
+    [giveawayId, guildId, userId]
+  )).changes > 0;
+}
+
+export async function listGiveawayEntries(giveawayId: number, guildId: string): Promise<GiveawayEntry[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    "SELECT * FROM giveaway_entries WHERE giveaway_id = ? AND guild_id = ? ORDER BY created_at",
+    [giveawayId, guildId]
+  );
+  return rows.map((row) => ({
+    giveawayId: Number(row.giveaway_id),
+    guildId: String(row.guild_id),
+    userId: String(row.user_id),
+    entries: Number(row.entries ?? 1),
+    createdAt: String(row.created_at)
+  }));
+}
+
+export async function createTicketTranscript(
+  input: Omit<TicketTranscript, "id" | "createdAt">
+): Promise<TicketTranscript> {
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO ticket_transcripts (
+      guild_id, ticket_id, channel_id, channel_name, opener_id, closed_by,
+      close_reason, message_count, transcript_json, transcript_text
+    ) VALUES (
+      @guildId, @ticketId, @channelId, @channelName, @openerId, @closedBy,
+      @closeReason, @messageCount, @transcriptJson, @transcriptText
+    ) RETURNING *
+  `, {
+    ...input,
+    transcriptJson: JSON.stringify(input.transcriptJson)
+  });
+  return mapTicketTranscript(row!);
+}
+
+function parseTranscriptMessages(value: string | null): TicketTranscriptMessage[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item): item is TicketTranscriptMessage =>
+      Boolean(item) && typeof item === "object" && !Array.isArray(item)
+    );
+  } catch {
+    return [];
+  }
+}
+
+function mapTicketTranscript(row: Record<string, unknown>): TicketTranscript {
+  return {
+    id: Number(row.id),
+    guildId: String(row.guild_id ?? row.guildId),
+    ticketId: Number(row.ticket_id ?? row.ticketId),
+    channelId: String(row.channel_id ?? row.channelId),
+    channelName: String(row.channel_name ?? row.channelName),
+    openerId: String(row.opener_id ?? row.openerId),
+    closedBy: String(row.closed_by ?? row.closedBy),
+    closeReason: String(row.close_reason ?? row.closeReason ?? ""),
+    messageCount: Number(row.message_count ?? row.messageCount ?? 0),
+    transcriptJson: parseTranscriptMessages(row.transcript_json as string | null),
+    transcriptText: String(row.transcript_text ?? row.transcriptText ?? ""),
+    createdAt: String(row.created_at ?? row.createdAt)
+  };
+}
+
+export async function listTicketTranscripts(guildId: string, limit = 100): Promise<TicketTranscript[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    "SELECT * FROM ticket_transcripts WHERE guild_id = ? ORDER BY id DESC LIMIT ?",
+    [guildId, limit]
+  );
+  return rows.map(mapTicketTranscript);
+}
+
+export async function getTicketTranscript(id: number, guildId: string): Promise<TicketTranscript | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM ticket_transcripts WHERE id = ? AND guild_id = ?",
+    [id, guildId]
+  );
+  return row ? mapTicketTranscript(row) : null;
+}
+
 function mapWelcomeSettings(row: Record<string, unknown>): WelcomeSettings {
   return {
     guildId: row.guild_id as string,
@@ -1040,13 +1409,40 @@ export async function getVerificationSettings(guildId: string): Promise<Verifica
     guildId,
     enabled: Boolean(row.enabled),
     verifiedRoleId: row.verified_role_id as string | null,
+    verificationChannelId: row.verification_channel_id as string | null,
+    verificationChannelName: String(row.verification_channel_name ?? "verify"),
+    verificationEmbedMessageId: row.verification_embed_message_id as string | null,
+    embedTitle: String(row.embed_title ?? "Verify to Access the Server"),
+    embedDescription: String(
+      row.embed_description
+      ?? "Click the button below to verify your Discord account. Once verified, you will receive the community role and unlock the rest of the server."
+    ),
+    embedColor: String(row.embed_color ?? "#C58B4B"),
+    buttonText: String(row.button_text ?? "Verify Me"),
+    successMessage: String(row.success_message ?? "Verification passed. You can return to Discord."),
+    failureMessage: String(
+      row.failure_message
+      ?? "Verification did not meet this server's requirements. Contact server staff if you need help."
+    ),
     action: (row.action as VerificationSettings["action"]) ?? "flag",
     logChannelId: row.log_channel_id as string | null,
     minAccountAgeDays: Number(row.min_account_age_days ?? 0),
     minServerDays: Number(row.min_server_days ?? 0),
     vpnCheckEnabled: Boolean(row.vpn_check_enabled),
     vpnFailClosed: Boolean(row.vpn_fail_closed),
-    recordRetentionHours: Number(row.record_retention_hours ?? 168)
+    recordRetentionHours: Number(row.record_retention_hours ?? 168),
+    publicChannelIds: parseJsonArray(row.public_channel_ids as string),
+    publicCategoryIds: parseJsonArray(row.public_category_ids as string),
+    hiddenChannelIds: parseJsonArray(row.hidden_channel_ids as string),
+    hiddenCategoryIds: parseJsonArray(row.hidden_category_ids as string),
+    lockAllChannels: Boolean(row.lock_all_channels ?? 1),
+    autoCreateChannel: Boolean(row.auto_create_channel ?? 1),
+    lockVerificationChannel: Boolean(row.lock_verification_channel ?? 1),
+    updateEmbedOnSetup: Boolean(row.update_embed_on_setup ?? 1),
+    applyPermissionsImmediately: Boolean(row.apply_permissions_immediately),
+    permissionsApplied: Boolean(row.permissions_applied),
+    lastSetupAt: row.last_setup_at ? String(row.last_setup_at) : null,
+    updatedBy: row.updated_by ? String(row.updated_by) : null
   };
 }
 
@@ -1055,21 +1451,146 @@ export async function saveVerificationSettings(settings: VerificationSettings): 
   await db.run(`
     UPDATE verification_settings SET
       enabled = @enabled, verified_role_id = @verifiedRoleId,
+      verification_channel_id = @verificationChannelId,
+      verification_channel_name = @verificationChannelName,
+      verification_embed_message_id = @verificationEmbedMessageId,
+      embed_title = @embedTitle,
+      embed_description = @embedDescription,
+      embed_color = @embedColor,
+      button_text = @buttonText,
+      success_message = @successMessage,
+      failure_message = @failureMessage,
       action = @action, log_channel_id = @logChannelId,
       min_account_age_days = @minAccountAgeDays,
       min_server_days = @minServerDays,
       vpn_check_enabled = @vpnCheckEnabled,
       vpn_fail_closed = @vpnFailClosed,
       record_retention_hours = @recordRetentionHours,
+      public_channel_ids = @publicChannelIds,
+      public_category_ids = @publicCategoryIds,
+      hidden_channel_ids = @hiddenChannelIds,
+      hidden_category_ids = @hiddenCategoryIds,
+      lock_all_channels = @lockAllChannels,
+      auto_create_channel = @autoCreateChannel,
+      lock_verification_channel = @lockVerificationChannel,
+      update_embed_on_setup = @updateEmbedOnSetup,
+      apply_permissions_immediately = @applyPermissionsImmediately,
+      permissions_applied = @permissionsApplied,
+      last_setup_at = @lastSetupAt,
+      updated_by = @updatedBy,
       updated_at = CURRENT_TIMESTAMP
     WHERE guild_id = @guildId
   `, {
     ...settings,
     enabled: Number(settings.enabled),
     vpnCheckEnabled: Number(settings.vpnCheckEnabled),
-    vpnFailClosed: Number(settings.vpnFailClosed)
+    vpnFailClosed: Number(settings.vpnFailClosed),
+    publicChannelIds: JSON.stringify(settings.publicChannelIds),
+    publicCategoryIds: JSON.stringify(settings.publicCategoryIds),
+    hiddenChannelIds: JSON.stringify(settings.hiddenChannelIds),
+    hiddenCategoryIds: JSON.stringify(settings.hiddenCategoryIds),
+    lockAllChannels: Number(settings.lockAllChannels),
+    autoCreateChannel: Number(settings.autoCreateChannel),
+    lockVerificationChannel: Number(settings.lockVerificationChannel),
+    updateEmbedOnSetup: Number(settings.updateEmbedOnSetup),
+    applyPermissionsImmediately: Number(settings.applyPermissionsImmediately),
+    permissionsApplied: Number(settings.permissionsApplied)
   });
   return getVerificationSettings(settings.guildId);
+}
+
+export async function saveVerificationSetupState(input: {
+  guildId: string;
+  verificationChannelId: string | null;
+  verificationEmbedMessageId: string | null;
+  permissionsApplied: boolean;
+  lastSetupAt: string | null;
+  updatedBy: string | null;
+}): Promise<VerificationSettings> {
+  await ensureGuildRows(input.guildId);
+  await db.run(`
+    UPDATE verification_settings SET
+      verification_channel_id = @verificationChannelId,
+      verification_embed_message_id = @verificationEmbedMessageId,
+      permissions_applied = @permissionsApplied,
+      last_setup_at = @lastSetupAt,
+      updated_by = @updatedBy,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...input,
+    permissionsApplied: Number(input.permissionsApplied)
+  });
+  return getVerificationSettings(input.guildId);
+}
+
+export async function getVerificationPermissionBackup(
+  guildId: string,
+  channelId: string,
+  targetId: string
+): Promise<VerificationPermissionBackup | null> {
+  const row = await db.get<Record<string, unknown>>(`
+    SELECT * FROM verification_permission_backups
+    WHERE guild_id = ? AND channel_id = ? AND target_id = ?
+  `, [guildId, channelId, targetId]);
+  if (!row) return null;
+  return {
+    guildId,
+    channelId,
+    targetId,
+    targetType: Number(row.target_type) === 1 ? 1 : 0,
+    allow: String(row.allow_bits ?? "0"),
+    deny: String(row.deny_bits ?? "0"),
+    existed: Boolean(row.existed)
+  };
+}
+
+export async function saveVerificationPermissionBackup(
+  backup: VerificationPermissionBackup
+): Promise<void> {
+  await db.run(`
+    INSERT INTO verification_permission_backups (
+      guild_id, channel_id, target_id, target_type, allow_bits, deny_bits, existed
+    ) VALUES (@guildId, @channelId, @targetId, @targetType, @allow, @deny, @existed)
+    ON CONFLICT (guild_id, channel_id, target_id) DO NOTHING
+  `, {
+    ...backup,
+    existed: Number(backup.existed)
+  });
+}
+
+export async function listVerificationPermissionBackups(
+  guildId: string
+): Promise<VerificationPermissionBackup[]> {
+  const rows = await db.all<Record<string, unknown>>(`
+    SELECT * FROM verification_permission_backups
+    WHERE guild_id = ?
+    ORDER BY channel_id, target_id
+  `, [guildId]);
+  return rows.map((row) => ({
+    guildId,
+    channelId: String(row.channel_id),
+    targetId: String(row.target_id),
+    targetType: Number(row.target_type) === 1 ? 1 : 0,
+    allow: String(row.allow_bits ?? "0"),
+    deny: String(row.deny_bits ?? "0"),
+    existed: Boolean(row.existed)
+  }));
+}
+
+export async function clearVerificationPermissionBackups(guildId: string): Promise<void> {
+  await db.run("DELETE FROM verification_permission_backups WHERE guild_id = ?", [guildId]);
+}
+
+export async function deleteVerificationPermissionBackup(
+  guildId: string,
+  channelId: string,
+  targetId: string
+): Promise<void> {
+  await db.run(`
+    DELETE FROM verification_permission_backups
+    WHERE guild_id = ? AND channel_id = ? AND target_id = ?
+  `, [guildId, channelId, targetId]);
 }
 
 export async function createVerificationLink(
@@ -1092,7 +1613,7 @@ export async function getVerificationLink(tokenHash: string): Promise<{ guildId:
 }
 
 export async function createVerificationRecord(
-  record: Omit<VerificationRecord, "id" | "verifiedAt">
+  record: Omit<VerificationRecord, "id" | "verifiedAt" | "reviewedBy" | "reviewedAt" | "staffNote">
 ): Promise<void> {
   await db.run(`
     INSERT INTO verification_records (
@@ -1133,8 +1654,51 @@ export async function listVerificationRecords(guildId: string, limit = 50): Prom
       ? null
       : Boolean(row.vpn_detected),
     verifiedAt: String(row.verified_at),
-    expiresAt: String(row.expires_at)
+    expiresAt: String(row.expires_at),
+    reviewedBy: row.reviewed_by ? String(row.reviewed_by) : null,
+    reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
+    staffNote: String(row.staff_note ?? "")
   }));
+}
+
+export async function updateVerificationRecordReview(input: {
+  guildId: string;
+  recordId: number;
+  status: VerificationRecord["status"];
+  reviewedBy: string;
+  staffNote?: string;
+}): Promise<VerificationRecord | null> {
+  const row = await db.get<Record<string, unknown>>(`
+    UPDATE verification_records SET
+      status = @status,
+      reviewed_by = @reviewedBy,
+      reviewed_at = CURRENT_TIMESTAMP,
+      staff_note = @staffNote
+    WHERE id = @recordId AND guild_id = @guildId
+    RETURNING *
+  `, {
+    ...input,
+    staffNote: input.staffNote ?? ""
+  });
+  if (!row) return null;
+  return {
+    id: Number(row.id),
+    guildId: String(row.guild_id),
+    userId: String(row.user_id),
+    status: row.status as VerificationRecord["status"],
+    reasonCodes: parseJsonArray(row.reason_codes as string),
+    riskScore: Number(row.risk_score ?? 0),
+    accountCreatedAt: String(row.account_created_at ?? ""),
+    serverJoinedAt: row.server_joined_at ? String(row.server_joined_at) : null,
+    vpnDetected: row.vpn_detected === null || row.vpn_detected === undefined
+      ? null
+      : Boolean(row.vpn_detected),
+    verifiedAt: String(row.verified_at),
+    expiresAt: String(row.expires_at),
+    reviewedBy: row.reviewed_by ? String(row.reviewed_by) : null,
+    reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
+    staffNote: String(row.staff_note ?? "")
+  };
 }
 
 export async function listAntiNukeTrusted(guildId: string): Promise<AntiNukeTrusted[]> {
@@ -1158,25 +1722,42 @@ export async function removeAntiNukeTrusted(id: number, guildId: string): Promis
   return (await db.run("DELETE FROM anti_nuke_trusted WHERE id = ? AND guild_id = ?", [id, guildId])).changes > 0;
 }
 
-async function getRolePanelRoleIds(panelId: number): Promise<string[]> {
-  const rows = await db.all<{ roleId: string }>(
-    `SELECT role_id AS "roleId" FROM role_panel_roles WHERE panel_id = ? ORDER BY sort_order, role_id`,
+async function getRolePanelOptions(panelId: number): Promise<RolePanelOption[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    `SELECT role_id AS "roleId", label, description, emoji, category,
+      required_role_id AS "requiredRoleId"
+     FROM role_panel_roles WHERE panel_id = ? ORDER BY sort_order, role_id`,
     [panelId]
   );
-  return rows.map((row) => row.roleId);
+  return rows.map((row) => ({
+    roleId: String(row.roleId),
+    label: String(row.label ?? ""),
+    description: String(row.description ?? ""),
+    emoji: String(row.emoji ?? ""),
+    category: String(row.category ?? "General") || "General",
+    requiredRoleId: row.requiredRoleId ? String(row.requiredRoleId) : null
+  }));
 }
 
 async function mapRolePanel(row: Record<string, unknown>): Promise<RolePanel> {
+  const options = await getRolePanelOptions(Number(row.id));
   return {
     id: Number(row.id),
     guildId: row.guild_id as string,
     name: row.name as string,
     channelId: row.channel_id as string | null,
+    layout: ((row.layout as RolePanel["layout"]) ?? "buttons") === "dropdown" ? "dropdown" : "buttons",
     title: row.title as string,
     description: row.description as string,
     color: row.color as string,
     active: Boolean(row.active),
-    roleIds: await getRolePanelRoleIds(Number(row.id)),
+    maxSelectedPerCategory: Number(row.max_selected_per_category ?? 0),
+    removeRoleOnSelect: Boolean(row.remove_role_on_select),
+    requiredRoleId: row.required_role_id as string | null,
+    messageId: row.message_id as string | null,
+    logChannelId: row.log_channel_id as string | null,
+    options,
+    roleIds: options.map((option) => option.roleId),
     createdAt: String(row.created_at),
     updatedAt: String(row.updated_at)
   };
@@ -1198,12 +1779,23 @@ export async function getRolePanel(id: number, guildId: string): Promise<RolePan
   return row ? mapRolePanel(row) : null;
 }
 
-async function saveRolePanelRoles(panelId: number, roleIds: string[]): Promise<void> {
+async function saveRolePanelRoles(panelId: number, options: RolePanelOption[]): Promise<void> {
   await db.run("DELETE FROM role_panel_roles WHERE panel_id = ?", [panelId]);
-  for (const [index, roleId] of roleIds.entries()) {
+  for (const [index, option] of options.entries()) {
     await db.run(
-      "INSERT INTO role_panel_roles (panel_id, role_id, sort_order) VALUES (?, ?, ?)",
-      [panelId, roleId, index]
+      `INSERT INTO role_panel_roles (
+        panel_id, role_id, sort_order, label, description, emoji, category, required_role_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        panelId,
+        option.roleId,
+        index,
+        option.label,
+        option.description,
+        option.emoji,
+        option.category || "General",
+        option.requiredRoleId
+      ]
     );
   }
 }
@@ -1214,13 +1806,32 @@ export async function createRolePanel(
   const id = await db.transaction(async () => {
     const row = await db.get<{ id: number }>(`
       INSERT INTO role_panels (
-        guild_id, name, channel_id, title, description, color, active
+        guild_id, name, channel_id, layout, title, description, color, active,
+        max_selected_per_category, remove_role_on_select, required_role_id,
+        message_id, log_channel_id
       ) VALUES (
-        @guildId, @name, @channelId, @title, @description, @color, @active
+        @guildId, @name, @channelId, @layout, @title, @description, @color, @active,
+        @maxSelectedPerCategory, @removeRoleOnSelect, @requiredRoleId,
+        @messageId, @logChannelId
       ) RETURNING id
-    `, { ...input, active: Number(input.active) });
+    `, {
+      ...input,
+      active: Number(input.active),
+      removeRoleOnSelect: Number(input.removeRoleOnSelect),
+      messageId: input.messageId ?? null,
+      logChannelId: input.logChannelId ?? null
+    });
     const panelId = Number(row!.id);
-    await saveRolePanelRoles(panelId, input.roleIds);
+    await saveRolePanelRoles(panelId, input.options.length
+      ? input.options
+      : input.roleIds.map((roleId) => ({
+        roleId,
+        label: "",
+        description: "",
+        emoji: "",
+        category: "General",
+        requiredRoleId: null
+      })));
     return panelId;
   });
   return (await getRolePanel(id, input.guildId))!;
@@ -1234,13 +1845,35 @@ export async function updateRolePanel(
   const changed = await db.transaction(async () => {
     const result = await db.run(`
       UPDATE role_panels SET
-        name = @name, channel_id = @channelId, title = @title,
+        name = @name, channel_id = @channelId, layout = @layout, title = @title,
         description = @description, color = @color, active = @active,
+        max_selected_per_category = @maxSelectedPerCategory,
+        remove_role_on_select = @removeRoleOnSelect,
+        required_role_id = @requiredRoleId,
+        message_id = @messageId,
+        log_channel_id = @logChannelId,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = @id AND guild_id = @guildId
-    `, { ...input, id, guildId, active: Number(input.active) });
+    `, {
+      ...input,
+      id,
+      guildId,
+      active: Number(input.active),
+      removeRoleOnSelect: Number(input.removeRoleOnSelect),
+      messageId: input.messageId ?? null,
+      logChannelId: input.logChannelId ?? null
+    });
     if (!result.changes) return false;
-    await saveRolePanelRoles(id, input.roleIds);
+    await saveRolePanelRoles(id, input.options.length
+      ? input.options
+      : input.roleIds.map((roleId) => ({
+        roleId,
+        label: "",
+        description: "",
+        emoji: "",
+        category: "General",
+        requiredRoleId: null
+      })));
     return true;
   });
   return changed ? getRolePanel(id, guildId) : null;

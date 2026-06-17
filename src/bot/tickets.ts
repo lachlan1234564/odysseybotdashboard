@@ -10,6 +10,8 @@ import {
   Guild,
   GuildMember,
   InteractionReplyOptions,
+  Message,
+  MessageFlags,
   ModalBuilder,
   ModalSubmitInteraction,
   PermissionFlagsBits,
@@ -24,6 +26,7 @@ import {
   closeTicket,
   countOpenTicketsForUser,
   createCloseRequest,
+  createTicketTranscript,
   createTicketRecord,
   getBranding,
   getGuildSettings,
@@ -43,6 +46,7 @@ import { emptyEmbedConfig } from "../shared/types.js";
 import { parseDiscordComponentEmoji } from "../shared/discord-components.js";
 import { renderEmbedMessage } from "./messages.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
+import { deferCommandReply, replyEphemeral, replyToCommand } from "./interactions.js";
 import { friendlyDiscordError, logDiscordError, logError } from "../shared/logging.js";
 import {
   closeRequestAudience,
@@ -316,19 +320,33 @@ export async function sendTicketTranscript(
   closedBy: string,
   reason: string
 ): Promise<{ saved: boolean; downloadUrl: string | null; messageCount: number }> {
-  const settings = await getGuildSettings(guild.id);
-  const logChannelId = type?.transcriptChannelId ?? settings.transcriptChannelId;
-  if (!logChannelId) return { saved: false, downloadUrl: null, messageCount: 0 };
-  const logChannel = await guild.channels.fetch(logChannelId).catch(() => null);
-  if (!logChannel?.isTextBased() || logChannel.isDMBased() || !("send" in logChannel)) {
-    return { saved: false, downloadUrl: null, messageCount: 0 };
-  }
-
   try {
+    const settings = await getGuildSettings(guild.id);
+    const logChannelId = type?.transcriptChannelId ?? settings.transcriptChannelId;
+    const logChannel = logChannelId
+      ? await guild.channels.fetch(logChannelId).catch(() => null)
+      : null;
     const ticket = await getTicketByChannel(guild.id, channel.id);
-    const messages = await channel.messages.fetch({ limit: 100 });
+    let before: string | undefined;
+    const fetched: Message<true>[] = [];
+    for (let page = 0; page < 10; page += 1) {
+      const batch = await channel.messages.fetch({ limit: 100, before });
+      if (!batch.size) break;
+      fetched.push(...batch.values());
+      before = batch.last()?.id;
+      if (batch.size < 100) break;
+    }
+    const messages = fetched.sort((left, right) => left.createdTimestamp - right.createdTimestamp);
+    const transcriptMessages = messages.map((message) => ({
+      id: message.id,
+      authorId: message.author.id,
+      authorTag: message.author.tag,
+      createdAt: message.createdAt.toISOString(),
+      content: message.cleanContent || "",
+      attachments: [...message.attachments.values()].map((file) => file.url),
+      embeds: message.embeds.length
+    }));
     const lines = messages
-      .sort((left, right) => left.createdTimestamp - right.createdTimestamp)
       .map((message) => {
         const attachments = [...message.attachments.values()].map((file) => file.url).join(" ");
         const content = [message.cleanContent, attachments].filter(Boolean).join(" ");
@@ -342,6 +360,23 @@ export async function sendTicketTranscript(
       "",
       ...lines
     ].join("\n");
+    if (ticket) {
+      await createTicketTranscript({
+        guildId: guild.id,
+        ticketId: ticket.id,
+        channelId: channel.id,
+        channelName: channel.name,
+        openerId: ticket.userId,
+        closedBy,
+        closeReason: reason || "No reason provided",
+        messageCount: transcriptMessages.length,
+        transcriptJson: transcriptMessages,
+        transcriptText: transcript
+      });
+    }
+    if (!logChannelId || !logChannel?.isTextBased() || logChannel.isDMBased() || !("send" in logChannel)) {
+      return { saved: Boolean(ticket), downloadUrl: null, messageCount: lines.length };
+    }
     const safeName = channel.name.replace(/[^a-z0-9-_]/gi, "-").slice(0, 80);
     const file = new AttachmentBuilder(Buffer.from(transcript, "utf8"), {
       name: `${safeName || "ticket"}-transcript.txt`
@@ -510,9 +545,10 @@ export async function prepareTicketCloseRequest(
 
 export async function handleTicketPanel(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId || !interaction.guild) {
-    await interaction.reply({ content: "This command can only be used in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command can only be used in a server.");
     return;
   }
+  await deferCommandReply(interaction);
   if (!(await requireBotAdmin(interaction))) return;
 
   const requestedId = Number(interaction.options.getString("panel"));
@@ -520,7 +556,7 @@ export async function handleTicketPanel(interaction: ChatInputCommandInteraction
     ? await getTicketPanel(requestedId, interaction.guildId)
     : (await listTicketPanels(interaction.guildId, true))[0];
   if (!panel?.active) {
-    await interaction.reply({ content: "Create and enable a ticket panel in the dashboard first.", ephemeral: true });
+    await replyToCommand(interaction, "Create and enable a ticket panel in the dashboard first.");
     return;
   }
 
@@ -529,25 +565,25 @@ export async function handleTicketPanel(interaction: ChatInputCommandInteraction
     : null;
   const target = interaction.options.getChannel("channel") ?? configuredChannel ?? interaction.channel;
   if (!target || !("send" in target) || typeof target.send !== "function") {
-    await interaction.reply({ content: "Choose a text channel for the ticket panel.", ephemeral: true });
+    await replyToCommand(interaction, "Choose a text channel for the ticket panel.");
     return;
   }
 
   try {
     await postTicketPanel(interaction.guild, panel.id, target as SendableChannel);
-    await interaction.reply({ content: `Posted **${panel.name}** in ${target}.`, ephemeral: true });
+    await replyToCommand(interaction, `Posted **${panel.name}** in ${target}.`);
   } catch (error) {
     logDiscordError(`Ticket panel "${panel.name}" could not be posted`, error);
     const detail = error instanceof Error && !("code" in error)
       ? error.message
       : friendlyDiscordError(error, "Could not post the ticket panel.");
-    await interaction.reply({ content: detail, ephemeral: true });
+    await replyToCommand(interaction, detail);
   }
 }
 
 async function createTicket(interaction: TicketCreateInteraction, panelId: number, typeId: number): Promise<void> {
   if (!interaction.guildId || !interaction.guild) return;
-  await interaction.deferReply({ ephemeral: true });
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const [type, panel] = await Promise.all([
     getTicketType(typeId, interaction.guildId),
     getTicketPanel(panelId, interaction.guildId)
@@ -695,7 +731,7 @@ export async function handlePanelSelect(interaction: StringSelectMenuInteraction
   if (!interaction.guildId || !interaction.guild) return;
   const child = await getTicketPanel(Number(interaction.values[0]), interaction.guildId);
   if (!child?.active) {
-    await interaction.reply({ content: "That panel is no longer available.", ephemeral: true });
+    await interaction.reply({ content: "That panel is no longer available.", flags: MessageFlags.Ephemeral });
     return;
   }
   await interaction.reply({
@@ -706,7 +742,7 @@ export async function handlePanelSelect(interaction: StringSelectMenuInteraction
         ? interaction.channel as SendableChannel
         : null
     )),
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -735,7 +771,7 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
   if (!interaction.guildId || !interaction.guild || !(interaction.channel instanceof TextChannel)) return;
   const ticket = await getTicketByChannel(interaction.guildId, interaction.channelId);
   if (!ticket || ticket.status !== "open") {
-    await interaction.reply({ content: "This is not an active ticket.", ephemeral: true });
+    await interaction.reply({ content: "This is not an active ticket.", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -750,14 +786,14 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     );
     const denial = closeRequestCreationDenial("community", access.isStaff, access.isCommunity);
     if (denial) {
-      await interaction.reply({ content: denial, ephemeral: true });
+      await interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
       return;
     }
     const pending = await getPendingCloseRequestForTicket(interaction.guildId, ticket.id);
     if (pending) {
       await interaction.reply({
         content: `Close request #${pending.id} is already waiting for ${closeRequestAudience(pending.requestSource)} to respond.`,
-        ephemeral: true
+        flags: MessageFlags.Ephemeral
       });
       return;
     }
@@ -781,7 +817,7 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
   if (!(await canManageTicket(interaction, allowOwner))) {
     await interaction.reply({
       content: "Only the ticket opener or configured ticket staff can use that action.",
-      ephemeral: true
+      flags: MessageFlags.Ephemeral
     });
     return;
   }
@@ -790,7 +826,7 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     const claimed = await claimTicket(interaction.guildId, interaction.channelId, interaction.user.id);
     await interaction.reply({
       content: claimed ? `Ticket claimed by ${interaction.user}.` : "This ticket has already been claimed.",
-      ephemeral: !claimed
+      flags: !claimed ? MessageFlags.Ephemeral : undefined
     });
     if (claimed) await sendTicketLog(interaction.guild, type, "Ticket claimed", `Channel: ${interaction.channel} \`${interaction.channel.id}\` | Claimed by: <@${interaction.user.id}> \`${interaction.user.id}\``);
     return;
@@ -814,7 +850,7 @@ export async function handleTicketButton(interaction: ButtonInteraction): Promis
     const closed = await finishClose(interaction.guild, interaction.channel, interaction.user.id, "");
     await interaction.reply(closed
       ? "Ticket closed. This channel will be deleted in 5 seconds."
-      : { content: "This ticket is already closed.", ephemeral: true });
+      : { content: "This ticket is already closed.", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -826,7 +862,7 @@ export async function handleTicketCloseModal(interaction: ModalSubmitInteraction
   const closed = await finishClose(interaction.guild, interaction.channel, interaction.user.id, reason);
   await interaction.reply(closed
     ? "Ticket closed. This channel will be deleted in 5 seconds."
-    : { content: "This ticket is already closed.", ephemeral: true });
+    : { content: "This ticket is already closed.", flags: MessageFlags.Ephemeral });
 }
 
 export async function handleTicketCloseRequestModal(interaction: ModalSubmitInteraction): Promise<void> {
@@ -834,7 +870,7 @@ export async function handleTicketCloseRequestModal(interaction: ModalSubmitInte
   const prepared = await prepareTicketCloseRequest(interaction, reason, "community");
   await interaction.reply(prepared.payload ?? {
     content: prepared.error ?? "Could not create the close request.",
-    ephemeral: true
+    flags: MessageFlags.Ephemeral
   });
 }
 
@@ -875,17 +911,17 @@ export async function handleTicketCloseDecision(interaction: ButtonInteraction):
   const requestId = Number(requestIdText);
   const request = await getTicketCloseRequest(requestId, interaction.guild.id);
   if (!request || request.status !== "pending") {
-    await interaction.reply({ content: "That close request has already been handled or no longer exists.", ephemeral: true });
+    await interaction.reply({ content: "That close request has already been handled or no longer exists.", flags: MessageFlags.Ephemeral });
     return;
   }
 
   const ticket = await getTicketByChannel(interaction.guild.id, interaction.channel.id);
   if (!ticket || ticket.status !== "open") {
-    await interaction.reply({ content: "This ticket is no longer active.", ephemeral: true });
+    await interaction.reply({ content: "This ticket is no longer active.", flags: MessageFlags.Ephemeral });
     return;
   }
   if (request.ticketId !== ticket.id) {
-    await interaction.reply({ content: "That close request belongs to a different ticket.", ephemeral: true });
+    await interaction.reply({ content: "That close request belongs to a different ticket.", flags: MessageFlags.Ephemeral });
     return;
   }
 
@@ -904,13 +940,13 @@ export async function handleTicketCloseDecision(interaction: ButtonInteraction):
     request.requestedBy === interaction.user.id
   );
   if (denial) {
-    await interaction.reply({ content: denial, ephemeral: true });
+    await interaction.reply({ content: denial, flags: MessageFlags.Ephemeral });
     return;
   }
 
   const accepted = action === "accept" || action === "approve";
   if (!accepted && action !== "deny") {
-    await interaction.reply({ content: "That close-request action is invalid.", ephemeral: true });
+    await interaction.reply({ content: "That close-request action is invalid.", flags: MessageFlags.Ephemeral });
     return;
   }
   const resolved = await resolveCloseRequest(
@@ -920,7 +956,7 @@ export async function handleTicketCloseDecision(interaction: ButtonInteraction):
     accepted ? "approved" : "denied"
   );
   if (!resolved) {
-    await interaction.reply({ content: "Someone else handled that close request first.", ephemeral: true });
+    await interaction.reply({ content: "Someone else handled that close request first.", flags: MessageFlags.Ephemeral });
     return;
   }
 

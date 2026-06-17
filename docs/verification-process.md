@@ -1,183 +1,160 @@
-# Verification process
+# Verification gate
 
-Odyssey Bot includes an optional Discord identity and membership verification flow. It can confirm who authorized the link, whether that Discord user belongs to the selected server, and whether configured account-age rules pass.
+Odyssey Bot can place a Discord server behind a privacy-respecting verification gate. New members see the verification channel and any public areas selected by an administrator. After a successful Discord OAuth check, the bot assigns the configured verified/community role, which unlocks the normal server.
 
-It cannot reliably detect alternate accounts. The flow does not fingerprint browsers or devices.
+The system confirms Discord identity, server membership, and optional account-age or VPN/proxy signals. It does not fingerprint browsers or claim to identify alternate accounts.
 
----
+## Before enabling it
 
-## How the admin sets it up
+1. Create a normal Discord role such as `Community` or `Verified`.
+2. Move the **Odyssey Bot** role above that role.
+3. Give Odyssey Bot:
+   - View Channels
+   - Send Messages
+   - Embed Links
+   - Read Message History
+   - Manage Channels
+   - Manage Roles
+4. In the Discord Developer Portal, register:
 
-### 1. Discord Developer Portal
-
-Go to your application in the [Discord Developer Portal](https://discord.com/developers/applications).
-
-**OAuth2 → General:**
-Copy your **Client Secret** (not the Bot Token).
-
-**OAuth2 → Redirects:**
-Add the exact callback URL:
-```
+```text
 https://verify.YOUR_DOMAIN.com/api/verify/callback
 ```
-or for testing:
-```
-http://127.0.0.1:3210/api/verify/callback
-```
 
-### 2. Environment variables
+5. Configure these startup variables:
 
-Add these to `.env`:
-
-```bash
+```dotenv
 DISCORD_CLIENT_SECRET=your_oauth_client_secret
 DISCORD_OAUTH_REDIRECT_URI=https://verify.YOUR_DOMAIN.com/api/verify/callback
 VERIFY_PUBLIC_BASE_URL=https://verify.YOUR_DOMAIN.com
-# Optional:
-PUBLIC_BASE_URL=https://admin.YOUR_DOMAIN.com
-TRUST_PROXY=true  # if behind Cloudflare Tunnel or a reverse proxy
+TRUST_PROXY=true
 ```
 
-If `DISCORD_CLIENT_SECRET` is not set, the entire verification feature is disabled — the dashboard shows a warning, the enable toggle is blocked, and routes return 503.
+`VERIFY_PUBLIC_BASE_URL` must be the public verification hostname, not the protected admin hostname. Do not apply Cloudflare Access to the verification hostname.
 
-| Variable | Purpose | Fallback |
-|----------|---------|----------|
-| `DISCORD_CLIENT_SECRET` | Discord OAuth client secret | (none — verification disabled without it) |
-| `DISCORD_OAUTH_REDIRECT_URI` | Exact OAuth callback URL | `VERIFY_PUBLIC_BASE_URL`/`api/verify/callback` |
-| `VERIFY_PUBLIC_BASE_URL` | Public URL for verification links | `PUBLIC_BASE_URL` then `req.host` |
-| `PUBLIC_BASE_URL` | Admin dashboard URL | (none) |
-| `TRUST_PROXY` | Trust `X-Forwarded-For` from Cloudflare | `false` (auto-true in production) |
-| `VPN_CHECK_URL_TEMPLATE` | VPN provider URL with `{ip}` | (none — VPN checks skipped) |
-| `VPN_CHECK_API_KEY` | VPN provider API key | (none) |
+## Dashboard setup
 
-### 3. Dashboard settings
+Open **Security → Verification**.
 
-Go to **Security → Verification** in the dashboard. The provider status cards show what's configured.
+### Gate identity
 
-Fields:
+- **Enabled:** turns verification on for the selected Discord server.
+- **Verified/community role:** assigned only after verification passes.
+- **Existing verification channel:** reuse a text channel.
+- **New channel name:** used when automatic creation is enabled.
+- **Verification log channel:** receives setup, pass, fail, and role-assignment events.
 
-| Setting | Default | What it does |
-|---------|---------|--------------|
-| Enabled | Off | Turn on verification for this server |
-| Verified role | None | Role assigned after passing (optional) |
-| Action | Flag for review | What happens when risk signals are found |
-| Log channel | None | Where moderation logs go |
-| Min account age (days) | 0 | Flags accounts newer than this |
-| Min server time (days) | 0 | Flags members newer than this |
-| VPN/proxy check | Off | Requires provider env vars |
-| Fail if VPN check unavailable | Off | Block if the VPN provider is down |
-| Record retention (hours) | 168 | Auto-delete old records after this time |
+### Verification message
 
-**Action modes:**
-- **Allow all**: Records pass/fail but takes no action. Useful for testing.
-- **Flag for review**: Default. Stores flagged records but does not block.
-- **Deny**: Blocks verification if any risk signal is found.
-- **Assign verified role**: Assigns the configured role on pass (falls through to flag behavior if no role set).
+Customize the embed title, description, colour, link-button label, success message, and failed message. The live preview shows the Discord message before anything is posted.
 
-### 4. Creating a verification link
+The Discord button uses a stable server URL:
 
-Click **Create link** on the dashboard. A new link appears (expires in 24 hours). Copy it and share it — post it in a welcome channel, send it via DM, or include it in server rules.
+```text
+https://verify.YOUR_DOMAIN.com/verify/server/GUILD_ID
+```
 
----
+The dashboard can still create temporary 24-hour links for one-off sharing.
 
-## What the member sees
+### Unverified visibility
 
-### Step 1: The consent page
+- **Lock the server by default:** hides every normal area from `@everyone`.
+- **Public categories:** visible to unverified users, including permission-synced child channels.
+- **Public channels:** individual visible exceptions.
+- **Always hidden categories/channels:** hidden selections override public selections.
+- **Read-only verification channel:** members can read and click the button but cannot chat.
 
-When the member opens the verification link (`https://verify.YOUR_DOMAIN.com/verify/<token>`), they see a page with:
+Odyssey Bot changes only the `@everyone`, verified role, configured admin/staff role, and bot-member overwrites required by the gate. It preserves unrelated role and user overwrites.
 
-> **What happens during verification**
-> This server uses verification to confirm your Discord identity and server membership. It may also check account age and optional VPN/proxy risk signals.
->
-> **What is stored**
-> Your Discord user ID, a limited-time result, reason codes (for example, "new Discord account"), an optional risk score, and expiry data.
->
-> **What is not stored**
-> No raw IP addresses, no browser fingerprints, no device identifiers, and no personal information beyond what Discord already shares.
+Before each first change, the original overwrite is saved in the database. Re-running setup derives changes from that saved original instead of repeatedly stacking permissions.
 
-They must click **"I agree, verify me"** to proceed.
+### Risk checks
 
-### Step 2: Discord OAuth
+- **Allow and record:** records risk signals and allows verification.
+- **Hold for staff review:** flagged members do not receive the verified role.
+- **Deny:** any configured signal prevents verification.
+- **Assign role and record:** records signals but allows verified members through.
 
-They are redirected to Discord to authorize the bot. The requested permissions are:
-- Know who you are on Discord (`identify`)
-- Know what servers you're in (`guilds.members.read`)
+Optional VPN/proxy checks require both provider variables. Raw IP addresses are never stored.
 
-No bot permissions are granted. This is a read-only identity check.
+## Safe setup workflow
 
-### Step 3: Verification checks
+1. Fill out the verification form.
+2. Save it with **Apply when settings are saved** turned off.
+3. Click **Dry run / preview changes**.
+4. Review the number of public, hidden, inherited, and planned permission changes.
+5. Click **Apply verification setup**, or run:
 
-After authorizing, the callback runs these checks in order:
+```text
+/verification setup
+```
 
-1. **Discord identity** — confirmed via OAuth user ID
-2. **Guild membership** — confirmed via Discord API. If not in the server, fails immediately.
-3. **Account age** — derived from the Discord Snowflake ID (no API call needed). Flagged if below `minAccountAgeDays`.
-4. **Server join time** — checked via the guild member endpoint. Flagged if below `minServerDays`.
-5. **VPN/proxy check** (optional) — only runs if provider env vars are configured and the toggle is on.
+The setup command requires Administrator or Manage Server. It creates or reuses the channel, posts or updates the embed, applies permissions, and returns a summary.
 
-### Step 4: Result
+Use this command to inspect saved status:
 
-| Status | Meaning |
-|--------|---------|
-| `passed` | No risk signals found |
-| `flagged` | One or more risk signals found, recorded for review |
-| `denied` | Risk signals found and action is set to Deny |
+```text
+/verification status
+```
 
-The member sees:
-- "Verification passed. You can return to Discord." (passed/flagged)
-- "Verification did not meet this server's requirements. Contact server staff if you need help." (denied)
-- "Verification could not be completed. The link may have expired..." (error/expired)
+## Member flow
 
-### Step 5: Role assignment
+1. The member opens the verification link.
+2. The public page explains what is and is not collected.
+3. The member continues to Discord OAuth using `identify guilds.members.read`.
+4. Odyssey Bot verifies that the OAuth user is still a member of the selected server.
+5. Configured account-age, server-time, and optional VPN/proxy checks run.
+6. Passed members receive the verified/community role.
+7. The role unlocks normal channels through the gate overwrites.
 
-If a **Verified role** is configured and the result is `passed` or `flagged`, the bot assigns that role to the member.
+If the member is not in the server, verification fails safely. If role assignment fails, the page asks the member to contact staff and the configured verification log receives the failure.
 
-### Step 6: Records
+## New member behaviour
 
-The dashboard **Security → Verification** page shows a table of recent verification records:
+When verification is enabled, Odyssey Bot never assigns the verified/community role through Welcome auto-roles. Other configured auto-roles still work. The verification log records that the new member is pending verification.
 
-| Column | Example |
-|--------|---------|
-| User | Discord user ID |
-| Result | `passed` / `flagged` / `denied` |
-| Reasons | `new_discord_account, vpn_proxy_detected` |
-| Risk score | `70` |
-| VPN | `Yes` / `No` / `N/A` |
-| Verified | timestamp |
-| Expires | timestamp |
+## Reposting and repair
 
-Records auto-expire based on the retention setting. No raw technical data is ever shown in the dashboard.
+Use **Repost / update embed** if the message was deleted or the text changed. If the saved message is gone, Odyssey Bot posts a replacement and stores its new message ID.
 
----
+Re-run setup after changing public areas, role hierarchy, or channel structure.
 
-## Reason codes
+## Disabling safely
 
-| Code | Risk Score | Trigger |
-|------|-----------|---------|
-| `new_discord_account` | +30 | Account younger than `minAccountAgeDays` |
-| `recent_server_member` | +20 | Joined server less than `minServerDays` ago |
-| `vpn_proxy_detected` | +40 | VPN/proxy provider flagged the IP |
-| `vpn_check_unavailable` | +30 | VPN check failed and `vpnFailClosed` is on |
+Click **Disable and restore permissions** to:
 
----
+- turn verification off;
+- restore saved permission overwrites;
+- keep the verification channel;
+- keep roles already assigned to verified members.
 
-## Error scenarios
+The action does not delete channels and does not remove verified roles from members. If a channel was deleted, restoration skips it safely.
 
-| What the user sees | Likely cause | Fix |
-|--------------------|-------------|-----|
-| "Verification link expired" | Link is older than 24 hours | Create a new link in the dashboard |
-| "Verification not configured" (503) | `DISCORD_CLIENT_SECRET` not set in `.env` | Add the OAuth client secret |
-| "Invalid OAuth2 redirect_uri" | Redirect URL doesn't match Discord Portal | Check `DISCORD_OAUTH_REDIRECT_URI` matches exactly |
-| "Could not complete the request" (500) | Server error | Check the dashboard terminal |
-| Cloudflare Access login page | Admin applied Access policy to verify hostname | Remove Access from `verify.DOMAIN.com` |
-| VPN check blocks everyone | Provider is down and `vpnFailClosed` is on | Turn off fail-closed or configure backup |
+## Stored data
 
----
+Per-guild settings include the verified role, channel/message IDs, embed content, public and hidden areas, gate options, last setup time, and updater ID.
 
-## Privacy summary
+Verification records include:
 
-- Raw IP addresses are **never stored**. The VPN check sends the IP to the provider but does not persist it.
-- Browser/device fingerprints and device-derived hashes are **not collected or stored**.
-- No hidden tracking. The consent page is shown before any checks run.
-- All records expire automatically.
-- Secrets (`DISCORD_CLIENT_SECRET`, `VPN_CHECK_API_KEY`, `DASHBOARD_PASSWORD`) are redacted from all server logs.
+- Discord user ID;
+- pass, flagged, or denied status;
+- reason codes and risk score;
+- Discord account creation time;
+- server join time when available;
+- optional VPN/proxy result;
+- verification and expiry timestamps.
+
+Raw IP addresses, browser fingerprints, device identifiers, and OAuth access tokens are not stored.
+
+## Common problems
+
+| Problem | Fix |
+|---|---|
+| Verification cannot be enabled | Configure `DISCORD_CLIENT_SECRET` and `VERIFY_PUBLIC_BASE_URL`. |
+| OAuth says redirect URI is invalid | Make `DISCORD_OAUTH_REDIRECT_URI` exactly match the Developer Portal entry. |
+| Members see Cloudflare Access | Remove Access protection from `verify.YOUR_DOMAIN.com`. |
+| Bot cannot create or lock channels | Grant Manage Channels and move the bot role appropriately. |
+| Role is not assigned | Grant Manage Roles and move Odyssey Bot above the verified role. |
+| Verification message disappeared | Use **Repost / update embed**. |
+| Some permission changes failed | Open the dry-run/setup result, fix channel access, and run setup again. |
+| Flagged members do not unlock the server | This is expected in **Hold for staff review** mode. |

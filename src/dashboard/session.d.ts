@@ -6,5 +6,6 @@ declare module "express-session" {
     selectedGuildId?: string;
     verificationTokenHash?: string;
     verificationOAuthState?: string;
+    verificationGuildId?: string;
   }
 }

@@ -517,5 +517,158 @@ export const postgresMigrations = [
       SET auto_roles_enabled = 1
       WHERE enabled = 1 AND auto_role_ids <> '[]';
     `
+  },
+  {
+    version: 14,
+    sql: `
+      CREATE TABLE IF NOT EXISTS logging_settings (
+        guild_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        channel_id TEXT,
+        members INTEGER NOT NULL DEFAULT 1,
+        messages INTEGER NOT NULL DEFAULT 1,
+        voice INTEGER NOT NULL DEFAULT 1,
+        channels INTEGER NOT NULL DEFAULT 1,
+        roles INTEGER NOT NULL DEFAULT 1,
+        server INTEGER NOT NULL DEFAULT 1,
+        invites INTEGER NOT NULL DEFAULT 1,
+        threads INTEGER NOT NULL DEFAULT 1,
+        moderation INTEGER NOT NULL DEFAULT 1,
+        dashboard INTEGER NOT NULL DEFAULT 1,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      UPDATE branding
+      SET accent_color = '#C58B4B'
+      WHERE UPPER(accent_color) IN ('#7785FF', '#5865F2');
+    `
+  },
+  {
+    version: 15,
+    sql: `
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS verification_channel_id TEXT;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS verification_channel_name TEXT NOT NULL DEFAULT 'verify';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS verification_embed_message_id TEXT;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS embed_title TEXT NOT NULL DEFAULT 'Verify to Access the Server';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS embed_description TEXT NOT NULL DEFAULT 'Click the button below to verify your Discord account. Once verified, you will receive the community role and unlock the rest of the server.';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS embed_color TEXT NOT NULL DEFAULT '#C58B4B';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS button_text TEXT NOT NULL DEFAULT 'Verify Me';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS success_message TEXT NOT NULL DEFAULT 'Verification passed. You can return to Discord.';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS failure_message TEXT NOT NULL DEFAULT 'Verification did not meet this server''s requirements. Contact server staff if you need help.';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS public_channel_ids TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS public_category_ids TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS hidden_channel_ids TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS hidden_category_ids TEXT NOT NULL DEFAULT '[]';
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS lock_all_channels INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS auto_create_channel INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS lock_verification_channel INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS update_embed_on_setup INTEGER NOT NULL DEFAULT 1;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS apply_permissions_immediately INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS permissions_applied INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS last_setup_at TIMESTAMPTZ;
+      ALTER TABLE verification_settings ADD COLUMN IF NOT EXISTS updated_by TEXT;
+
+      CREATE TABLE IF NOT EXISTS verification_permission_backups (
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        target_type INTEGER NOT NULL,
+        allow_bits TEXT NOT NULL DEFAULT '0',
+        deny_bits TEXT NOT NULL DEFAULT '0',
+        existed INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (guild_id, channel_id, target_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_verification_permission_backups_guild
+        ON verification_permission_backups(guild_id);
+    `
+  },
+  {
+    version: 16,
+    sql: `
+      ALTER TABLE role_panels ADD COLUMN IF NOT EXISTS layout TEXT NOT NULL DEFAULT 'buttons';
+      ALTER TABLE role_panels ADD COLUMN IF NOT EXISTS max_selected_per_category INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE role_panels ADD COLUMN IF NOT EXISTS remove_role_on_select INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE role_panels ADD COLUMN IF NOT EXISTS required_role_id TEXT;
+      ALTER TABLE role_panels ADD COLUMN IF NOT EXISTS message_id TEXT;
+      ALTER TABLE role_panels ADD COLUMN IF NOT EXISTS log_channel_id TEXT;
+
+      ALTER TABLE role_panel_roles ADD COLUMN IF NOT EXISTS label TEXT NOT NULL DEFAULT '';
+      ALTER TABLE role_panel_roles ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+      ALTER TABLE role_panel_roles ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '';
+      ALTER TABLE role_panel_roles ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'General';
+      ALTER TABLE role_panel_roles ADD COLUMN IF NOT EXISTS required_role_id TEXT;
+
+      ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS reviewed_by TEXT;
+      ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
+      ALTER TABLE verification_records ADD COLUMN IF NOT EXISTS staff_note TEXT NOT NULL DEFAULT '';
+
+      CREATE TABLE IF NOT EXISTS moderation_cases (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        case_number INTEGER NOT NULL,
+        target_user_id TEXT NOT NULL,
+        moderator_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        reason TEXT NOT NULL DEFAULT '',
+        duration_seconds INTEGER,
+        evidence_url TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'active',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(guild_id, case_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_moderation_cases_guild ON moderation_cases(guild_id, case_number DESC);
+      CREATE INDEX IF NOT EXISTS idx_moderation_cases_target ON moderation_cases(guild_id, target_user_id);
+
+      CREATE TABLE IF NOT EXISTS giveaways (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        prize TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        winners_count INTEGER NOT NULL DEFAULT 1,
+        ends_at TIMESTAMPTZ NOT NULL,
+        required_role_id TEXT,
+        booster_bonus_entries INTEGER NOT NULL DEFAULT 0,
+        bonus_role_id TEXT,
+        bonus_role_entries INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'draft',
+        winner_user_ids TEXT NOT NULL DEFAULT '[]',
+        created_by TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_giveaways_guild ON giveaways(guild_id, status, ends_at);
+
+      CREATE TABLE IF NOT EXISTS giveaway_entries (
+        giveaway_id BIGINT NOT NULL REFERENCES giveaways(id) ON DELETE CASCADE,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        entries INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(giveaway_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_giveaway_entries_guild ON giveaway_entries(guild_id, giveaway_id);
+
+      CREATE TABLE IF NOT EXISTS ticket_transcripts (
+        id BIGSERIAL PRIMARY KEY,
+        guild_id TEXT NOT NULL,
+        ticket_id BIGINT NOT NULL REFERENCES tickets(id) ON DELETE CASCADE,
+        channel_id TEXT NOT NULL,
+        channel_name TEXT NOT NULL,
+        opener_id TEXT NOT NULL,
+        closed_by TEXT NOT NULL,
+        close_reason TEXT NOT NULL DEFAULT '',
+        message_count INTEGER NOT NULL DEFAULT 0,
+        transcript_json TEXT NOT NULL DEFAULT '[]',
+        transcript_text TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_guild ON ticket_transcripts(guild_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_ticket ON ticket_transcripts(guild_id, ticket_id);
+    `
   }
 ] as const;

@@ -35,7 +35,7 @@ pnpm db:setup
 pnpm deploy:commands
 ```
 
-`db:setup` applies pending SQLite or PostgreSQL migrations. `deploy:commands` registers the static Discord slash commands, including `/ping`, `/help`, `/server-info`, `/user-info`, `/automod-status`, `/socials-post`, `/bot-status`, `/custom`, `/ticket-panel`, `/announce`, `/reaction-roles`, `/close-request`, `/lockdown`, `/unlockdown`, and the moderation commands.
+`db:setup` applies pending SQLite or PostgreSQL migrations. `deploy:commands` registers the static Discord slash commands, including `/ping`, `/help`, `/server info`, `/user-info`, `/automod-status`, `/socials-post`, `/bot-status`, `/custom`, `/ticket-panel`, `/announce`, `/reaction-roles`, `/close-request`, `/lockdown`, `/unlockdown`, and the moderation commands.
 
 ## 4. Start development
 

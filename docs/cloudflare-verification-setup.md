@@ -4,7 +4,7 @@ This guide explains how to run Odyssey Bot behind a Cloudflare Tunnel with separ
 
 ---
 
-## Accounts you need
+## Requirements
 
 | Service | Why | Cost |
 |---------|-----|------|
@@ -16,7 +16,7 @@ This guide explains how to run Odyssey Bot behind a Cloudflare Tunnel with separ
 
 ---
 
-## Step 1: Discord Developer Portal
+## Discord Developer Portal
 
 1. Go to [discord.com/developers/applications](https://discord.com/developers/applications) and open your bot application.
 2. Under **OAuth2 → Redirects**, add:
@@ -24,11 +24,13 @@ This guide explains how to run Odyssey Bot behind a Cloudflare Tunnel with separ
    https://verify.YOUR_DOMAIN.com/api/verify/callback
    ```
    This is the ONLY redirect URL you need. Do not add `admin.YOUR_DOMAIN.com` here.
-3. Copy your **Client Secret** (not the Bot Token) from the OAuth2 page. You'll put this in `.env` as `DISCORD_CLIENT_SECRET`.
+3. Copy your **Client Secret** from the OAuth2 page. You'll put this in `.env` as `DISCORD_CLIENT_SECRET`.
+
+> **Important:** Do not use the bot token as the Discord client secret. The bot token belongs in `DISCORD_TOKEN`; the OAuth client secret belongs in `DISCORD_CLIENT_SECRET`.
 
 ---
 
-## Step 2: Install and authenticate Cloudflare Tunnel
+## Cloudflare Tunnel
 
 ```bash
 # macOS/Linux
@@ -49,7 +51,7 @@ This outputs a tunnel UUID. Save it.
 
 ---
 
-## Step 3: Configure Cloudflare DNS
+## DNS records
 
 In the Cloudflare dashboard → DNS, add two CNAME records pointing to your tunnel:
 
@@ -62,7 +64,7 @@ Turn the orange cloud (proxy) ON for both records.
 
 ---
 
-## Step 4: Cloudflare Access for the admin dashboard
+## Cloudflare Access policy
 
 The verification hostname (`verify.YOUR_DOMAIN.com`) must remain **public** with no Access policy. The admin dashboard (`admin.YOUR_DOMAIN.com`) must be **protected**.
 
@@ -74,11 +76,11 @@ The verification hostname (`verify.YOUR_DOMAIN.com`) must remain **public** with
 6. Under **Identity providers**, choose One-time PIN (simplest) or add Google/GitHub.
 7. Create the policy, then save.
 
-> **Critical:** Do NOT create an Access policy for `verify.YOUR_DOMAIN.com`. The verification page MUST be publicly accessible so Discord OAuth can redirect back to it.
+> **Critical:** Do NOT protect `verify.YOUR_DOMAIN.com` with Cloudflare Access. The verification page must be publicly reachable so members and Discord OAuth can complete the redirect.
 
 ---
 
-## Step 5: Configure the tunnel
+## Tunnel configuration
 
 Create `~/.cloudflared/config.yml`:
 
@@ -102,7 +104,7 @@ cloudflared tunnel run odyssey-bot
 
 ---
 
-## Step 6: `.env` configuration
+## `.env` settings
 
 ```bash
 # --- Required for the bot ---
@@ -136,10 +138,12 @@ PORT=3210
 > **Why `PORT=3210`?** When `PORT` is set, the dashboard listens on `0.0.0.0:3210` instead of `127.0.0.1:3210`, which Cloudflare Tunnel needs to reach it. Alternatively, set `DASHBOARD_HOST=0.0.0.0` instead of `PORT`.
 >
 > **Why `TRUST_PROXY=true`?** Without it, Express ignores `X-Forwarded-For` headers from Cloudflare. The bot will see Cloudflare's IP instead of the real user IP, breaking VPN checks and IP-based logging.
+>
+> **Important:** `VERIFY_PUBLIC_BASE_URL` must point to the public verify hostname, not the protected admin hostname.
 
 ---
 
-## Step 7: Discord OAuth redirect URL — the exact value
+## OAuth redirect URL
 
 Registered in Discord Developer Portal → OAuth2 → Redirects:
 
@@ -154,6 +158,33 @@ DISCORD_OAUTH_REDIRECT_URI=https://verify.YOUR_DOMAIN.com/api/verify/callback
 ```
 
 These must match exactly. If they don't, Discord returns "Invalid OAuth2 redirect_uri."
+
+> **Exact-match rule:** `DISCORD_OAUTH_REDIRECT_URI` must match the Discord Developer Portal redirect URL character-for-character, including protocol, hostname, path, and trailing slash behavior.
+
+---
+
+## Verification flow
+
+1. Start Odyssey Bot and open the protected admin dashboard.
+2. Select the Discord server.
+3. Open **Security → Verification**.
+4. Choose a verified/community role and make sure the Odyssey Bot role is above it.
+5. Choose public categories/channels that unverified users may see.
+6. Save the form.
+7. Run **Dry run / preview changes**.
+8. Apply the setup from the dashboard or run:
+
+```text
+/verification setup
+```
+
+The verification panel uses a stable public URL:
+
+```text
+https://verify.YOUR_DOMAIN.com/verify/server/GUILD_ID
+```
+
+Keep Cloudflare Access on the admin hostname only. The stable verification URL and OAuth callback must be reachable without an Access login.
 
 ---
 
@@ -184,8 +215,24 @@ For local dev without a tunnel (no OAuth testing), leave `DISCORD_CLIENT_SECRET`
 | Protecting verify hostname with Access | "Cloudflare Access" login shown to Discord servers, OAuth fails | Remove Access policy from `verify.DOMAIN.com` |
 | Using bot token as `DISCORD_CLIENT_SECRET` | OAuth token exchange fails | Bot token ≠ Client Secret. Find the secret under OAuth2 → Client Secret |
 | Not setting `PORT=3210` or `DASHBOARD_HOST=0.0.0.0` | Tunnel can't reach `127.0.0.1` | Set `PORT=3210` or `DASHBOARD_HOST=0.0.0.0` in `.env` |
-| Not setting `TRUST_PROXY=true` | VPN checks see Cloudflare's IP, not the real user IP | Set `TRUST_PROXY=true` in `.env` |
+| Not setting `TRUST_PROXY=true` | Optional VPN checks receive the proxy address instead of the connecting address | Set `TRUST_PROXY=true` in `.env` |
 | `VERIFY_PUBLIC_BASE_URL` points to admin domain | Verification links and OAuth callbacks use wrong hostname | Must use `https://verify.DOMAIN.com` |
 | Exposing dashboard publicly without Access | Anyone at `admin.DOMAIN.com` can brute-force the dashboard password | Always protect with Cloudflare Access |
 | Tunnel not running | Both sites return 502 | Keep `cloudflared tunnel run` running |
 | CSP blocks Cloudflare scripts | Dashboard layout broken | The CSP is set to `'self'` only; if you use Turnstile or Cloudflare widgets, you will need to allow their domains |
+| Bot role below verified role | OAuth passes but role assignment fails | Move Odyssey Bot above the verified/community role |
+| Members can still see normal channels | Gate permissions have not been applied | Save, run the dry preview, then apply setup |
+
+---
+
+## Privacy summary
+
+The verification flow is intentionally narrow:
+
+1. The member opens the public verification link.
+2. Discord OAuth confirms their Discord user ID and basic membership information.
+3. Odyssey Bot checks whether the user is in the selected server.
+4. If configured, Odyssey Bot can run an optional VPN/proxy provider check.
+5. The bot records only the minimum verification result needed for dashboard history and support.
+
+Odyssey Bot does not secretly fingerprint browsers, does not claim to detect alts, and should not store raw IP data longer than needed for the verification decision.

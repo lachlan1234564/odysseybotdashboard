@@ -6,6 +6,7 @@ import {
 } from "discord.js";
 import {
   getAutoModSettings,
+  getBranding,
   getGuildSettings,
   getSocialPromotionSettings,
   getWelcomeSettings,
@@ -18,28 +19,44 @@ import type { AutoModSettings } from "../shared/types.js";
 import { renderEmbedMessage } from "./messages.js";
 import { emptyEmbedConfig } from "../shared/types.js";
 import { buildDiscordPlaceholders } from "./placeholders.js";
-import { requireBotAdmin } from "./utils.js";
+import { asColor, requireBotAdmin } from "./utils.js";
 import { friendlyDiscordError, logDiscordError } from "../shared/logging.js";
+import {
+  deferCommandReply,
+  replyEphemeral,
+  replyToCommand
+} from "./interactions.js";
+import { countServerChannels, formatRoleSummary } from "./server-info.js";
 
 export async function handleServerInfo(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guild) {
-    await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command only works in a server.");
     return;
   }
 
   const guild = interaction.guild;
-  await guild.members.fetchMe();
-
-  const [settings, welcome, antiRaid, antiNuke] = await Promise.all([
+  await deferCommandReply(interaction);
+  const [
+    settings,
+    branding,
+    welcome,
+    antiRaid,
+    antiNuke,
+    owner,
+    customCommands,
+    channels,
+    roles
+  ] = await Promise.all([
     getGuildSettings(guild.id),
+    getBranding(guild.id),
     getWelcomeSettings(guild.id),
     getAntiRaidSettings(guild.id),
-    getAntiNukeSettings(guild.id)
+    getAntiNukeSettings(guild.id),
+    guild.fetchOwner().catch(() => null),
+    listCustomCommands(guild.id),
+    guild.channels.fetch().catch(() => guild.channels.cache),
+    guild.roles.fetch().catch(() => guild.roles.cache)
   ]);
-
-  const memberCount = guild.memberCount;
-  const owner = await guild.fetchOwner();
-  const customCommands = await listCustomCommands(guild.id);
 
   const features: string[] = [];
   if (welcome.enabled) features.push("Welcome messages");
@@ -49,30 +66,88 @@ export async function handleServerInfo(interaction: ChatInputCommandInteraction)
   if (customCommands.length > 0) features.push(`${customCommands.length} custom commands`);
   if (settings.modLogChannelId) features.push("Mod log configured");
 
-  const embed = new EmbedBuilder()
-    .setColor(0x5865F2)
-    .setTitle(`${guild.name}`)
-    .setThumbnail(guild.iconURL() ?? null)
-    .addFields(
-      { name: "Server ID", value: guild.id, inline: true },
-      { name: "Owner", value: `${owner.user.username}`, inline: true },
-      { name: "Member count", value: String(memberCount), inline: true },
-      { name: "Created", value: guild.createdAt.toLocaleDateString(), inline: true },
-      { name: "Boosts", value: `${guild.premiumSubscriptionCount ?? 0} (Level ${guild.premiumTier})`, inline: true },
-      { name: "Active features", value: features.length ? features.join(", ") : "No features configured yet. Use the dashboard to set up tickets, automod, and more.", inline: false }
-    )
-    .setFooter({ text: "Odyssey Bot server overview" });
+  const channelCounts = countServerChannels(channels.values());
+  const roleSummary = formatRoleSummary(roles.values(), guild.id);
+  const iconUrl = guild.iconURL({ size: 256 });
+  const bannerUrl = guild.bannerURL({ size: 1024 });
+  const createdTimestamp = Math.floor(guild.createdTimestamp / 1000);
+  const ownerName = owner?.user.username ?? "Unavailable";
+  const boostCount = guild.premiumSubscriptionCount ?? 0;
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  const embed = new EmbedBuilder()
+    .setColor(asColor(branding.accentColor))
+    .setTitle(guild.name)
+    .setDescription("A live overview of this Discord server and its Odyssey Bot setup.")
+    .addFields(
+      {
+        name: "Owner",
+        value: `${ownerName}\n<@${guild.ownerId}>`,
+        inline: true
+      },
+      {
+        name: "Members",
+        value: `**${guild.memberCount.toLocaleString()}** total`,
+        inline: true
+      },
+      {
+        name: "Server boosts",
+        value: `**${boostCount.toLocaleString()}** boosts\nLevel ${guild.premiumTier}`,
+        inline: true
+      },
+      {
+        name: "Channel overview",
+        value: [
+          `Categories  **${channelCounts.categories.toLocaleString()}**`,
+          `Text  **${channelCounts.text.toLocaleString()}**`,
+          `Voice  **${channelCounts.voice.toLocaleString()}**`
+        ].join("\n"),
+        inline: true
+      },
+      {
+        name: `Roles (${roleSummary.count.toLocaleString()})`,
+        value: roleSummary.text,
+        inline: false
+      },
+      {
+        name: "Server details",
+        value: [
+          `ID  \`${guild.id}\``,
+          `Created  <t:${createdTimestamp}:F>`,
+          `Age  <t:${createdTimestamp}:R>`
+        ].join("\n"),
+        inline: false
+      },
+      {
+        name: "Odyssey Bot setup",
+        value: features.length
+          ? features.map((feature) => `- ${feature}`).join("\n")
+          : "No optional features are configured yet. Open the dashboard to set up tickets, Auto Mod, and more.",
+        inline: false
+      }
+    )
+    .setFooter({
+      text: branding.footerText || "Odyssey Bot • Server overview",
+      iconURL: interaction.client.user?.displayAvatarURL()
+    })
+    .setTimestamp();
+
+  if (iconUrl) embed.setThumbnail(iconUrl);
+  if (bannerUrl) embed.setImage(bannerUrl);
+
+  await replyToCommand(interaction, {
+    embeds: [embed],
+    allowedMentions: { users: [], roles: [] }
+  });
 }
 
 export async function handleUserInfo(interaction: ChatInputCommandInteraction): Promise<void> {
   const member = interaction.options.getMember("member") as GuildMember | null;
   if (!member || !("user" in member)) {
-    await interaction.reply({ content: "That member could not be found in this server.", ephemeral: true });
+    await replyEphemeral(interaction, "That member could not be found in this server.");
     return;
   }
 
+  await deferCommandReply(interaction);
   const user = member.user;
   const warnings = await listWarnings(interaction.guildId!, user.id);
 
@@ -96,14 +171,15 @@ export async function handleUserInfo(interaction: ChatInputCommandInteraction): 
     )
     .setFooter({ text: "Odyssey Bot user info" });
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await replyToCommand(interaction, { embeds: [embed] });
 }
 
 export async function handleAutomodStatus(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId) {
-    await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command only works in a server.");
     return;
   }
+  await deferCommandReply(interaction);
   if (!(await requireBotAdmin(interaction))) return;
 
   const settings = await getAutoModSettings(interaction.guildId);
@@ -114,7 +190,7 @@ export async function handleAutomodStatus(interaction: ChatInputCommandInteracti
 
   if (!settings.enabled) {
     embed.setFooter({ text: "Enable Auto Mod in the dashboard to see rules here." });
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await replyToCommand(interaction, { embeds: [embed] });
     return;
   }
 
@@ -147,23 +223,23 @@ export async function handleAutomodStatus(interaction: ChatInputCommandInteracti
     embed.addFields({ name: "Channel link rules", value: linkRules, inline: false });
   }
 
-  await interaction.reply({ embeds: [embed], ephemeral: true });
+  await replyToCommand(interaction, { embeds: [embed] });
 }
 
 export async function handleSocialsPost(interaction: ChatInputCommandInteraction): Promise<void> {
   if (!interaction.guildId || !interaction.guild) {
-    await interaction.reply({ content: "This command only works in a server.", ephemeral: true });
+    await replyEphemeral(interaction, "This command only works in a server.");
     return;
   }
+  await deferCommandReply(interaction);
   if (!(await requireBotAdmin(interaction))) return;
 
   const socials = await getSocialPromotionSettings(interaction.guildId);
   const channelOption = interaction.options.getChannel("channel");
 
   if (!socials.title && !socials.links.length && !socials.memberEntries.length) {
-    await interaction.reply({
-      content: "No social promotion has been configured yet. Set it up in the dashboard under **Social Promotion**.",
-      ephemeral: true
+    await replyToCommand(interaction, {
+      content: "No social promotion has been configured yet. Set it up in the dashboard under **Social Promotion**."
     });
     return;
   }
@@ -173,9 +249,8 @@ export async function handleSocialsPost(interaction: ChatInputCommandInteraction
     : interaction.channel);
 
   if (!targetChannel || !("send" in targetChannel)) {
-    await interaction.reply({
-      content: "Could not find a valid text channel. Save a target channel in the dashboard or provide one with the `channel` option.",
-      ephemeral: true
+    await replyToCommand(interaction, {
+      content: "Could not find a valid text channel. Save a target channel in the dashboard or provide one with the `channel` option."
     });
     return;
   }
@@ -191,9 +266,8 @@ export async function handleSocialsPost(interaction: ChatInputCommandInteraction
   ];
   const missingPermissions = requiredPermissions.filter((permission) => !permissions?.has(permission));
   if (missingPermissions.length > 0) {
-    await interaction.reply({
-      content: "Odyssey Bot cannot post there. Check View Channel, Send Messages, and Embed Links permissions.",
-      ephemeral: true
+    await replyToCommand(interaction, {
+      content: "Odyssey Bot cannot post there. Check View Channel, Send Messages, and Embed Links permissions."
     });
     return;
   }
@@ -234,15 +308,13 @@ export async function handleSocialsPost(interaction: ChatInputCommandInteraction
     }
   } catch (error) {
     logDiscordError("Social promotion post failed", error);
-    await interaction.reply({
-      content: friendlyDiscordError(error, "Could not post the social promotion"),
-      ephemeral: true
+    await replyToCommand(interaction, {
+      content: friendlyDiscordError(error, "Could not post the social promotion")
     });
     return;
   }
 
-  await interaction.reply({
-    content: `Social promotion posted in ${targetChannel.toString()}.`,
-    ephemeral: true
+  await replyToCommand(interaction, {
+    content: `Social promotion posted in ${targetChannel.toString()}.`
   });
 }

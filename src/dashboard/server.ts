@@ -42,7 +42,7 @@ app.use(session({
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: "strict",
+    sameSite: "lax",
     secure: config.NODE_ENV === "production",
     maxAge: 8 * 60 * 60 * 1000
   }
@@ -61,6 +61,11 @@ app.get(["/docs", "/docs/:topic", "/help"], (req, res) => {
   res.sendFile(path.join(publicPath, "index.html"));
 });
 app.get("/verify/:token", (_req, res) => {
+  const filePath = path.join(publicPath, "verify.html");
+  const content = fs.readFileSync(filePath, "utf8");
+  res.setHeader("Content-Type", "text/html; charset=utf-8").send(content);
+});
+app.get("/verify/server/:guildId", (_req, res) => {
   const filePath = path.join(publicPath, "verify.html");
   const content = fs.readFileSync(filePath, "utf8");
   res.setHeader("Content-Type", "text/html; charset=utf-8").send(content);

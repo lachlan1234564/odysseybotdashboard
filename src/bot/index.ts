@@ -6,7 +6,9 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  MessageFlags,
   ModalSubmitInteraction,
+  Partials,
   PermissionFlagsBits,
   StringSelectMenuInteraction
 } from "discord.js";
@@ -14,12 +16,13 @@ import {
   listAnnouncements,
   listCustomCommands,
   updateTicketActivity,
-  getWelcomeSettings
+  getWelcomeSettings,
+  getVerificationSettings
 } from "../database/index.js";
 import { loadDiscordConfig } from "../shared/config.js";
 import { handleAnnounce, handleAnnouncementButton } from "./announcements.js";
 import { handleCustomCommand } from "./custom-commands.js";
-import { handleModeration } from "./moderation.js";
+import { handleCaseCommand, handleModeration } from "./moderation.js";
 import {
   availableTicketPanels,
   handlePanelSelect,
@@ -45,7 +48,8 @@ import { handleAutoModMessage } from "./auto-mod.js";
 import {
   availableRolePanels,
   handleReactionRolesCommand,
-  handleRolePanelButton
+  handleRolePanelButton,
+  handleRolePanelSelect
 } from "./role-panels.js";
 import { handleStickyActivity } from "./sticky-messages.js";
 import { processScheduledAnnouncements } from "./scheduled-announcements.js";
@@ -65,8 +69,42 @@ import {
   handleUnlockdown,
   handleBotStatus
 } from "./admin-commands.js";
-import { logError } from "../shared/logging.js";
+import { logError, safeErrorSummary } from "../shared/logging.js";
 import { renderBoostTemplate } from "../shared/boost.js";
+import { replyEphemeral, replyToCommand, deferCommandReply } from "./interactions.js";
+import type { SlashCommandName } from "./commands.js";
+import {
+  logBanAdd,
+  logBanRemove,
+  logChannelCreate,
+  logChannelDelete,
+  logChannelUpdate,
+  logEmojiChange,
+  logGuildUpdate,
+  logInviteChange,
+  logMemberJoin,
+  logMemberLeave,
+  logMemberUpdate,
+  logMessageBulkDelete,
+  logMessageDelete,
+  logMessageUpdate,
+  logRoleCreate,
+  logRoleDelete,
+  logRoleUpdate,
+  logStickerChange,
+  logThreadCreate,
+  logThreadDelete,
+  logThreadUpdate,
+  logVoiceUpdate,
+  logWebhookUpdate
+} from "./server-logging.js";
+import { handleVerificationCommand } from "./verification.js";
+import { sendVerificationEventLog } from "../shared/verification-gate.js";
+import {
+  handleGiveawayButton,
+  handleGiveawayCommand,
+  processDueGiveaways
+} from "./giveaways.js";
 
 const config = loadDiscordConfig();
 const client = new Client({
@@ -75,7 +113,17 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildInvites,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildExpressions,
+    GatewayIntentBits.GuildWebhooks,
     GatewayIntentBits.MessageContent
+  ],
+  partials: [
+    Partials.Channel,
+    Partials.GuildMember,
+    Partials.Message,
+    Partials.User
   ]
 });
 
@@ -83,6 +131,9 @@ client.once(Events.ClientReady, (readyClient) => {
   console.log(`Odyssey Bot connected to Discord in ${readyClient.guilds.cache.size} server(s).`);
   processScheduledAnnouncements(readyClient).catch((error) => {
     logError("Scheduled announcement sweep failed", error);
+  });
+  processDueGiveaways(readyClient).catch((error) => {
+    logError("Giveaway sweep failed", error);
   });
   setInterval(() => {
     processInactiveTickets(readyClient.guilds.cache).catch((error) => {
@@ -92,6 +143,11 @@ client.once(Events.ClientReady, (readyClient) => {
   setInterval(() => {
     processScheduledAnnouncements(readyClient).catch((error) => {
       logError("Scheduled announcement sweep failed", error);
+    });
+  }, 30_000).unref();
+  setInterval(() => {
+    processDueGiveaways(readyClient).catch((error) => {
+      logError("Giveaway sweep failed", error);
     });
   }, 30_000).unref();
 });
@@ -111,6 +167,9 @@ client.on(Events.MessageCreate, async (message) => {
 });
 
 client.on(Events.GuildMemberAdd, async (member) => {
+  await logMemberJoin(member).catch((error) => {
+    logError("Member join logging failed", error);
+  });
   await handleGuildMemberAdd(member).catch((error) => {
     logError("Anti-raid member add handler failed", error);
   });
@@ -121,7 +180,10 @@ client.on(Events.GuildMemberAdd, async (member) => {
 
 async function handleWelcome(member: import("discord.js").GuildMember): Promise<void> {
   if (member.user.bot) return;
-  const settings = await getWelcomeSettings(member.guild.id);
+  const [settings, verification] = await Promise.all([
+    getWelcomeSettings(member.guild.id),
+    getVerificationSettings(member.guild.id)
+  ]);
 
   const variables = buildDiscordPlaceholders({
     guild: member.guild,
@@ -184,10 +246,21 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
   }
 
   if (settings.autoRolesEnabled && settings.autoRoleIds.length > 0) {
-    for (const roleId of settings.autoRoleIds) {
+    const roleIds = verification.enabled && verification.verifiedRoleId
+      ? settings.autoRoleIds.filter((roleId) => roleId !== verification.verifiedRoleId)
+      : settings.autoRoleIds;
+    for (const roleId of roleIds) {
       const role = await member.guild.roles.fetch(roleId).catch(() => null);
       if (role) await member.roles.add(role, "Welcome auto-role").catch(() => undefined);
     }
+  }
+  if (verification.enabled) {
+    await sendVerificationEventLog(
+      member.client.rest as unknown as import("discord.js").REST,
+      verification,
+      "Member pending verification",
+      `<@${member.id}> joined and has not been given the verified/community role.`
+    );
   }
 }
 
@@ -284,20 +357,38 @@ async function handleBoostMessage(
 
 client.on(Events.ChannelDelete, async (channel) => {
   if (channel.isDMBased() || !channel.guild) return;
+  await logChannelDelete(channel).catch((error) => {
+    logError("Channel delete logging failed", error);
+  });
   await auditHandler(channel.guild, 12); // AuditLogEvent.ChannelDelete
 });
 
 client.on(Events.ChannelCreate, async (channel) => {
   if (channel.isDMBased() || !channel.guild) return;
+  await logChannelCreate(channel).catch((error) => {
+    logError("Channel create logging failed", error);
+  });
   await auditHandler(channel.guild, 10); // AuditLogEvent.ChannelCreate
 });
 
 client.on(Events.GuildBanAdd, async (ban) => {
+  await logBanAdd(
+    ban.guild,
+    ban.user.id,
+    ban.user.username,
+    ban.user.displayAvatarURL()
+  ).catch((error) => {
+    logError("Ban logging failed", error);
+  });
   await auditHandler(ban.guild, 22); // AuditLogEvent.MemberBanAdd
 });
 
 client.on(Events.GuildMemberRemove, async (member) => {
-  if (member.user.bot || !member.guild) return;
+  if (!member.guild) return;
+  await logMemberLeave(member).catch((error) => {
+    logError("Member leave logging failed", error);
+  });
+  if (member.user.bot) return;
   try {
     const fetched = await member.guild.fetchAuditLogs({ limit: 1, type: 20 }); // MemberKick
     const entry = fetched.entries.first();
@@ -313,6 +404,9 @@ client.on(Events.GuildMemberRemove, async (member) => {
 });
 
 client.on(Events.GuildRoleDelete, async (role) => {
+  await logRoleDelete(role).catch((error) => {
+    logError("Role delete logging failed", error);
+  });
   await auditHandler(role.guild, 32); // AuditLogEvent.RoleDelete
   await handleRoleDelete(role).catch((error) => {
     logError("Role Protection delete handler failed", error);
@@ -320,6 +414,9 @@ client.on(Events.GuildRoleDelete, async (role) => {
 });
 
 client.on(Events.GuildRoleCreate, async (role) => {
+  await logRoleCreate(role).catch((error) => {
+    logError("Role create logging failed", error);
+  });
   await auditHandler(role.guild, 30); // AuditLogEvent.RoleCreate
   await handleRoleCreate(role).catch((error) => {
     logError("Role Protection create handler failed", error);
@@ -327,6 +424,9 @@ client.on(Events.GuildRoleCreate, async (role) => {
 });
 
 client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
+  await logRoleUpdate(oldRole, newRole).catch((error) => {
+    logError("Role update logging failed", error);
+  });
   await handleRoleUpdate(oldRole, newRole).catch((error) => {
     logError("Role Protection update handler failed", error);
   });
@@ -334,6 +434,9 @@ client.on(Events.GuildRoleUpdate, async (oldRole, newRole) => {
 
 client.on(Events.WebhooksUpdate, async (channel) => {
   if (!channel.guild) return;
+  await logWebhookUpdate(channel.guild, channel.id).catch((error) => {
+    logError("Webhook logging failed", error);
+  });
   await auditHandler(channel.guild, 50); // AuditLogEvent.WebhookCreate
   await auditHandler(channel.guild, 52); // AuditLogEvent.WebhookDelete
 });
@@ -341,6 +444,9 @@ client.on(Events.WebhooksUpdate, async (channel) => {
 client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   if (!newMember.guild) return;
   if (_oldMember.partial) return;
+  await logMemberUpdate(_oldMember, newMember).catch((error) => {
+    logError("Member update logging failed", error);
+  });
   await handleBoostMessage(_oldMember, newMember).catch((error) => {
     logError("Boost message handler failed", error);
   });
@@ -352,6 +458,91 @@ client.on(Events.GuildMemberUpdate, async (_oldMember, newMember) => {
   await handleMemberRoleUpdate(_oldMember, newMember).catch((error) => {
     logError("Role Protection assignment handler failed", error);
   });
+});
+
+client.on(Events.MessageUpdate, async (oldMessage, newMessage) => {
+  if (!newMessage.guildId) return;
+  await logMessageUpdate(oldMessage, newMessage).catch((error) => {
+    logError("Message edit logging failed", error);
+  });
+});
+
+client.on(Events.MessageDelete, async (message) => {
+  if (!message.guildId) return;
+  await logMessageDelete(message).catch((error) => {
+    logError("Message delete logging failed", error);
+  });
+});
+
+client.on(Events.MessageBulkDelete, async (messages, channel) => {
+  if (!channel.guild) return;
+  await logMessageBulkDelete(channel.guild, channel.id, messages.values()).catch((error) => {
+    logError("Bulk message delete logging failed", error);
+  });
+});
+
+client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  await logVoiceUpdate(oldState, newState).catch((error) => {
+    logError("Voice state logging failed", error);
+  });
+});
+
+client.on(Events.ChannelUpdate, async (oldChannel, newChannel) => {
+  if (oldChannel.isDMBased() || newChannel.isDMBased()) return;
+  await logChannelUpdate(oldChannel, newChannel).catch((error) => {
+    logError("Channel update logging failed", error);
+  });
+});
+
+client.on(Events.GuildBanRemove, async (ban) => {
+  await logBanRemove(
+    ban.guild,
+    ban.user.id,
+    ban.user.username,
+    ban.user.displayAvatarURL()
+  ).catch((error) => {
+    logError("Unban logging failed", error);
+  });
+});
+
+client.on(Events.GuildUpdate, async (oldGuild, newGuild) => {
+  await logGuildUpdate(oldGuild, newGuild).catch((error) => {
+    logError("Server update logging failed", error);
+  });
+});
+
+client.on(Events.GuildEmojiCreate, async (emoji) => {
+  await logEmojiChange("created", emoji).catch((error) => logError("Emoji create logging failed", error));
+});
+client.on(Events.GuildEmojiDelete, async (emoji) => {
+  await logEmojiChange("deleted", emoji).catch((error) => logError("Emoji delete logging failed", error));
+});
+client.on(Events.GuildEmojiUpdate, async (oldEmoji, newEmoji) => {
+  await logEmojiChange("updated", newEmoji, oldEmoji).catch((error) => logError("Emoji update logging failed", error));
+});
+client.on(Events.GuildStickerCreate, async (sticker) => {
+  await logStickerChange("created", sticker).catch((error) => logError("Sticker create logging failed", error));
+});
+client.on(Events.GuildStickerDelete, async (sticker) => {
+  await logStickerChange("deleted", sticker).catch((error) => logError("Sticker delete logging failed", error));
+});
+client.on(Events.GuildStickerUpdate, async (oldSticker, newSticker) => {
+  await logStickerChange("updated", newSticker, oldSticker).catch((error) => logError("Sticker update logging failed", error));
+});
+client.on(Events.InviteCreate, async (invite) => {
+  await logInviteChange("created", invite).catch((error) => logError("Invite create logging failed", error));
+});
+client.on(Events.InviteDelete, async (invite) => {
+  await logInviteChange("deleted", invite).catch((error) => logError("Invite delete logging failed", error));
+});
+client.on(Events.ThreadCreate, async (thread) => {
+  await logThreadCreate(thread).catch((error) => logError("Thread create logging failed", error));
+});
+client.on(Events.ThreadDelete, async (thread) => {
+  await logThreadDelete(thread).catch((error) => logError("Thread delete logging failed", error));
+});
+client.on(Events.ThreadUpdate, async (oldThread, newThread) => {
+  await logThreadUpdate(oldThread, newThread).catch((error) => logError("Thread update logging failed", error));
 });
 
 async function handleAutocomplete(interaction: AutocompleteInteraction): Promise<void> {
@@ -391,89 +582,85 @@ async function handleAutocomplete(interaction: AutocompleteInteraction): Promise
   }
 }
 
-async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
-  if (interaction.commandName === "ping") {
-    await interaction.reply({ content: `Pong! ${client.ws.ping}ms`, ephemeral: true });
-    return;
-  }
-
-  if (interaction.commandName === "help") {
-    await handleHelpCommand(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "server-info") {
-    await handleServerInfo(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "user-info") {
-    await handleUserInfo(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "automod-status") {
-    await handleAutomodStatus(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "socials-post") {
-    await handleSocialsPost(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "lockdown") {
-    await handleLockdown(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "unlockdown") {
-    await handleUnlockdown(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "bot-status") {
-    await handleBotStatus(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "custom") {
-    await handleCustomCommand(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "ticket-panel") {
-    await handleTicketPanel(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "announce") {
-    await handleAnnounce(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "reaction-roles") {
-    await handleReactionRolesCommand(interaction);
-    return;
-  }
-
-  if (interaction.commandName === "close-request") {
-    await handleCloseRequest(interaction);
-    return;
-  }
-
-  if (["warn", "warnings", "timeout", "kick", "ban", "clear"].includes(interaction.commandName)) {
-    await handleModeration(interaction);
-  }
-}
-
 async function handleCloseRequest(interaction: ChatInputCommandInteraction): Promise<void> {
+  await deferCommandReply(interaction);
   const reason = interaction.options.getString("reason") ?? "";
   const prepared = await prepareTicketCloseRequest(interaction, reason, "staff");
-  await interaction.reply(prepared.payload ?? {
-    content: prepared.error ?? "Could not create the close request.",
-    ephemeral: true
-  });
+  if (!prepared.payload) {
+    await replyToCommand(interaction, {
+      content: prepared.error ?? "Could not create the close request."
+    });
+    return;
+  }
+  await interaction.followUp(prepared.payload);
+  await interaction.editReply("Close request posted for the ticket opener or community to review.");
+}
+
+type SlashCommandHandler = (interaction: ChatInputCommandInteraction) => Promise<void>;
+
+const commandHandlers: Record<SlashCommandName, SlashCommandHandler> = {
+  ping: async (interaction) => replyEphemeral(interaction, `Pong! ${client.ws.ping}ms`),
+  help: handleHelpCommand,
+  server: handleServerInfo,
+  "user-info": handleUserInfo,
+  "automod-status": handleAutomodStatus,
+  "socials-post": handleSocialsPost,
+  custom: handleCustomCommand,
+  "close-request": handleCloseRequest,
+  "ticket-panel": handleTicketPanel,
+  announce: handleAnnounce,
+  "reaction-roles": handleReactionRolesCommand,
+  giveaway: handleGiveawayCommand,
+  verification: handleVerificationCommand,
+  warn: handleModeration,
+  warnings: handleModeration,
+  timeout: handleModeration,
+  kick: handleModeration,
+  ban: handleModeration,
+  clear: handleModeration,
+  case: handleCaseCommand,
+  lockdown: handleLockdown,
+  unlockdown: handleUnlockdown,
+  "bot-status": handleBotStatus
+};
+
+function commandLogName(interaction: ChatInputCommandInteraction): string {
+  let subcommand = "";
+  try {
+    subcommand = interaction.options.getSubcommand(false) ?? "";
+  } catch {
+    subcommand = "";
+  }
+  return subcommand ? `${interaction.commandName} ${subcommand}` : interaction.commandName;
+}
+
+async function handleCommand(interaction: ChatInputCommandInteraction): Promise<void> {
+  const startedAt = performance.now();
+  const commandName = commandLogName(interaction);
+  const context = [
+    "[SlashCommand]",
+    `command=${commandName}`,
+    `guild=${interaction.guildId ?? "dm"}`,
+    `user=${interaction.user.id}`
+  ];
+  try {
+    const handler = commandHandlers[interaction.commandName as SlashCommandName];
+    if (!handler) throw new Error(`No handler is registered for /${interaction.commandName}.`);
+    await handler(interaction);
+    console.info([
+      ...context,
+      `durationMs=${(performance.now() - startedAt).toFixed(1)}`,
+      "success=true"
+    ].join(" "));
+  } catch (error) {
+    console.error([
+      ...context,
+      `durationMs=${(performance.now() - startedAt).toFixed(1)}`,
+      "success=false",
+      `error=${safeErrorSummary(error)}`
+    ].join(" "));
+    throw error;
+  }
 }
 
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -490,6 +677,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleTicketCreateButton(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("role-panel:toggle:")) {
       await handleRolePanelButton(interaction);
+    } else if (interaction.isStringSelectMenu() && interaction.customId.startsWith("role-panel:select:")) {
+      await handleRolePanelSelect(interaction);
+    } else if (interaction.isButton() && interaction.customId.startsWith("giveaway:enter:")) {
+      await handleGiveawayButton(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket-close:")) {
       await handleTicketCloseDecision(interaction as ButtonInteraction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket:")) {
@@ -502,13 +693,25 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleTicketCloseRequestModal(interaction as ModalSubmitInteraction);
     }
   } catch (error) {
-    logError("Interaction failed", error);
+    if (!interaction.isChatInputCommand()) logError("Interaction failed", error);
     if (interaction.isRepliable()) {
-      const message = { content: "Something went wrong while handling that action.", ephemeral: true };
-      if (interaction.replied || interaction.deferred) {
-        await interaction.followUp(message).catch(() => undefined);
+      if (interaction.isChatInputCommand()) {
+        await replyEphemeral(
+          interaction,
+          "Something went wrong while handling that command. Check the bot log for the command error."
+        ).catch(() => undefined);
       } else {
-        await interaction.reply(message).catch(() => undefined);
+        const message = {
+          content: "Something went wrong while handling that action.",
+          flags: MessageFlags.Ephemeral as const
+        };
+        if (interaction.deferred) {
+          await interaction.editReply({ content: message.content }).catch(() => undefined);
+        } else if (interaction.replied) {
+          await interaction.followUp(message).catch(() => undefined);
+        } else {
+          await interaction.reply(message).catch(() => undefined);
+        }
       }
     }
   }

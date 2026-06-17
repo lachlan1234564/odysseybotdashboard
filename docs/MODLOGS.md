@@ -27,8 +27,8 @@ Discord IDs are included so staff can investigate even when a user, role, or cha
 
 ## Dashboard history
 
-- **Moderation** shows warning and moderation database records.
-- **Tickets > History** shows ticket lifecycle records.
+- **Moderation** shows warnings, raw moderation actions, and structured moderation cases.
+- **Tickets > History** shows ticket lifecycle records and saved ticket transcripts.
 - **Tickets > Close Requests** shows pending, approved, and denied close requests.
 
-The current ticket log is metadata only. Full HTML or text message transcripts are not implemented yet.
+Ticket transcripts are saved as database records and can also be posted as downloadable text files to the configured transcript channel.

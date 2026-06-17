@@ -1,6 +1,7 @@
 import {
   dashboardSearchItems,
   hasFormStateChanged,
+  nextSearchIndex,
   searchDashboardItems,
   shouldBlockNavigation,
   toggleState
@@ -15,8 +16,12 @@ const state = {
   ticketTypesError: null,
   announcements: [],
   closeRequests: [],
+  ticketTranscripts: [],
   docsTopics: [],
+  docsSearchResults: [],
+  docsSearchActiveIndex: -1,
   activeDocTopic: null,
+  docsSearchOpen: false,
   ticketView: "panels",
   securityView: "anti-raid",
   automationView: "auto-mod",
@@ -27,13 +32,19 @@ const state = {
   antiRole: null,
   autoMod: null,
   rolePanels: [],
+  giveaways: [],
+  giveawayEntries: [],
   stickyMessages: [],
   scheduledAnnouncements: [],
   socials: null,
   verification: null,
   branding: null,
+  logging: null,
   activePage: "overview",
   selectedGuildId: null,
+  searchActiveIndex: -1,
+  searchResults: [],
+  autoModDiagnosticsRequest: 0,
   initializing: true,
   dirtyForms: new Set(),
   pendingNavigation: null,
@@ -47,8 +58,10 @@ const pageMeta = {
   tickets: ["Ticket Studio", "Compose ticket types into reusable entry panels."],
   announcements: ["Announcements", "Reusable broadcasts with a Discord confirmation flow."],
   socials: ["Social Promotion", "Create and publish a safe, reusable directory of community links."],
+  giveaways: ["Giveaways", "Create and manage restart-safe community giveaways."],
   moderation: ["Moderation", "Warnings and actions recorded by the bot."],
   settings: ["Server Settings", "Shared Discord roles, channels, and access defaults."],
+  logging: ["Server Logs", "A configurable audit feed for server events, excluding normal message sends."],
   branding: ["Appearance", "Visual defaults used across bot messages."],
   welcome: ["Welcome & Goodbye", "Shape a clear member experience when people join or leave."],
   security: ["Security", "Anti-raid, anti-nuke, and role protection."],
@@ -513,7 +526,18 @@ async function performNavigation(target) {
   if (target.securityView) state.securityView = target.securityView;
   if (target.automationView) state.automationView = target.automationView;
   await showPage(target.page);
-  if (target.docTopic) await showDocsTopic(target.docTopic);
+  if (target.docTopic) await showDocsTopic(target.docTopic, true, target.docHash || "");
+  if (target.targetId) {
+    window.setTimeout(() => {
+      const element = document.getElementById(target.targetId);
+      if (!element) return;
+      element.scrollIntoView({ behavior: "smooth", block: "center" });
+      element.classList.remove("search-target");
+      void element.offsetWidth;
+      element.classList.add("search-target");
+      window.setTimeout(() => element.classList.remove("search-target"), 1800);
+    }, 80);
+  }
 }
 
 function requestNavigation(target, label) {
@@ -590,10 +614,14 @@ function populateResourceSelects() {
     const selected = selectedValues(select);
     const kind = select.dataset.channelSelect;
     const channels = state.resources.channels.filter((channel) =>
-      kind === "category" ? channel.type === 4 : [0, 5].includes(channel.type)
+      kind === "category"
+        ? channel.type === 4
+        : kind === "all"
+          ? channel.type !== 4
+          : [0, 5].includes(channel.type)
     );
     select.innerHTML = `${select.multiple ? "" : '<option value="">Not configured</option>'}${channels.map((channel) =>
-      `<option value="${channel.id}">${kind === "category" ? "Category · " : "#"}${escapeHtml(channel.name)}</option>`
+      `<option value="${channel.id}">${kind === "category" ? "Category · " : channel.type === 2 || channel.type === 13 ? "Voice · " : "#"}${escapeHtml(channel.name)}</option>`
     ).join("")}`;
     setSelectedValues(select, selected);
   });
@@ -961,6 +989,115 @@ function updateWelcomePreview() {
   });
 }
 
+function verificationDraft() {
+  const form = document.querySelector("#verification-form");
+  const values = formObject(form);
+  return {
+    ...values,
+    enabled: form.elements.enabled.checked,
+    publicChannelIds: selectedValues(form.elements.publicChannelIds),
+    publicCategoryIds: selectedValues(form.elements.publicCategoryIds),
+    hiddenChannelIds: selectedValues(form.elements.hiddenChannelIds),
+    hiddenCategoryIds: selectedValues(form.elements.hiddenCategoryIds),
+    lockAllChannels: form.elements.lockAllChannels.checked,
+    autoCreateChannel: form.elements.autoCreateChannel.checked,
+    lockVerificationChannel: form.elements.lockVerificationChannel.checked,
+    updateEmbedOnSetup: form.elements.updateEmbedOnSetup.checked,
+    applyPermissionsImmediately: form.elements.applyPermissionsImmediately.checked,
+    vpnCheckEnabled: form.elements.vpnCheckEnabled.checked,
+    vpnFailClosed: form.elements.vpnFailClosed.checked
+  };
+}
+
+function updateVerificationPreview() {
+  const draft = verificationDraft();
+  renderDiscordPreview(document.querySelector("#verification-preview"), {
+    embed: {
+      title: draft.embedTitle,
+      description: draft.embedDescription,
+      color: draft.embedColor || "#C58B4B",
+      footerText: "Discord OAuth verification • Odyssey Bot",
+      timestamp: true,
+      fields: []
+    },
+    components: {
+      mode: "buttons",
+      buttonStyle: "primary",
+      labels: [draft.buttonText || "Verify Me"]
+    }
+  });
+  document.querySelector("#verification-role-preview").textContent = draft.verifiedRoleId
+    ? `@${roleName(draft.verifiedRoleId)}`
+    : "Not configured";
+  const publicNames = [
+    ...draft.publicCategoryIds.map((id) => roleOrChannelLabel(id, "Category")),
+    ...draft.publicChannelIds.map((id) => roleOrChannelLabel(id, "#"))
+  ];
+  const hiddenNames = [
+    ...draft.hiddenCategoryIds.map((id) => roleOrChannelLabel(id, "Category")),
+    ...draft.hiddenChannelIds.map((id) => roleOrChannelLabel(id, "#"))
+  ];
+  document.querySelector("#verification-visibility-summary").innerHTML = `
+    <div><span>Public before verification</span><strong>${publicNames.length ? publicNames.map(escapeHtml).join(", ") : "Verification channel only"}</strong></div>
+    <div><span>Explicitly hidden</span><strong>${hiddenNames.length ? hiddenNames.map(escapeHtml).join(", ") : "None selected"}</strong></div>
+    <div><span>Default behaviour</span><strong>${draft.lockAllChannels ? "Hide every other server area" : "Keep other existing visibility"}</strong></div>`;
+}
+
+function roleOrChannelLabel(id, prefix) {
+  const channel = state.resources.channels.find((item) => item.id === id);
+  return channel ? `${prefix === "#" ? "#" : `${prefix} · `}${channel.name}` : id;
+}
+
+function renderVerificationReadiness(verification) {
+  const panel = document.querySelector("#verification-readiness");
+  const readiness = verification.readiness || {};
+  const environmentChecks = [
+    { label: "Discord OAuth secret", ok: verification.oauthConfigured },
+    { label: "OAuth redirect URI", ok: verification.oauthRedirectConfigured },
+    { label: "Public verify hostname", ok: verification.verifyPublicUrlConfigured },
+    { label: "Verified role hierarchy", ok: readiness.roleManageable },
+    ...(readiness.permissionChecks || []).map((check) => ({
+      label: check.label,
+      ok: check.ok
+    }))
+  ];
+  const warnings = [
+    ...(!verification.oauthConfigured ? ["DISCORD_CLIENT_SECRET is missing, so verification cannot be enabled."] : []),
+    ...(!verification.oauthRedirectConfigured ? ["Set the exact DISCORD_OAUTH_REDIRECT_URI registered in Discord."] : []),
+    ...(!verification.verifyPublicUrlConfigured ? ["Set VERIFY_PUBLIC_BASE_URL to the public verify hostname."] : []),
+    ...(readiness.warnings || [])
+  ];
+  panel.classList.toggle("has-warnings", warnings.length > 0);
+  panel.innerHTML = `
+    <div class="section-title">
+      <div><span class="step">Check</span><h3>Verification readiness</h3><p>${warnings.length ? "Resolve these items before applying the live gate." : "OAuth, role hierarchy, and Discord permissions are ready."}</p></div>
+      <span class="state-pill ${warnings.length ? "warning" : "enabled"}">${warnings.length ? `${warnings.length} warning${warnings.length === 1 ? "" : "s"}` : "Ready"}</span>
+    </div>
+    <div class="diagnostic-checks">${environmentChecks.map((check) =>
+      `<span class="${check.ok ? "ok" : "missing"}">${check.ok ? "Ready" : "Missing"} · ${escapeHtml(check.label)}</span>`
+    ).join("")}</div>
+    ${warnings.length ? `<div class="diagnostic-warnings">${warnings.map((warning) => `<p>${escapeHtml(warning)}</p>`).join("")}</div>` : ""}`;
+}
+
+function renderVerificationSetupResult(result, dryRun = false) {
+  const container = document.querySelector("#verification-setup-result");
+  container.classList.remove("hidden", "success", "error");
+  container.classList.add(result.permissionsFailed ? "error" : "success");
+  const visible = (result.visibleChannelIds || []).map((id) => roleOrChannelLabel(id, "#"));
+  const hidden = (result.hiddenChannelIds || []).map((id) => roleOrChannelLabel(id, "#"));
+  container.innerHTML = `
+    <strong>${dryRun ? "Dry run complete" : result.permissionsFailed ? "Setup completed with warnings" : "Setup completed"}</strong>
+    <dl>
+      <div><dt>Permission writes</dt><dd>${dryRun ? result.permissionChangesPlanned : `${result.permissionsApplied} applied`}</dd></div>
+      <div><dt>Failures</dt><dd>${result.permissionsFailed || 0}</dd></div>
+      <div><dt>Public areas</dt><dd>${visible.length}</dd></div>
+      <div><dt>Hidden areas</dt><dd>${hidden.length}</dd></div>
+    </dl>
+    ${result.warnings?.length ? `<p>${result.warnings.map(escapeHtml).join("<br>")}</p>` : ""}
+    ${result.failures?.length ? `<p>${result.failures.slice(0, 5).map((failure) => `${escapeHtml(roleOrChannelLabel(failure.channelId, "#"))}: ${escapeHtml(failure.message)}`).join("<br>")}</p>` : ""}
+    <small>${dryRun ? "No Discord channels or permissions were changed." : "Existing unrelated role and member overwrites were preserved."}</small>`;
+}
+
 async function loadOverview() {
   const data = await api("/overview");
   const labels = {
@@ -991,26 +1128,29 @@ async function loadCustomCommands() {
 }
 
 async function loadTickets() {
-  const [typesResult, panelsResult, historyResult, closeRequestsResult] = await Promise.allSettled([
+  const [typesResult, panelsResult, historyResult, closeRequestsResult, transcriptsResult] = await Promise.allSettled([
     api("/ticket-types"),
     api("/ticket-panels"),
     api("/tickets"),
-    api("/ticket-close-requests")
+    api("/ticket-close-requests"),
+    api("/ticket-transcripts")
   ]);
   const ticketStatus = document.querySelector("#ticket-load-status");
   const typesPayload = typesResult.status === "fulfilled" ? typesResult.value : null;
   state.ticketTypes = Array.isArray(typesPayload) ? typesPayload : (typesPayload?.items || []);
-  state.ticketPanels = panelsResult.status === "fulfilled" ? panelsResult.value : [];
-  state.closeRequests = closeRequestsResult.status === "fulfilled" ? closeRequestsResult.value : [];
+  state.ticketPanels = panelsResult.status === "fulfilled" && Array.isArray(panelsResult.value) ? panelsResult.value : [];
+  state.closeRequests = closeRequestsResult.status === "fulfilled" && Array.isArray(closeRequestsResult.value) ? closeRequestsResult.value : [];
+  state.ticketTranscripts = transcriptsResult.status === "fulfilled" && Array.isArray(transcriptsResult.value) ? transcriptsResult.value : [];
   state.ticketTypesError = typesResult.status === "rejected"
     ? typesResult.reason?.message || "Ticket types could not be loaded."
     : typesPayload?.ok === false ? typesPayload.error || "Ticket types could not be loaded." : null;
-  const history = historyResult.status === "fulfilled" ? historyResult.value : [];
+  const history = historyResult.status === "fulfilled" && Array.isArray(historyResult.value) ? historyResult.value : [];
   const failedAreas = [
     state.ticketTypesError ? "ticket types" : "",
     panelsResult.status === "rejected" ? "ticket panels" : "",
     historyResult.status === "rejected" ? "ticket history" : "",
-    closeRequestsResult.status === "rejected" ? "close requests" : ""
+    closeRequestsResult.status === "rejected" ? "close requests" : "",
+    transcriptsResult.status === "rejected" ? "transcripts" : ""
   ].filter(Boolean);
   if (failedAreas.length) {
     ticketStatus.classList.remove("hidden");
@@ -1044,9 +1184,20 @@ async function loadTickets() {
     ["Type", "User", "Status", "Opened", "Claimed by"],
     history.map((ticket) => `<tr><td>${escapeHtml(ticket.typeLabel || "Deleted type")}</td><td>${escapeHtml(ticket.userId)}</td><td><span class="pill">${escapeHtml(ticket.status)}</span></td><td>${escapeHtml(ticket.openedAt)}</td><td>${escapeHtml(ticket.claimedBy || "-")}</td></tr>`)
   );
+  document.querySelector("#ticket-transcripts").innerHTML = table(
+    ["Ticket", "Opened by", "Closed by", "Messages", "Created", "Download"],
+    state.ticketTranscripts.map((transcript) => `<tr>
+      <td>${escapeHtml(transcript.channelName)}<br><span class="table-secondary">#${transcript.ticketId}</span></td>
+      <td>${escapeHtml(transcript.openerId)}</td>
+      <td>${escapeHtml(transcript.closedBy)}</td>
+      <td>${escapeHtml(String(transcript.messageCount))}</td>
+      <td>${escapeHtml(transcript.createdAt)}</td>
+      <td><a class="secondary-button compact" href="/api/ticket-transcripts/${transcript.id}/download" target="_blank" rel="noopener">Download</a></td>
+    </tr>`)
+  );
   document.querySelector("#ticket-close-requests").innerHTML = table(
     ["Request", "Source", "Ticket", "Requester", "Reason", "Status", "Resolved by", "Created"],
-    closeRequests.map((request) => `<tr>
+    state.closeRequests.map((request) => `<tr>
       <td>#${request.id}</td>
       <td><span class="pill">${request.requestSource === "staff" ? "Staff → Community" : "Community → Staff"}</span></td>
       <td>${escapeHtml(request.typeLabel || "Ticket")}<br><span class="table-secondary">#${escapeHtml(request.channelId || "deleted")}</span></td>
@@ -1090,6 +1241,56 @@ async function loadSocials() {
   markFormClean(form);
 }
 
+function updateGiveawayPreview() {
+  const form = document.querySelector("#giveaway-form");
+  const values = formObject(form);
+  const timestamp = values.endsAt ? Math.floor(new Date(values.endsAt).getTime() / 1000) : null;
+  renderDiscordPreview(document.querySelector("#giveaway-preview"), {
+    embed: {
+      title: values.prize ? `Giveaway: ${values.prize}` : "Giveaway: Prize name",
+      description: [
+        values.description || "Click Enter Giveaway below to join.",
+        "",
+        `**Winners:** ${values.winnersCount || 1}`,
+        timestamp ? `**Ends:** <t:${timestamp}:R>` : "**Ends:** choose an end time",
+        values.requiredRoleId ? `**Required role:** @${roleName(values.requiredRoleId)}` : ""
+      ].filter(Boolean).join("\n"),
+      color: "#C58B4B",
+      fields: []
+    },
+    components: { mode: "buttons", labels: ["Enter Giveaway"] }
+  });
+}
+
+async function loadGiveaways() {
+  const data = await api("/giveaways");
+  state.giveaways = data.giveaways || [];
+  state.giveawayEntries = data.entries || [];
+  document.querySelector("#giveaway-count").textContent = state.giveaways.length;
+  document.querySelector("#giveaway-list").innerHTML = state.giveaways.length
+    ? state.giveaways.map((item) => {
+      const entries = state.giveawayEntries.find((entry) => entry.giveawayId === item.id)?.count ?? 0;
+      const primaryAction = item.status === "draft" ? "start" : item.status === "active" ? "end" : "reroll";
+      return `<div class="saved-item">
+        <div class="list-copy"><strong>${escapeHtml(item.prize)}</strong><span>${escapeHtml(item.status)} · ${entries} entr${entries === 1 ? "y" : "ies"} · ends ${new Date(item.endsAt).toLocaleString()}</span></div>
+        <div class="item-actions">
+          <button data-giveaway-action="${primaryAction}" data-id="${item.id}">${primaryAction === "start" ? "Start" : primaryAction === "end" ? "End" : "Reroll"}</button>
+          <button class="secondary-button" data-giveaway-action="reroll" data-id="${item.id}">Reroll</button>
+          <button class="delete" data-giveaway-action="cancel" data-id="${item.id}">Cancel</button>
+        </div>
+      </div>`;
+    }).join("")
+    : emptyState("No giveaways yet", "Create a giveaway draft, then start it when you are ready.");
+  const form = document.querySelector("#giveaway-form");
+  if (!form.elements.endsAt.value) {
+    const soon = new Date(Date.now() + 60 * 60_000);
+    soon.setMinutes(soon.getMinutes() - soon.getTimezoneOffset());
+    form.elements.endsAt.value = soon.toISOString().slice(0, 16);
+  }
+  updateGiveawayPreview();
+  markFormClean(form);
+}
+
 async function loadGuilds() {
   const data = await api("/guilds");
   state.guilds = data.guilds;
@@ -1103,6 +1304,18 @@ async function loadGuilds() {
 
 async function loadModeration() {
   const data = await api("/moderation");
+  document.querySelector("#cases-table").innerHTML = table(
+    ["Case", "Action", "Target", "Moderator", "Status", "Reason", "Updated"],
+    (data.cases || []).map((item) => `<tr>
+      <td>#${item.caseNumber}</td>
+      <td><span class="pill">${escapeHtml(item.actionType)}</span></td>
+      <td>${escapeHtml(item.targetUserId)}</td>
+      <td>${escapeHtml(item.moderatorId)}</td>
+      <td><span class="pill status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
+      <td class="wrap-cell">${escapeHtml(item.reason || "No reason")}</td>
+      <td>${escapeHtml(item.updatedAt)}</td>
+    </tr>`)
+  );
   document.querySelector("#warnings-table").innerHTML = table(
     ["ID", "User", "Moderator", "Reason", "Date"],
     data.warnings.map((warning) => `<tr><td>${warning.id}</td><td>${escapeHtml(warning.userId)}</td><td>${escapeHtml(warning.moderatorId)}</td><td>${escapeHtml(warning.reason)}</td><td>${escapeHtml(warning.createdAt)}</td></tr>`)
@@ -1125,20 +1338,49 @@ async function loadSettings() {
   markFormClean(form);
 }
 
+async function loadLogging() {
+  const settings = await api("/logging");
+  state.logging = settings;
+  const form = document.querySelector("#logging-form");
+  Object.entries(settings).forEach(([key, value]) => {
+    const field = form.elements[key];
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value || "";
+  });
+  syncFeatureToggles(form);
+  markFormClean(form);
+}
+
 function blendHex(colorValue, amount = 0.22) {
   const match = /^#([0-9a-f]{6})$/i.exec(colorValue);
-  if (!match) return "#98A2FF";
+  if (!match) return "#E0B476";
   const number = Number.parseInt(match[1], 16);
   const channels = [number >> 16, (number >> 8) & 255, number & 255]
     .map((channel) => Math.round(channel + (255 - channel) * amount));
   return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
 }
 
+function shadeHex(colorValue, amount = 0.2) {
+  const match = /^#([0-9a-f]{6})$/i.exec(colorValue);
+  if (!match) return "#9F6536";
+  const number = Number.parseInt(match[1], 16);
+  const channels = [number >> 16, (number >> 8) & 255, number & 255]
+    .map((channel) => Math.round(channel * (1 - amount)));
+  return `#${channels.map((channel) => channel.toString(16).padStart(2, "0")).join("")}`;
+}
+
 function applyDashboardAccent(value) {
   if (!/^#[0-9a-f]{6}$/i.test(value || "")) return;
-  document.documentElement.style.setProperty("--brand", value);
-  document.documentElement.style.setProperty("--brand-bright", blendHex(value));
+  const isLight = document.documentElement.dataset.theme === "light";
+  document.documentElement.style.setProperty("--brand", isLight ? shadeHex(value, 0.18) : value);
+  document.documentElement.style.setProperty("--brand-bright", isLight ? shadeHex(value, 0.36) : blendHex(value));
 }
+
+window.addEventListener("odyssey:themechange", () => {
+  const accent = state.branding?.accentColor;
+  if (accent) applyDashboardAccent(accent);
+});
 
 function updateBrandingPreview() {
   const form = document.querySelector("#branding-form");
@@ -1245,25 +1487,25 @@ async function loadSecurity() {
   Object.entries(verification.settings).forEach(([key, value]) => {
     const field = verificationForm.elements[key];
     if (!field) return;
-    if (field.type === "checkbox") field.checked = Boolean(value);
+    if (field instanceof HTMLSelectElement && field.multiple) setSelectedValues(field, value);
+    else if (field.type === "checkbox") field.checked = Boolean(value);
     else field.value = value ?? "";
   });
+  verificationForm.elements.embedColorText.value = verification.settings.embedColor.toUpperCase();
   const cards = [
     {
       label: "Discord OAuth",
       ok: verification.oauthConfigured,
       detail: verification.oauthConfigured
-        ? (verification.oauthRedirectConfigured ? "Client secret and redirect URI configured" : "Client secret set; add DISCORD_OAUTH_REDIRECT_URI for production")
+        ? (verification.oauthRedirectConfigured ? "Client secret and redirect URI configured" : "Client secret set; add the exact DISCORD_OAUTH_REDIRECT_URI")
         : "Not configured — add DISCORD_CLIENT_SECRET to .env"
     },
     {
       label: "Public verification URL",
-      ok: verification.verifyPublicUrlConfigured || verification.publicUrlConfigured,
+      ok: verification.verifyPublicUrlConfigured,
       detail: verification.verifyPublicUrlConfigured
         ? "VERIFY_PUBLIC_BASE_URL set"
-        : verification.publicUrlConfigured
-          ? "PUBLIC_BASE_URL set"
-          : "Not set — verification links will use the request hostname"
+        : "Not set — verification setup will not generate a fallback admin-host link"
     },
     {
       label: "VPN / proxy provider",
@@ -1291,8 +1533,18 @@ async function loadSecurity() {
     </div>`
   ).join("");
 
+  renderVerificationReadiness(verification);
+  document.querySelector("#stable-verification-link").value = verification.stableUrl || "";
+  const setupStatus = document.querySelector("#verification-setup-status");
+  setupStatus.innerHTML = `
+    <div><span>Mode</span><strong>${verification.settings.enabled ? "Enabled" : "Disabled"}</strong></div>
+    <div><span>Permissions</span><strong>${verification.settings.permissionsApplied ? "Applied" : "Not applied"}</strong></div>
+    <div><span>Channel</span><strong>${verification.settings.verificationChannelId ? escapeHtml(channelName(verification.settings.verificationChannelId)) : `Will create #${escapeHtml(verification.settings.verificationChannelName)}`}</strong></div>
+    <div><span>Last setup</span><strong>${verification.settings.lastSetupAt ? escapeHtml(new Date(verification.settings.lastSetupAt).toLocaleString()) : "Never"}</strong></div>`;
+  updateVerificationPreview();
+
   document.querySelector("#verification-records").innerHTML = table(
-    ["User", "Result", "Reasons", "Risk", "VPN", "Verified", "Expires"],
+    ["User", "Result", "Reasons", "Risk", "VPN", "Verified", "Review"],
     verification.records.map((record) => `<tr>
       <td>${escapeHtml(record.userId)}</td>
       <td><span class="pill status-${escapeHtml(record.status)}">${escapeHtml(record.status)}</span></td>
@@ -1300,9 +1552,13 @@ async function loadSecurity() {
       <td>${record.riskScore}</td>
       <td>${record.vpnDetected === null ? "N/A" : record.vpnDetected ? "Yes" : "No"}</td>
       <td>${escapeHtml(record.verifiedAt)}</td>
-      <td>${escapeHtml(record.expiresAt)}</td>
+      <td><div class="table-actions">
+        <button class="secondary-button compact" data-verification-review="approve" data-id="${record.id}">Approve</button>
+        <button class="secondary-button compact danger" data-verification-review="deny" data-id="${record.id}">Deny</button>
+      </div></td>
     </tr>`)
   );
+  syncFeatureToggles(verificationForm);
   [raidForm, nukeForm, roleForm, verificationForm].forEach(markFormClean);
 }
 
@@ -1327,9 +1583,73 @@ function roleName(roleId) {
   return state.resources.roles.find((item) => item.id === roleId)?.name || roleId;
 }
 
+function collectRolePanelOptions() {
+  const form = document.querySelector("#role-panel-form");
+  const selected = selectedValues(form.elements.roleIds);
+  const rows = [...document.querySelectorAll("#role-panel-options [data-role-option]")];
+  const byRole = new Map(rows.map((row) => [row.dataset.roleId, {
+    roleId: row.dataset.roleId,
+    label: row.querySelector("[data-role-label]").value.trim(),
+    description: row.querySelector("[data-role-description]").value.trim(),
+    emoji: row.querySelector("[data-role-emoji]").value.trim(),
+    category: row.querySelector("[data-role-category]").value.trim() || "General",
+    requiredRoleId: row.querySelector("[data-role-required]").value || null
+  }]));
+  return selected.map((roleId) => byRole.get(roleId) || {
+    roleId,
+    label: "",
+    description: "",
+    emoji: "",
+    category: "General",
+    requiredRoleId: null
+  });
+}
+
+function renderRolePanelOptions(existing = []) {
+  const form = document.querySelector("#role-panel-form");
+  const selected = selectedValues(form.elements.roleIds);
+  const current = collectRolePanelOptions();
+  const optionMap = new Map([...existing, ...current].map((option) => [option.roleId, option]));
+  const roleChoices = optionList(state.resources.roles, (role) => role.name, "No extra requirement");
+  const container = document.querySelector("#role-panel-options");
+  if (!selected.length) {
+    container.innerHTML = emptyState("Choose roles first", "Select one or more roles above, then customize how they appear.");
+    return;
+  }
+  container.innerHTML = selected.map((roleId) => {
+    const option = optionMap.get(roleId) || {};
+    return `<div class="role-option-card" data-role-option data-role-id="${escapeHtml(roleId)}">
+      <div class="role-option-title"><strong>${escapeHtml(roleName(roleId))}</strong><span>${escapeHtml(roleId)}</span></div>
+      <div class="form-grid compact-grid">
+        <label class="field">Button/dropdown label<input data-role-label maxlength="80" value="${escapeHtml(option.label || "")}" placeholder="${escapeHtml(roleName(roleId))}"></label>
+        <label class="field">Category<input data-role-category maxlength="80" value="${escapeHtml(option.category || "General")}" placeholder="General"></label>
+        <label class="field">Emoji<input data-role-emoji maxlength="100" value="${escapeHtml(option.emoji || "")}" placeholder="✨ or <:role:123>"></label>
+        <label class="field">Required role<select data-role-required>${roleChoices}</select></label>
+        <label class="field span-2">Description<input data-role-description maxlength="100" value="${escapeHtml(option.description || "")}" placeholder="Shown in dropdown menus"></label>
+      </div>
+    </div>`;
+  }).join("");
+  selected.forEach((roleId) => {
+    const option = optionMap.get(roleId) || {};
+    const row = container.querySelector(`[data-role-id="${CSS.escape(roleId)}"]`);
+    if (row) row.querySelector("[data-role-required]").value = option.requiredRoleId || "";
+  });
+  container.querySelectorAll("input, select").forEach((field) => {
+    field.addEventListener("input", () => {
+      updateRolePanelPreview();
+      updateFormDirtyState(form);
+    });
+    field.addEventListener("change", () => {
+      updateRolePanelPreview();
+      updateFormDirtyState(form);
+    });
+  });
+}
+
 function updateRolePanelPreview() {
   const form = document.querySelector("#role-panel-form");
   const values = formObject(form);
+  const options = collectRolePanelOptions();
   renderDiscordPreview(document.querySelector("#role-panel-preview"), {
     embed: {
       title: values.title || "Choose your roles",
@@ -1338,8 +1658,8 @@ function updateRolePanelPreview() {
       fields: []
     },
     components: {
-      mode: "buttons",
-      labels: selectedValues(form.elements.roleIds).map((id) => roleName(id))
+      mode: values.layout || "buttons",
+      labels: options.map((option) => option.label || roleName(option.roleId))
     }
   });
 }
@@ -1381,17 +1701,139 @@ function autoModLinkRules() {
   }));
 }
 
+function formatReadinessTime(value) {
+  if (!value) return "Not checked yet";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : date.toLocaleString();
+}
+
+function renderAutoModDiagnostics(diagnostics) {
+  const panel = document.querySelector("#automod-diagnostics");
+  const status = diagnostics.status || (diagnostics.ok ? "ready" : diagnostics.unavailable ? "offline" : "warning");
+  const variants = {
+    checking: {
+      eyebrow: "Checking",
+      title: "Checking Discord readiness",
+      summary: "AutoMod settings are ready to edit while the live permission check runs.",
+      pill: "Checking…"
+    },
+    ready: {
+      eyebrow: "Ready",
+      title: "Discord connected",
+      summary: diagnostics.summary || "Discord intents and permissions are ready for AutoMod.",
+      pill: "Ready"
+    },
+    warning: {
+      eyebrow: "Review",
+      title: "Discord connected · action needed",
+      summary: diagnostics.summary || "Some intents or permissions need attention for reliable moderation.",
+      pill: `${diagnostics.warnings?.length || 0} item${diagnostics.warnings?.length === 1 ? "" : "s"}`
+    },
+    degraded: {
+      eyebrow: "Degraded",
+      title: "Using the last successful check",
+      summary: diagnostics.summary || "Discord did not answer the latest readiness refresh.",
+      pill: "Retry available"
+    },
+    offline: {
+      eyebrow: "Unavailable",
+      title: "Live Discord check unavailable",
+      summary: diagnostics.summary || "The dashboard could not reach Discord right now.",
+      pill: "Offline"
+    }
+  };
+  const variant = variants[status] || variants.offline;
+  const ignoredChannels = diagnostics.exemptions?.ignoredChannels || [];
+  const ignoredRoles = diagnostics.exemptions?.ignoredRoles || [];
+  const ignoredUsers = diagnostics.exemptions?.ignoredUserIds || [];
+  const checkedLabel = diagnostics.stale && diagnostics.lastSuccessfulAt
+    ? `Last successful check: ${formatReadinessTime(diagnostics.lastSuccessfulAt)}`
+    : diagnostics.checkedAt
+      ? `Last checked: ${formatReadinessTime(diagnostics.checkedAt)}${diagnostics.cached ? " · cached" : ""}`
+      : "";
+
+  panel.dataset.status = status;
+  panel.setAttribute("aria-busy", String(status === "checking"));
+  panel.innerHTML = `
+    <div class="diagnostic-header">
+      <div class="diagnostic-heading">
+        <span class="diagnostic-indicator" aria-hidden="true">${status === "checking" ? '<span class="diagnostic-spinner"></span>' : ""}</span>
+        <div>
+          <span class="diagnostic-eyebrow">${escapeHtml(variant.eyebrow)}</span>
+          <h3>${escapeHtml(variant.title)}</h3>
+          <p>${escapeHtml(variant.summary)}</p>
+        </div>
+      </div>
+      <div class="diagnostic-actions">
+        <span class="diagnostic-state">${escapeHtml(variant.pill)}</span>
+        ${diagnostics.retryable ? '<button type="button" class="secondary-button compact" data-retry-automod-readiness>Retry check</button>' : ""}
+      </div>
+    </div>
+    ${checkedLabel ? `<p class="diagnostic-meta">${escapeHtml(checkedLabel)}</p>` : ""}
+    ${diagnostics.checks?.length ? `<div class="diagnostic-checks">${diagnostics.checks.map((check) =>
+      `<span class="${check.ok ? "ok" : "missing"}">${check.ok ? "✓" : "!"} ${escapeHtml(check.label)}</span>`
+    ).join("")}</div>` : ""}
+    ${diagnostics.warnings?.length ? `<div class="diagnostic-warnings">${diagnostics.warnings.map((warning) =>
+      `<p>${escapeHtml(warning)}</p>`
+    ).join("")}</div>` : ""}
+    ${diagnostics.unavailable ? `<div class="diagnostic-scope">
+      <div><strong>Still available</strong><span>Edit and save every AutoMod setting below.</span></div>
+      <div><strong>Temporarily unavailable</strong><span>Live Discord intent, channel, and permission validation.</span></div>
+    </div>` : ""}
+    ${diagnostics.exemptions ? `<details class="diagnostic-exemptions">
+      <summary>Review configured exemptions</summary>
+      <div>
+        <p><strong>Non-link exempt channels:</strong> ${ignoredChannels.length ? ignoredChannels.map((channel) => `#${escapeHtml(channel.name)} (${escapeHtml(channel.id)})`).join(", ") : "None"}</p>
+        <p><strong>Ignored roles:</strong> ${ignoredRoles.length ? ignoredRoles.map((role) => `${escapeHtml(role.name)} (${escapeHtml(role.id)})`).join(", ") : "None"}</p>
+        <p><strong>Ignored users:</strong> ${ignoredUsers.length ? ignoredUsers.map(escapeHtml).join(", ") : "None"}</p>
+        <p>If a test channel, account, or role appears here, non-link rules intentionally skip it.</p>
+      </div>
+    </details>` : ""}`;
+
+  panel.querySelector("[data-retry-automod-readiness]")?.addEventListener("click", () => {
+    loadAutoModDiagnostics(true);
+  });
+}
+
+async function loadAutoModDiagnostics(force = false) {
+  const requestId = ++state.autoModDiagnosticsRequest;
+  renderAutoModDiagnostics({
+    status: "checking",
+    summary: force
+      ? "Refreshing Discord intents, channels, roles, and permissions."
+      : "AutoMod settings are ready to edit while the live permission check runs."
+  });
+  try {
+    const diagnostics = await api(`/auto-mod/diagnostics${force ? "?force=true" : ""}`);
+    if (requestId !== state.autoModDiagnosticsRequest) return;
+    renderAutoModDiagnostics(diagnostics);
+    if (force && ["ready", "warning"].includes(diagnostics.status)) {
+      success(diagnostics.status === "ready"
+        ? "Discord readiness check completed."
+        : "Discord is connected. Review the readiness items shown.");
+    }
+  } catch (error) {
+    if (requestId !== state.autoModDiagnosticsRequest) return;
+    renderAutoModDiagnostics({
+      status: "offline",
+      unavailable: true,
+      retryable: true,
+      checkedAt: new Date().toISOString(),
+      summary: "The readiness request could not be completed.",
+      warnings: [error.message || "Try the check again in a moment."],
+      checks: [],
+      exemptions: null
+    });
+  }
+}
+
 async function loadAutomation() {
-  const [autoMod, rolePanels, stickyMessages, scheduledAnnouncements, diagnostics] = await Promise.all([
+  void loadAutoModDiagnostics();
+  const [autoMod, rolePanels, stickyMessages, scheduledAnnouncements] = await Promise.all([
     api("/auto-mod"),
     api("/role-panels"),
     api("/sticky-messages"),
-    api("/scheduled-announcements"),
-    api("/auto-mod/diagnostics").catch((error) => ({
-      ok: false,
-      warnings: [error.message],
-      checks: []
-    }))
+    api("/scheduled-announcements")
   ]);
   state.autoMod = autoMod;
   state.rolePanels = rolePanels;
@@ -1409,29 +1851,6 @@ async function loadAutomation() {
   });
   document.querySelector("#automod-link-rules").innerHTML = "";
   (autoMod.linkChannelRules || []).forEach(addAutoModLinkRule);
-  const diagnosticsPanel = document.querySelector("#automod-diagnostics");
-  diagnosticsPanel.classList.toggle("has-warnings", !diagnostics.ok);
-  const unavailable = diagnostics.unavailable === true;
-  const ignoredChannels = diagnostics.exemptions?.ignoredChannels || [];
-  const ignoredRoles = diagnostics.exemptions?.ignoredRoles || [];
-  const ignoredUsers = diagnostics.exemptions?.ignoredUserIds || [];
-  diagnosticsPanel.innerHTML = `
-    <div class="section-title">
-      <div><span class="step">${diagnostics.ok ? "Ready" : unavailable ? "Offline" : "Check"}</span><h3>Discord readiness</h3><p>${diagnostics.ok ? "Intents and permissions look ready for AutoMod." : unavailable ? "Discord could not be reached. AutoMod settings are still available below." : "Resolve these items for reliable moderation."}</p></div>
-      <span class="state-pill ${diagnostics.ok ? "enabled" : "warning"}">${diagnostics.ok ? "Ready" : unavailable ? "Check unavailable" : `${diagnostics.warnings.length} warning${diagnostics.warnings.length === 1 ? "" : "s"}`}</span>
-    </div>
-    ${diagnostics.checks?.length ? `<div class="diagnostic-checks">${diagnostics.checks.map((check) =>
-      `<span class="${check.ok ? "ok" : "missing"}">${check.ok ? "✓" : "!"} ${escapeHtml(check.label)}</span>`
-    ).join("")}</div>` : ""}
-    ${diagnostics.warnings?.length ? `<div class="diagnostic-warnings">${diagnostics.warnings.map((warning) =>
-      `<p>${escapeHtml(warning)}</p>`
-    ).join("")}</div>` : ""}
-    ${diagnostics.exemptions ? `<div class="diagnostic-exemptions">
-      <p><strong>Non-link exempt channels:</strong> ${ignoredChannels.length ? ignoredChannels.map((channel) => `#${escapeHtml(channel.name)} (${escapeHtml(channel.id)})`).join(", ") : "None"}</p>
-      <p><strong>Ignored roles:</strong> ${ignoredRoles.length ? ignoredRoles.map((role) => `${escapeHtml(role.name)} (${escapeHtml(role.id)})`).join(", ") : "None"}</p>
-      <p><strong>Ignored users:</strong> ${ignoredUsers.length ? ignoredUsers.map(escapeHtml).join(", ") : "None"}</p>
-      <p>If your test channel, account, or one of its roles appears here, caps, spam, mass mentions, and repeated pings are intentionally skipped there.</p>
-    </div>` : ""}`;
 
   populateLibrarySelects();
   document.querySelector("#role-panel-count").textContent = rolePanels.length;
@@ -1455,6 +1874,7 @@ async function loadAutomation() {
     (item) => `${item.enabled ? "Enabled" : "Disabled"} · ${item.scheduleType} · ${new Date(item.nextRunAt).toLocaleString()}`,
     "test"
   );
+  renderRolePanelOptions();
   updateRolePanelPreview();
   updateStickyPreview();
   markFormClean(autoForm);
@@ -1476,29 +1896,172 @@ function enhanceDocsCodeBlocks() {
   });
 }
 
-async function loadDocsIndex(search = "") {
-  state.docsTopics = await api(`/docs${search ? `?search=${encodeURIComponent(search)}` : ""}`);
-  const list = document.querySelector("#docs-topic-list");
-  list.innerHTML = state.docsTopics.length
-    ? state.docsTopics.map((topic) => `<button type="button" data-doc-slug="${escapeHtml(topic.slug)}" class="${topic.slug === state.activeDocTopic ? "active" : ""}">
-        <strong>${escapeHtml(topic.title)}</strong><span>${escapeHtml(topic.description)}</span>
-      </button>`).join("")
-    : emptyState("No matching topics", "Try another search term.");
-  if (!state.activeDocTopic && state.docsTopics[0]) await showDocsTopic(state.docsTopics[0].slug, false);
+function stripFirstDocsHeading(html) {
+  return String(html || "").replace(/^\s*<h1\b[\s\S]*?<\/h1>/i, "").trim();
 }
 
-async function showDocsTopic(slug, pushHistory = true) {
+function docsPathParts(path = "") {
+  return String(path).split("→").map((part) => part.trim()).filter(Boolean);
+}
+
+function renderDocsTopicList(topics) {
+  if (!topics.length) {
+    return emptyState("No docs available", "Documentation topics will appear here once the dashboard can load them.");
+  }
+
+  const groups = new Map();
+  topics.forEach((topic, index) => {
+    const category = topic.category || docsPathParts(topic.path)[0] || "Docs";
+    if (!groups.has(category)) groups.set(category, []);
+    groups.get(category).push({ topic, index });
+  });
+
+  return [...groups.entries()].map(([category, entries]) => `<section class="docs-category">
+    <div class="docs-category-title">${escapeHtml(category)}</div>
+    <div class="docs-category-items">
+      ${entries.map(({ topic, index }) => {
+        const parts = docsPathParts(topic.path);
+        const label = topic.navTitle || parts.at(-1) || topic.title;
+        return `<button type="button" class="docs-nav-item ${topic.slug === state.activeDocTopic ? "active" : ""}" data-doc-slug="${escapeHtml(topic.slug)}" data-doc-index="${index}">
+          <strong>${escapeHtml(label)}</strong>
+        </button>`;
+      }).join("")}
+    </div>
+  </section>`).join("");
+}
+
+async function loadDocsIndex() {
+  state.docsTopics = await api("/docs");
+  const list = document.querySelector("#docs-topic-list");
+  list.innerHTML = renderDocsTopicList(state.docsTopics);
+  if (!state.activeDocTopic && state.docsTopics[0]) await showDocsTopic(state.docsTopics[0].slug, false, "", { scroll: false });
+}
+
+function renderDocsSearchResults(results, query = "") {
+  if (!query.trim()) {
+    const suggested = results.slice(0, 8);
+    if (!suggested.length) return emptyState("Search documentation", "Type a feature, setup step, or error to find the right guide.");
+    return `<div class="docs-search-summary">Suggested docs</div>${suggested.map((topic, index) => renderDocsSearchResult(topic, index, query)).join("")}`;
+  }
+  if (!results.length) return emptyState("No matching docs", "Try terms like cloudflare verification setup, ticket setup, logging, automod, role panels, or commands.");
+  return results.map((topic, index) => renderDocsSearchResult(topic, index, query)).join("");
+}
+
+function renderDocsSearchResult(topic, index, query = "") {
+  const title = topic.heading || topic.title;
+  const path = topic.heading ? `${topic.path} / ${topic.heading}` : topic.path;
+  const hash = topic.hash || "";
+  return `<button type="button" class="docs-search-result ${index === state.docsSearchActiveIndex ? "keyboard-active" : ""}" data-doc-slug="${escapeHtml(topic.slug)}" data-doc-index="${index}" ${hash ? `data-doc-hash="${escapeHtml(hash)}"` : ""}>
+    <span class="docs-search-result-path">${highlightSearchText(path || "Docs", query)}</span>
+    <strong>${highlightSearchText(title, query)}</strong>
+    <small>${highlightSearchText(topic.description || "", query)}</small>
+    <i aria-hidden="true">↵</i>
+  </button>`;
+}
+
+async function loadDocsSearchResults(query = "") {
+  const normalized = query.trim();
+  state.docsSearchResults = await api(`/docs${normalized ? `?search=${encodeURIComponent(normalized)}` : ""}`);
+  state.docsSearchActiveIndex = state.docsSearchResults.length ? 0 : -1;
+  document.querySelector("#docs-search-results").innerHTML = renderDocsSearchResults(state.docsSearchResults, normalized);
+  setDocsSearchActiveIndex(state.docsSearchActiveIndex);
+}
+
+function setDocsSearchActiveIndex(index) {
+  state.docsSearchActiveIndex = index;
+  document.querySelectorAll("#docs-search-results [data-doc-index]").forEach((button, buttonIndex) => {
+    const active = buttonIndex === index;
+    button.classList.toggle("keyboard-active", active);
+    button.setAttribute("aria-selected", String(active));
+    if (active) button.scrollIntoView({ block: "nearest" });
+  });
+}
+
+async function openDocsSearchModal(query = "") {
+  const modal = document.querySelector("#docs-search-modal");
+  const input = document.querySelector("#docs-search");
+  modal.classList.remove("hidden");
+  modal.setAttribute("aria-hidden", "false");
+  state.docsSearchOpen = true;
+  input.value = query;
+  await loadDocsSearchResults(query);
+  window.setTimeout(() => input.focus(), 0);
+}
+
+function closeDocsSearchModal({ restoreFocus = true } = {}) {
+  const modal = document.querySelector("#docs-search-modal");
+  if (!modal || modal.classList.contains("hidden")) return;
+  modal.classList.add("hidden");
+  modal.setAttribute("aria-hidden", "true");
+  state.docsSearchOpen = false;
+  state.docsSearchActiveIndex = -1;
+  if (restoreFocus) document.querySelector("#docs-search-trigger")?.focus();
+}
+
+function scrollToDocsHash(hash) {
+  if (!hash) return false;
+  const target = document.getElementById(hash);
+  if (!target) return false;
+  target.scrollIntoView({ behavior: "smooth", block: "start" });
+  target.classList.remove("docs-target-heading");
+  void target.offsetWidth;
+  target.classList.add("docs-target-heading");
+  window.setTimeout(() => target.classList.remove("docs-target-heading"), 1800);
+  return true;
+}
+
+function renderDocsPageToc() {
+  const toc = document.querySelector("#docs-page-toc");
+  if (!toc) return;
+  const headings = [...document.querySelectorAll("#docs-topic-content .docs-rendered h2, #docs-topic-content .docs-rendered h3")]
+    .filter((heading) => heading.id)
+    .slice(0, 14);
+  toc.innerHTML = headings.length
+    ? `<div class="section-title"><div><p class="eyebrow">On this page</p><h3>Contents</h3></div></div><nav class="docs-page-toc-nav">${headings.map((heading) => `<a href="#${escapeHtml(heading.id)}" class="${heading.tagName === "H3" ? "is-nested" : ""}">${escapeHtml(heading.textContent.replace(/#$/, "").trim())}</a>`).join("")}</nav>`
+    : `<div class="section-title"><div><p class="eyebrow">On this page</p><h3>Contents</h3></div></div>${emptyState("Short guide", "This page is brief enough to read from top to bottom.")}`;
+}
+
+function renderDocsPagination(topic) {
+  if (!topic.previous && !topic.next) return "";
+  const link = (entry, direction) => entry
+    ? `<button type="button" class="docs-page-link ${direction}" data-doc-slug="${escapeHtml(entry.slug)}">
+        <span>${direction === "previous" ? "Previous" : "Next"}</span>
+        <strong>${escapeHtml(entry.title)}</strong>
+        <small>${escapeHtml(entry.path || "")}</small>
+      </button>`
+    : `<span></span>`;
+  return `<nav class="docs-pagination" aria-label="Documentation pagination">${link(topic.previous, "previous")}${link(topic.next, "next")}</nav>`;
+}
+
+async function showDocsTopic(slug, pushHistory = true, hash = "", options = {}) {
   const topic = await api(`/docs/${encodeURIComponent(slug)}`);
   state.activeDocTopic = topic.slug;
-  document.querySelector("#docs-topic-content").innerHTML = topic.html;
+  const activeHash = hash || "";
+  document.querySelector("#docs-topic-content").innerHTML = `
+    <header class="docs-article-header">
+      <div class="docs-breadcrumb">${docsPathParts(topic.path).map((part) => `<span>${escapeHtml(part)}</span>`).join("<i>/</i>")}</div>
+      <h1>${escapeHtml(topic.title)}</h1>
+      <p>${escapeHtml(topic.description)}</p>
+    </header>
+    <div class="docs-rendered">${stripFirstDocsHeading(topic.html)}</div>
+    ${renderDocsPagination(topic)}
+  `;
   document.querySelectorAll("[data-doc-slug]").forEach((button) => {
     button.classList.toggle("active", button.dataset.docSlug === topic.slug);
   });
   enhanceDocsCodeBlocks();
-  if (pushHistory && window.location.pathname !== `/docs/${topic.slug}`) {
-    window.history.pushState({ page: "docs", topic: topic.slug }, "", `/docs/${topic.slug}`);
+  renderDocsPageToc();
+  const route = `/docs/${topic.slug}${activeHash ? `#${encodeURIComponent(activeHash)}` : ""}`;
+  if (pushHistory && `${window.location.pathname}${window.location.hash}` !== route) {
+    window.history.pushState({ page: "docs", topic: topic.slug, hash: activeHash }, "", route);
   }
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (activeHash) {
+    window.setTimeout(() => {
+      if (!scrollToDocsHash(activeHash)) document.querySelector(".docs-article")?.scrollIntoView({ block: "start", behavior: "smooth" });
+    }, 40);
+  } else if (options.scroll !== false) {
+    document.querySelector(".docs-article")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
 }
 
 function setTicketView(view) {
@@ -1562,7 +2125,7 @@ async function showPage(name) {
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === `page-${name}`));
   document.querySelector("#page-title").textContent = pageMeta[name][0];
   document.querySelector("#page-subtitle").textContent = pageMeta[name][1];
-  const loaders = { overview: loadOverview, custom: loadCustomCommands, tickets: loadTickets, announcements: loadAnnouncements, socials: loadSocials, moderation: loadModeration, settings: loadSettings, branding: loadBranding, welcome: loadWelcome, security: loadSecurity, automation: loadAutomation };
+  const loaders = { overview: loadOverview, custom: loadCustomCommands, tickets: loadTickets, announcements: loadAnnouncements, socials: loadSocials, giveaways: loadGiveaways, moderation: loadModeration, settings: loadSettings, logging: loadLogging, branding: loadBranding, welcome: loadWelcome, security: loadSecurity, automation: loadAutomation };
   try { if (loaders[name]) await loaders[name](); } catch (error) { toast(error.message, true); }
   if (name === "tickets") setTicketView(state.ticketView);
   if (name === "security") setSecurityView(state.securityView);
@@ -1572,8 +2135,8 @@ async function showPage(name) {
       window.history.pushState({ page: "docs" }, "", "/docs");
     }
     try {
-      await loadDocsIndex(document.querySelector("#docs-search").value.trim());
-      if (!state.activeDocTopic && state.docsTopics[0]) await showDocsTopic(state.docsTopics[0].slug, false);
+      await loadDocsIndex();
+      if (!state.activeDocTopic && state.docsTopics[0]) await showDocsTopic(state.docsTopics[0].slug, false, "", { scroll: false });
     } catch (error) {
       document.querySelector("#docs-topic-content").innerHTML = emptyState("Documentation unavailable", error.message);
     }
@@ -1583,21 +2146,50 @@ async function showPage(name) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function highlightSearchText(value, query) {
+  const tokens = String(query).trim().split(/[^a-z0-9]+/i).filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!tokens.length) return escapeHtml(value);
+  const pattern = new RegExp(`(${tokens.map((token) => token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "ig");
+  return String(value).split(pattern).map((part) =>
+    tokens.some((token) => token.toLowerCase() === part.toLowerCase())
+      ? `<mark>${escapeHtml(part)}</mark>`
+      : escapeHtml(part)
+  ).join("");
+}
+
+function setSearchActiveIndex(index) {
+  state.searchActiveIndex = index;
+  document.querySelectorAll("#dashboard-search-results [data-search-index]").forEach((button, buttonIndex) => {
+    const active = buttonIndex === index;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", String(active));
+    if (active) button.scrollIntoView({ block: "nearest" });
+  });
+}
+
 function renderDashboardSearch(query) {
-  const results = searchDashboardItems(query, dashboardSearchItems).slice(0, 7);
+  const results = searchDashboardItems(query, dashboardSearchItems).slice(0, 9);
   state.searchResults = results;
+  state.searchActiveIndex = results.length ? 0 : -1;
   const container = document.querySelector("#dashboard-search-results");
   const input = document.querySelector("#dashboard-search");
   container.classList.toggle("hidden", !query.trim());
   input.setAttribute("aria-expanded", String(Boolean(query.trim())));
   container.innerHTML = results.length
     ? results.map((item, index) => `
-      <button type="button" role="option" data-search-index="${index}">
-        <strong>${escapeHtml(item.label)}</strong>
-        <span>${escapeHtml(item.description)}</span>
+      <button type="button" role="option" data-search-index="${index}" aria-selected="${index === 0}">
+        <span class="search-result-heading">
+          <strong>${highlightSearchText(item.label, query)}</strong>
+          <span class="search-result-category">${escapeHtml(item.category || "Page")}</span>
+        </span>
+        <span>${highlightSearchText(item.description, query)}</span>
+        ${item.matchedText && item.matchedText !== item.label && item.matchedText !== item.description
+          ? `<small>Matched: ${highlightSearchText(item.matchedText, query)}</small>`
+          : ""}
       </button>
     `).join("")
     : emptyState("No matching dashboard area", "Try a feature name such as tickets, auto roles, or invite blocker.");
+  if (results.length) setSearchActiveIndex(0);
 }
 
 function navigateSearchItem(item) {
@@ -1689,11 +2281,17 @@ function resetRolePanelForm() {
   form.reset();
   form.elements.id.value = "";
   form.elements.active.checked = true;
+  form.elements.layout.value = "buttons";
+  form.elements.maxSelectedPerCategory.value = 0;
+  form.elements.removeRoleOnSelect.checked = false;
+  form.elements.requiredRoleId.value = "";
+  form.elements.logChannelId.value = "";
   form.elements.title.value = "Choose your roles";
   form.elements.color.value = "#5865f2";
   form.elements.colorText.value = "#5865F2";
   form.querySelector(".cancel-edit").style.display = "none";
   clearErrors(form);
+  renderRolePanelOptions();
   updateRolePanelPreview();
   markFormClean(form);
 }
@@ -1775,15 +2373,29 @@ document.querySelector("#dashboard-search").addEventListener("keydown", (event) 
   if (event.key === "Escape") {
     event.currentTarget.value = "";
     renderDashboardSearch("");
+    return;
   }
-  if (event.key === "Enter" && state.searchResults?.[0]) {
+  if (["ArrowDown", "ArrowUp"].includes(event.key)) {
     event.preventDefault();
-    navigateSearchItem(state.searchResults[0]);
+    setSearchActiveIndex(nextSearchIndex(
+      state.searchActiveIndex,
+      state.searchResults.length,
+      event.key
+    ));
+    return;
+  }
+  if (event.key === "Enter" && state.searchResults?.length) {
+    event.preventDefault();
+    navigateSearchItem(state.searchResults[state.searchActiveIndex] || state.searchResults[0]);
   }
 });
 document.querySelector("#dashboard-search-results").addEventListener("click", (event) => {
   const button = event.target.closest("[data-search-index]");
   if (button) navigateSearchItem(state.searchResults?.[Number(button.dataset.searchIndex)]);
+});
+document.querySelector("#dashboard-search-results").addEventListener("pointermove", (event) => {
+  const button = event.target.closest("[data-search-index]");
+  if (button) setSearchActiveIndex(Number(button.dataset.searchIndex));
 });
 document.addEventListener("keydown", (event) => {
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -2277,6 +2889,57 @@ document.querySelector("#send-socials").addEventListener("click", async () => {
   });
 });
 
+document.querySelector("#giveaway-form").addEventListener("input", updateGiveawayPreview);
+document.querySelector("#giveaway-form").addEventListener("change", updateGiveawayPreview);
+document.querySelector("#giveaway-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  clearErrors(form);
+  await withBusy(form.querySelector('[type="submit"]'), "Saving giveaway...", async () => {
+    try {
+      await api("/giveaways", {
+        method: "POST",
+        body: JSON.stringify({
+          channelId: values.channelId,
+          prize: values.prize,
+          description: values.description || "",
+          winnersCount: Number(values.winnersCount || 1),
+          endsAt: new Date(values.endsAt).toISOString(),
+          requiredRoleId: values.requiredRoleId || null,
+          boosterBonusEntries: Number(values.boosterBonusEntries || 0),
+          bonusRoleId: values.bonusRoleId || null,
+          bonusRoleEntries: Number(values.bonusRoleEntries || 0),
+          status: "draft"
+        })
+      });
+      form.reset();
+      await loadGiveaways();
+      success("Giveaway draft saved. Start it from the giveaway library when ready.");
+    } catch (error) {
+      showErrors(form, error.fields);
+      toast(`Could not save giveaway: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#giveaway-list").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-giveaway-action]");
+  if (!button) return;
+  const id = button.dataset.id;
+  const action = button.dataset.giveawayAction;
+  if (action === "cancel" && !window.confirm("Cancel this giveaway?")) return;
+  await withBusy(button, `${action}...`, async () => {
+    try {
+      await api(`/giveaways/${id}/${action}`, { method: "POST", body: "{}" });
+      await loadGiveaways();
+      success(`Giveaway ${action} complete.`);
+    } catch (error) {
+      toast(`Could not ${action} giveaway: ${error.message}`, true);
+    }
+  });
+});
+
 document.querySelector("#settings-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2294,6 +2957,41 @@ document.querySelector("#settings-form").addEventListener("submit", async (event
       }) });
       success("Successfully saved server and modlog settings.");
     } catch (error) { toast(`Could not save server settings: ${error.message}`, true); }
+  });
+});
+
+document.querySelector("#logging-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  clearErrors(form);
+  setFormStatus(form, "Saving the logging channel and event categories...", "saving");
+  await withBusy(form.querySelector('[type="submit"]'), "Saving logging...", async () => {
+    try {
+      state.logging = await api("/logging", {
+        method: "PUT",
+        body: JSON.stringify({
+          enabled: form.elements.enabled.checked,
+          channelId: values.channelId || null,
+          members: form.elements.members.checked,
+          messages: form.elements.messages.checked,
+          voice: form.elements.voice.checked,
+          channels: form.elements.channels.checked,
+          roles: form.elements.roles.checked,
+          server: form.elements.server.checked,
+          invites: form.elements.invites.checked,
+          threads: form.elements.threads.checked,
+          moderation: form.elements.moderation.checked,
+          dashboard: form.elements.dashboard.checked
+        })
+      });
+      setFormStatus(form, "Server logging settings saved. The bot may take up to 10 seconds to refresh its event cache.", "success", 9000);
+      success("Successfully saved server logging settings.");
+    } catch (error) {
+      showErrors(form, error.fields);
+      setFormStatus(form, error.message, "error", 12000);
+      toast(`Could not save server logging settings: ${error.message}`, true);
+    }
   });
 });
 
@@ -2607,35 +3305,77 @@ document.querySelector("#anti-role-form").addEventListener("submit", async (even
   });
 });
 
+document.querySelector("#verification-form").addEventListener("input", updateVerificationPreview);
+document.querySelector("#verification-form").addEventListener("change", updateVerificationPreview);
 document.querySelector("#verification-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const values = formObject(form);
   clearErrors(form);
+  if (
+    form.elements.enabled.checked
+    && form.elements.applyPermissionsImmediately.checked
+    && !window.confirm("Save these settings and immediately apply channel permission changes to the live Discord server?")
+  ) {
+    setFormStatus(form, "Save cancelled before live permission changes were applied.", "error", 8000);
+    return;
+  }
+  setFormStatus(form, "Saving verification gate settings and validating Discord references...", "saving");
   await withBusy(form.querySelector('[type="submit"]'), "Saving verification...", async () => {
     try {
-      await api("/verification", {
+      const result = await api("/verification", {
         method: "PUT",
         body: JSON.stringify({
           enabled: form.elements.enabled.checked,
           verifiedRoleId: values.verifiedRoleId || null,
+          verificationChannelId: values.verificationChannelId || null,
+          verificationChannelName: values.verificationChannelName,
+          embedTitle: values.embedTitle,
+          embedDescription: values.embedDescription,
+          embedColor: values.embedColor,
+          buttonText: values.buttonText,
+          successMessage: values.successMessage,
+          failureMessage: values.failureMessage,
           action: values.action,
           logChannelId: values.logChannelId || null,
           minAccountAgeDays: Number(values.minAccountAgeDays),
           minServerDays: Number(values.minServerDays),
           vpnCheckEnabled: form.elements.vpnCheckEnabled.checked,
           vpnFailClosed: form.elements.vpnFailClosed.checked,
-          recordRetentionHours: Number(values.recordRetentionHours)
+          recordRetentionHours: Number(values.recordRetentionHours),
+          publicChannelIds: selectedValues(form.elements.publicChannelIds),
+          publicCategoryIds: selectedValues(form.elements.publicCategoryIds),
+          hiddenChannelIds: selectedValues(form.elements.hiddenChannelIds),
+          hiddenCategoryIds: selectedValues(form.elements.hiddenCategoryIds),
+          lockAllChannels: form.elements.lockAllChannels.checked,
+          autoCreateChannel: form.elements.autoCreateChannel.checked,
+          lockVerificationChannel: form.elements.lockVerificationChannel.checked,
+          updateEmbedOnSetup: form.elements.updateEmbedOnSetup.checked,
+          applyPermissionsImmediately: form.elements.applyPermissionsImmediately.checked
         })
       });
+      if (result.setup) renderVerificationSetupResult(result.setup);
       await loadSecurity();
-      success("Successfully saved verification settings.");
+      const message = result.setup
+        ? "Verification settings saved and the live gate was applied."
+        : "Verification settings saved. Run a dry preview before applying the live gate.";
+      setFormStatus(form, message, "success", 10000);
+      success(message);
     } catch (error) {
       showErrors(form, error.fields);
+      setFormStatus(form, `Could not save verification settings: ${error.message}`, "error", 14000);
       toast(`Could not save verification settings: ${error.message}`, true);
     }
   });
 });
+
+function verificationFormIsSaved() {
+  const form = document.querySelector("#verification-form");
+  if (!state.dirtyForms.has(form)) return true;
+  setFormStatus(form, "Save or discard the verification changes before running setup actions.", "error", 10000);
+  form.scrollIntoView({ behavior: "smooth", block: "start" });
+  return false;
+}
 
 document.querySelector("#create-verification-link").addEventListener("click", async () => {
   const button = document.querySelector("#create-verification-link");
@@ -2659,6 +3399,100 @@ document.querySelector("#copy-verification-link").addEventListener("click", asyn
   } catch {
     toast("The browser could not copy the link. Select the link and copy it manually.", true);
   }
+});
+
+document.querySelector("#copy-stable-verification-link").addEventListener("click", async () => {
+  const value = document.querySelector("#stable-verification-link").value;
+  if (!value) return toast("Set VERIFY_PUBLIC_BASE_URL and enable verification first.", true);
+  try {
+    await navigator.clipboard.writeText(value);
+    success("Stable server verification link copied.");
+  } catch {
+    toast("The browser could not copy the link. Select it and copy it manually.", true);
+  }
+});
+
+document.querySelector("#verification-records").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-verification-review]");
+  if (!button) return;
+  const decision = button.dataset.verificationReview;
+  const id = button.dataset.id;
+  const note = window.prompt(`Optional staff note for this ${decision}:`, "") || "";
+  await withBusy(button, decision === "approve" ? "Approving..." : "Denying...", async () => {
+    try {
+      const result = await api(`/verification/records/${id}/review`, {
+        method: "POST",
+        body: JSON.stringify({ decision, note })
+      });
+      await loadSecurity();
+      success(result.warning || `Verification record ${decision === "approve" ? "approved" : "denied"}.`);
+    } catch (error) {
+      toast(`Could not review verification record: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#preview-verification-setup").addEventListener("click", async () => {
+  if (!verificationFormIsSaved()) return;
+  const button = document.querySelector("#preview-verification-setup");
+  await withBusy(button, "Checking changes...", async () => {
+    try {
+      const result = await api("/verification/dry-run", { method: "POST", body: "{}" });
+      renderVerificationSetupResult(result, true);
+      success("Dry run completed. No Discord permissions were changed.");
+    } catch (error) {
+      toast(`Could not preview verification setup: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#apply-verification-setup").addEventListener("click", async () => {
+  if (!verificationFormIsSaved()) return;
+  if (!window.confirm("Apply the saved verification gate to the live Discord server now? Existing affected overwrites will be backed up first.")) return;
+  const button = document.querySelector("#apply-verification-setup");
+  await withBusy(button, "Applying setup...", async () => {
+    try {
+      const result = await api("/verification/setup", { method: "POST", body: "{}" });
+      renderVerificationSetupResult(result);
+      await loadSecurity();
+      success("Verification channel, embed, and permission gate were applied.");
+    } catch (error) {
+      toast(`Could not apply verification setup: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#repost-verification-embed").addEventListener("click", async () => {
+  if (!verificationFormIsSaved()) return;
+  const button = document.querySelector("#repost-verification-embed");
+  await withBusy(button, "Updating embed...", async () => {
+    try {
+      const result = await api("/verification/repost", { method: "POST", body: "{}" });
+      renderVerificationSetupResult(result);
+      await loadSecurity();
+      success(result.embedPosted ? "Verification embed posted." : "Verification embed updated.");
+    } catch (error) {
+      toast(`Could not update the verification embed: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#disable-verification-mode").addEventListener("click", async () => {
+  if (!verificationFormIsSaved()) return;
+  if (!window.confirm("Disable verification and restore every channel overwrite Odyssey Bot backed up? The verification channel and existing verified roles will remain.")) return;
+  const button = document.querySelector("#disable-verification-mode");
+  await withBusy(button, "Restoring permissions...", async () => {
+    try {
+      const result = await api("/verification/disable", {
+        method: "POST",
+        body: JSON.stringify({ restorePermissions: true })
+      });
+      await loadSecurity();
+      success(`Verification disabled. ${result.restore?.restored ?? 0} permission overwrites restored.`);
+    } catch (error) {
+      toast(`Could not disable verification safely: ${error.message}`, true);
+    }
+  });
 });
 
 document.querySelector("#add-automod-link-rule").addEventListener("click", () => addAutoModLinkRule());
@@ -2701,7 +3535,10 @@ document.querySelector("#auto-mod-form").addEventListener("submit", async (event
 });
 
 document.querySelector("#role-panel-form").addEventListener("input", updateRolePanelPreview);
-document.querySelector("#role-panel-form").addEventListener("change", updateRolePanelPreview);
+document.querySelector("#role-panel-form").addEventListener("change", (event) => {
+  if (event.target?.name === "roleIds") renderRolePanelOptions();
+  updateRolePanelPreview();
+});
 document.querySelector("#role-panel-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
@@ -2715,10 +3552,17 @@ document.querySelector("#role-panel-form").addEventListener("submit", async (eve
         body: JSON.stringify({
           name: values.name,
           channelId: values.channelId || null,
+          layout: values.layout || "buttons",
           title: values.title,
           description: values.description || "",
           color: values.color || "#5865F2",
           active: form.elements.active.checked,
+          maxSelectedPerCategory: Number(values.maxSelectedPerCategory || 0),
+          removeRoleOnSelect: form.elements.removeRoleOnSelect.checked,
+          requiredRoleId: values.requiredRoleId || null,
+          messageId: null,
+          logChannelId: values.logChannelId || null,
+          options: collectRolePanelOptions(),
           roleIds: selectedValues(form.elements.roleIds)
         })
       });
@@ -2814,17 +3658,57 @@ document.querySelectorAll(".new-editor").forEach((button) => button.addEventList
   }
 }));
 
+document.querySelector("#docs-search-trigger")?.addEventListener("click", () => {
+  openDocsSearchModal().catch((error) => toast(error.message, true));
+});
+document.querySelector("#docs-search-close")?.addEventListener("click", () => closeDocsSearchModal());
+document.querySelector("[data-docs-search-close]")?.addEventListener("click", () => closeDocsSearchModal());
 document.querySelector("#docs-search")?.addEventListener("input", (event) => {
   window.clearTimeout(state.docsSearchTimer);
   state.docsSearchTimer = window.setTimeout(() => {
-    loadDocsIndex(event.target.value.trim()).catch((error) => toast(error.message, true));
+    loadDocsSearchResults(event.target.value.trim()).catch((error) => toast(error.message, true));
   }, 180);
+});
+document.querySelector("#docs-search")?.addEventListener("keydown", (event) => {
+  if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    setDocsSearchActiveIndex(nextSearchIndex(
+      state.docsSearchActiveIndex,
+      state.docsSearchResults.length,
+      event.key
+    ));
+  }
+  if (event.key === "Enter") {
+    const topic = state.docsSearchResults[state.docsSearchActiveIndex] || state.docsSearchResults[0];
+    if (!topic) return;
+    event.preventDefault();
+    showDocsTopic(topic.slug, true, topic.hash || "").then(() => {
+      closeDocsSearchModal({ restoreFocus: false });
+    }).catch((error) => toast(error.message, true));
+  }
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeDocsSearchModal();
+  }
+});
+document.addEventListener("keydown", (event) => {
+  const isSearchShortcut = (event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k";
+  if (isSearchShortcut && state.activePage === "docs") {
+    event.preventDefault();
+    openDocsSearchModal().catch((error) => toast(error.message, true));
+  }
+  if (event.key === "Escape" && state.docsSearchOpen) {
+    event.preventDefault();
+    closeDocsSearchModal();
+  }
 });
 
 document.body.addEventListener("click", async (event) => {
   const docsTopic = event.target.closest("[data-doc-slug]");
   if (docsTopic) {
-    await showDocsTopic(docsTopic.dataset.docSlug);
+    const isSearchResult = Boolean(docsTopic.closest("#docs-search-modal"));
+    await showDocsTopic(docsTopic.dataset.docSlug, true, docsTopic.dataset.docHash || "");
+    if (isSearchResult) closeDocsSearchModal({ restoreFocus: false });
     return;
   }
 
@@ -2898,12 +3782,18 @@ document.body.addEventListener("click", async (event) => {
       form.elements.id.value = item.id;
       form.elements.name.value = item.name;
       form.elements.channelId.value = item.channelId || "";
+      form.elements.layout.value = item.layout || "buttons";
+      form.elements.logChannelId.value = item.logChannelId || "";
+      form.elements.requiredRoleId.value = item.requiredRoleId || "";
+      form.elements.maxSelectedPerCategory.value = item.maxSelectedPerCategory ?? 0;
+      form.elements.removeRoleOnSelect.checked = Boolean(item.removeRoleOnSelect);
       form.elements.title.value = item.title;
       form.elements.description.value = item.description;
       form.elements.color.value = item.color;
       form.elements.colorText.value = item.color;
       form.elements.active.checked = item.active;
       setSelectedValues(form.elements.roleIds, item.roleIds);
+      renderRolePanelOptions(item.options || []);
       form.querySelector(".cancel-edit").style.display = "block";
       updateRolePanelPreview();
       markFormClean(form);
@@ -3154,7 +4044,7 @@ async function init() {
     if (window.location.pathname === "/docs" || window.location.pathname === "/help" || window.location.pathname.startsWith("/docs/")) {
       await showPage("docs");
       const topic = window.location.pathname.split("/")[2];
-      if (topic) await showDocsTopic(topic, false);
+      if (topic) await showDocsTopic(topic, false, window.location.hash.replace(/^#/, ""));
     }
     const pendingTarget = sessionStorage.getItem("odyssey.pendingNavigation");
     if (pendingTarget) {
@@ -3184,7 +4074,7 @@ window.addEventListener("popstate", async () => {
     : null;
   requestNavigation(
     topic
-      ? { type: "page", page: "docs", docTopic: topic }
+      ? { type: "page", page: "docs", docTopic: topic, docHash: window.location.hash.replace(/^#/, "") }
       : { type: "page", page: "overview" },
     "Follow browser navigation"
   );

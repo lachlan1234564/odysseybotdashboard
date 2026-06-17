@@ -1,9 +1,10 @@
 import { REST, Routes } from "discord.js";
 import { loadDiscordConfig } from "../shared/config.js";
-import { commandData } from "./commands.js";
+import { assertUniqueCommandNames, commandData } from "./commands.js";
 
 const config = loadDiscordConfig();
 const rest = new REST({ version: "10" }).setToken(config.DISCORD_TOKEN);
+assertUniqueCommandNames();
 
 const guilds = await rest.get(Routes.userGuilds()) as Array<{ id: string }>;
 if (!guilds.length) {
@@ -17,4 +18,29 @@ await Promise.all(guilds.map((guild) =>
     { body: commandData }
   )
 ));
-console.log(`Slash commands deployed to ${guilds.length} server(s).`);
+
+const verification = await Promise.all(guilds.map(async (guild) => {
+  const registered = await rest.get(
+    Routes.applicationGuildCommands(config.DISCORD_CLIENT_ID, guild.id)
+  ) as Array<{ name: string; options?: Array<{ name: string }> }>;
+  const server = registered.filter((command) => command.name === "server");
+  const legacy = registered.filter((command) => command.name === "server-info");
+  const hasInfo = server.length === 1
+    && server[0]?.options?.some((option) => option.name === "info");
+  return {
+    commandCount: registered.length,
+    hasInfo,
+    legacyCount: legacy.length
+  };
+}));
+
+const failed = verification.filter((result) => !result.hasInfo || result.legacyCount !== 0);
+if (failed.length > 0) {
+  throw new Error(
+    "Discord command verification failed: expected one /server info command and no /server-info legacy alias."
+  );
+}
+console.log(
+  `Slash commands deployed and verified in ${guilds.length} server(s): `
+  + `${verification[0]?.commandCount ?? commandData.length} commands, /server info active, legacy alias removed.`
+);
