@@ -17,6 +17,7 @@ const app = express();
 const publicPath = path.join(config.projectRoot, "src/dashboard/public");
 const uploadsPath = resolveUploadsPath(config.UPLOADS_DIR);
 const sessionSecret = config.DASHBOARD_SESSION_SECRET
+  || config.SETUP_SECRET_KEY
   || config.COREPANEL_SECRET_KEY
   || runtimeConfig.dashboardPasswordHash
   || crypto.randomBytes(32).toString("hex");
@@ -38,7 +39,7 @@ app.use(helmet({
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 app.use(express.json({ limit: "250kb" }));
 app.use(session({
-  name: "corepanel.sid",
+  name: "botdashboard.sid",
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -86,7 +87,8 @@ app.get(["/servers", "/servers.html"], (req, res) => {
   }
   res.sendFile(path.join(publicPath, "servers.html"));
 });
-app.get(["/", "/index.html"], (req, res) => {
+app.get(["/", "/home", "/home.html"], (_req, res) => res.sendFile(path.join(publicPath, "home.html")));
+app.get(["/dashboard", "/dashboard.html", "/index.html"], (req, res) => {
   if (!req.session.authenticated) {
     res.redirect("/login");
     return;
@@ -150,7 +152,7 @@ const host = config.PORT ? "0.0.0.0" : config.DASHBOARD_HOST;
 const displayHost = host === "0.0.0.0" ? "localhost" : host;
 const url = `http://${displayHost}:${port}`;
 const server = app.listen(port, host, async () => {
-  console.log(`CorePanel dashboard listening on ${host}:${port}`);
+  console.log(`Bot Dashboard listening on ${host}:${port}`);
   if (process.argv.includes("--open") && config.NODE_ENV !== "production") {
     await open(url).catch((error) => logError("Could not open the browser", error));
   }

@@ -48,7 +48,7 @@ export async function processVerificationAutoKicks(client: Client): Promise<void
         client.rest as unknown as REST,
         settings,
         "Verification auto-kick skipped",
-        "Auto-kick is enabled, but CorePanel is missing Kick Members."
+        "Auto-kick is enabled, but Bot Dashboard is missing Kick Members."
       );
       continue;
     }

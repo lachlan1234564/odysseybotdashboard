@@ -39,10 +39,10 @@ export type SlashCommandName = typeof slashCommandNames[number];
 export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("Quickly check that CorePanel is online and responding."),
+    .setDescription("Quickly check that Bot Dashboard is online and responding."),
   new SlashCommandBuilder()
     .setName("help")
-    .setDescription("List every CorePanel command, its purpose, and who can use it."),
+    .setDescription("List every Bot Dashboard command, its purpose, and who can use it."),
   new SlashCommandBuilder()
     .setName("server")
     .setDescription("Server information and administration.")

@@ -54,7 +54,7 @@ export const dashboardSearchItems = [
   { category: "Page", label: "Sticky Messages", description: "Keep notices at the bottom of channels", page: "automation", automationView: "sticky", aliases: ["sticky", "persistent message"] },
   { category: "Page", label: "Scheduled Announcements", description: "Timed and repeating announcements", page: "automation", automationView: "scheduled", aliases: ["schedule", "scheduled messages", "timed announcements"] },
   { category: "Page", label: "Docs & Help", description: "Setup and feature documentation", page: "docs", aliases: ["docs", "help", "documentation"] },
-  { category: "Guide", label: "Quick Start guide", description: "Install dependencies and launch CorePanel", page: "docs", docTopic: "quick-start", aliases: ["install bot", "run bot", "download github"] },
+  { category: "Guide", label: "Quick Start guide", description: "Install dependencies and launch Bot Dashboard", page: "docs", docTopic: "quick-start", aliases: ["install bot", "run bot", "download github"] },
   { category: "Guide", label: "Railway Hosting guide", description: "Deploy the bot, dashboard, database, and uploads", page: "docs", docTopic: "railway-hosting", aliases: ["host bot", "production deploy", "railway"] },
   { category: "Guide", label: "Troubleshooting guide", description: "Resolve bot, dashboard, command, and database issues", page: "docs", docTopic: "bot-offline", aliases: ["errors", "bot offline", "application did not respond"] }
 ];

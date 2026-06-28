@@ -26,7 +26,7 @@ OAuth redirect errors come from a mismatch between Discord Developer Portal and 
 
 Cloudflare Tunnel problems usually show up as 502 errors, redirects that never return, or a verification page hidden behind Access.
 
-1. Keep `cloudflared tunnel run corepanel-bot` running.
+1. Keep `cloudflared tunnel run bot-dashboard` running.
 2. Point both `admin` and `verify` DNS records at the tunnel UUID.
 3. Protect only the admin hostname with Cloudflare Access.
 4. Leave the verification hostname public.
@@ -36,7 +36,7 @@ Cloudflare Tunnel problems usually show up as 502 errors, redirects that never r
 
 Most failed sends, role changes, ticket creation, and moderation actions are permission problems.
 
-1. Put the CorePanel role above roles it needs to assign or moderate.
+1. Put the Bot Dashboard role above roles it needs to assign or moderate.
 2. Give the bot View Channel and Send Messages where it must post.
 3. Give the bot Embed Links where embeds are enabled.
 4. Give the bot Manage Channels for tickets and verification setup.
@@ -56,7 +56,7 @@ If the bot is offline or Discord says an application did not respond:
 
 Discord blocks actions against roles or members above the bot.
 
-1. Move the CorePanel role above staff, verified, muted, ticket, and self-service roles it must manage.
+1. Move the Bot Dashboard role above staff, verified, muted, ticket, and self-service roles it must manage.
 2. Do not use managed integration roles for bot-managed actions.
 3. Remember that the server owner cannot be moderated by the bot.
 4. Re-test role panels, verification, and moderation after moving the role.
@@ -78,7 +78,7 @@ Discord blocks actions against roles or members above the bot.
 
 - Use the **Active server** selector near the top of the sidebar.
 - Each server has separate settings, commands, panels, announcements, and history.
-- If a server is missing, confirm CorePanel is installed there, then refresh the dashboard.
+- If a server is missing, confirm Bot Dashboard is installed there, then refresh the dashboard.
 
 ## Role actions failing
 
@@ -122,7 +122,7 @@ Discord blocks actions against roles or members above the bot.
 - Set `VERIFY_PUBLIC_BASE_URL` to the public verification hostname. The gate does not fall back to the protected admin hostname.
 - If behind Cloudflare Tunnel or a reverse proxy, set `TRUST_PROXY=true` so `X-Forwarded-For` headers are trusted for proper IP logging and VPN checks.
 - Configure both VPN provider variables (`VPN_CHECK_URL_TEMPLATE` and `VPN_CHECK_API_KEY`) before enabling the optional VPN/proxy toggle.
-- Choose a verified/community role and move the CorePanel role above it.
+- Choose a verified/community role and move the Bot Dashboard role above it.
 - Give the bot Manage Channels, Manage Roles, View Channel, Send Messages, Embed Links, and Read Message History.
 
 ## Verification setup only changes some channels
@@ -137,7 +137,7 @@ Discord blocks actions against roles or members above the bot.
 
 - Confirm the member is still in the server.
 - Confirm the verified role still exists and is not managed by an integration.
-- Move the CorePanel role above the verified role.
+- Move the Bot Dashboard role above the verified role.
 - Grant Manage Roles.
 - Check the configured verification log channel for the role-assignment failure.
 

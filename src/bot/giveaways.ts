@@ -119,7 +119,7 @@ export async function sendGiveawayMessage(
     status: "active",
     startsAt: giveaway.startsAt ?? new Date().toISOString()
   }))!;
-  await sendGiveawayLog(guild, updated, "Giveaway Started", "A giveaway was published from CorePanel.").catch(() => undefined);
+  await sendGiveawayLog(guild, updated, "Giveaway Started", "A giveaway was published from Bot Dashboard.").catch(() => undefined);
   return updated;
 }
 

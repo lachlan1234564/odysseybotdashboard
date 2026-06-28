@@ -6,7 +6,7 @@ Moderation cases are structured records for staff actions such as warnings, time
 
 ## Automatic cases
 
-CorePanel creates cases for:
+Bot Dashboard creates cases for:
 
 - `/warn`
 - `/timeout`
@@ -20,9 +20,9 @@ The older moderation action history still exists as a raw audit trail. Cases are
 
 ## Optional moderation DMs
 
-Open **Direct Messages** in the dashboard to enable moderation DMs. When enabled, CorePanel can notify affected users for warnings, timeouts, timeout removals, kicks, bans, unbans, and manual cases.
+Open **Direct Messages** in the dashboard to enable moderation DMs. When enabled, Bot Dashboard can notify affected users for warnings, timeouts, timeout removals, kicks, bans, unbans, and manual cases.
 
-For kicks and bans, CorePanel attempts the DM before removing the user when possible. If the user has DMs closed, the action still continues and the failure is logged safely.
+For kicks and bans, Bot Dashboard attempts the DM before removing the user when possible. If the user has DMs closed, the action still continues and the failure is logged safely.
 
 ## Dashboard view
 

@@ -1,6 +1,6 @@
 # Polls
 
-Polls let staff post a clean Discord button vote, store votes in the database, and keep the poll working after CorePanel restarts.
+Polls let staff post a clean Discord button vote, store votes in the database, and keep the poll working after Bot Dashboard restarts.
 
 ## What exists now
 
@@ -94,7 +94,7 @@ Slash command polls publish immediately. Use the dashboard when you need schedul
 
 ## Required permissions
 
-CorePanel needs these permissions in the poll channel:
+Bot Dashboard needs these permissions in the poll channel:
 
 - View Channel
 - Send Messages
@@ -103,7 +103,7 @@ CorePanel needs these permissions in the poll channel:
 
 ## Troubleshooting
 
-- If a scheduled poll does not publish, make sure CorePanel is running.
+- If a scheduled poll does not publish, make sure Bot Dashboard is running.
 - If a poll does not publish, confirm the channel belongs to the selected server.
 - If voting says a role is required, make sure the member has that role.
 - If the buttons are disabled, the poll has ended or was cancelled.

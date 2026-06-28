@@ -181,7 +181,7 @@ function decryptStoredSecret(row: Record<string, unknown>, key: string): { value
   } catch {
     return {
       value: "",
-      error: "A stored setup secret could not be decrypted. Check COREPANEL_SECRET_KEY."
+      error: "A stored setup secret could not be decrypted. Check SETUP_SECRET_KEY."
     };
   }
 }
@@ -193,8 +193,8 @@ export async function getAppSetup(): Promise<AppSetupPublic> {
   const envClientSecret = envValue("DISCORD_CLIENT_SECRET");
   return {
     setupComplete: setupCompleteFrom(row),
-    dashboardName: String(row.dashboard_name ?? "CorePanel"),
-    botDisplayName: String(row.bot_display_name ?? "CorePanel Bot"),
+    dashboardName: String(row.dashboard_name ?? "Bot Dashboard"),
+    botDisplayName: String(row.bot_display_name ?? "Discord Bot"),
     supportServerName: String(row.support_server_name ?? ""),
     discordClientId: envValue("DISCORD_CLIENT_ID") || String(row.discord_client_id ?? ""),
     discordClientSecretConfigured: Boolean(envClientSecret || row.discord_client_secret_encrypted),
@@ -220,8 +220,8 @@ export async function getRuntimeAppConfig(): Promise<RuntimeAppConfig> {
   const clientSecret = decryptStoredSecret(row, "discord_client_secret_encrypted");
   return {
     setupComplete: setupCompleteFrom(row),
-    dashboardName: String(row.dashboard_name ?? "CorePanel"),
-    botDisplayName: String(row.bot_display_name ?? "CorePanel Bot"),
+    dashboardName: String(row.dashboard_name ?? "Bot Dashboard"),
+    botDisplayName: String(row.bot_display_name ?? "Discord Bot"),
     supportServerName: String(row.support_server_name ?? ""),
     discordToken: envValue("DISCORD_TOKEN") || token.value,
     discordClientId: envValue("DISCORD_CLIENT_ID") || String(row.discord_client_id ?? ""),

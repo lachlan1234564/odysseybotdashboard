@@ -135,7 +135,7 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, (readyClient) => {
-  console.log(`CorePanel connected to Discord in ${readyClient.guilds.cache.size} server(s).`);
+  console.log(`Bot Dashboard connected to Discord in ${readyClient.guilds.cache.size} server(s).`);
   processScheduledAnnouncements(readyClient).catch((error) => {
     logError("Scheduled announcement sweep failed", error);
   });
@@ -760,9 +760,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
 });
 
 if (!runtimeConfig.discordToken) {
-  console.warn("[CorePanel] Discord bot startup skipped: setup is incomplete. Open the dashboard setup page and save a bot token.");
+  console.warn("[Bot Dashboard] Discord bot startup skipped: setup is incomplete. Open the dashboard setup page and save a bot token.");
 } else if (runtimeConfig.secretError) {
-  console.warn(`[CorePanel] Discord bot startup skipped: ${runtimeConfig.secretError}`);
+  console.warn(`[Bot Dashboard] Discord bot startup skipped: ${runtimeConfig.secretError}`);
 } else {
   client.login(runtimeConfig.discordToken).catch((error) => {
     logError("Discord bot login failed", error);

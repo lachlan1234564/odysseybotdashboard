@@ -46,8 +46,8 @@ const state = {
   branding: null,
   logging: null,
   dmSettings: null,
-  dashboardName: "CorePanel",
-  botDisplayName: "CorePanel Bot",
+  dashboardName: "Bot Dashboard",
+  botDisplayName: "Discord Bot",
   activePage: "overview",
   selectedGuildId: null,
   searchActiveIndex: -1,
@@ -324,7 +324,7 @@ function escapeHtml(value = "") {
 }
 
 function applyRuntimeBranding(session = {}) {
-  state.dashboardName = session.dashboardName || state.dashboardName || "CorePanel";
+  state.dashboardName = session.dashboardName || state.dashboardName || "Bot Dashboard";
   state.botDisplayName = session.botDisplayName || state.botDisplayName || `${state.dashboardName} Bot`;
   const brandText = document.querySelector(".sidebar-brand strong");
   if (brandText) brandText.textContent = state.dashboardName;
@@ -528,7 +528,7 @@ async function switchGuild(guildId) {
     body: JSON.stringify({ guildId })
   });
   state.suppressBeforeUnload = true;
-  window.location.assign(result.next || "/");
+  window.location.assign(result.next || "/dashboard");
 }
 
 async function performNavigation(target) {
@@ -745,8 +745,8 @@ function renderDiscordPreview(container, { content = "", embed = null, component
     ? `<div class="preview-select">${escapeHtml(components.placeholder || "Choose an option")}⌄</div>`
     : `<div class="preview-buttons">${components.labels.slice(0, 10).map((label) => `<span class="preview-button ${escapeHtml(components.buttonStyle || "secondary")}">${escapeHtml(label)}</span>`).join("")}</div>`
   }</div>` : "";
-  const botName = escapeHtml(state.botDisplayName || "CorePanel Bot");
-  const botInitial = escapeHtml((state.botDisplayName || "CorePanel").slice(0, 1).toUpperCase());
+  const botName = escapeHtml(state.botDisplayName || "Discord Bot");
+  const botInitial = escapeHtml((state.botDisplayName || "Bot Dashboard").slice(0, 1).toUpperCase());
   container.innerHTML = `<div class="discord-message"><div class="discord-avatar">${botInitial}</div><div><div class="discord-head"><strong>${botName}</strong><span class="bot-tag">APP</span><time>Today at 12:00</time></div>${safeContent ? `<div class="discord-content">${escapeHtml(safeContent)}</div>` : ""}${embedHtml}${componentHtml}${!safeContent && !embedHtml ? '<div class="discord-content">Configure the action to see a preview.</div>' : ""}</div></div>`;
 }
 
@@ -1056,7 +1056,7 @@ function updateVerificationPreview() {
       title: draft.embedTitle,
       description: draft.embedDescription,
       color: draft.embedColor || "#C58B4B",
-      footerText: "Discord OAuth verification • CorePanel",
+      footerText: "Discord OAuth verification • Bot Dashboard",
       timestamp: true,
       fields: []
     },
@@ -1902,7 +1902,7 @@ function applyDashboardAccent(value) {
   document.documentElement.style.setProperty("--brand-bright", isLight ? shadeHex(value, 0.36) : blendHex(value));
 }
 
-window.addEventListener("corepanel:themechange", () => {
+window.addEventListener("botdashboard:themechange", () => {
   const accent = state.branding?.accentColor;
   if (accent) applyDashboardAccent(accent);
 });
@@ -3146,7 +3146,7 @@ document.querySelector("#discard-changes").addEventListener("click", () => {
     performNavigation(target).catch((error) => toast(error.message, true));
     return;
   }
-  sessionStorage.setItem("corepanel.pendingNavigation", JSON.stringify(target));
+  sessionStorage.setItem("botdashboard.pendingNavigation", JSON.stringify(target));
   state.suppressBeforeUnload = true;
   window.location.reload();
 });
@@ -3640,7 +3640,7 @@ document.querySelector("#giveaway-form").addEventListener("submit", async (event
       form.reset();
       await loadGiveaways();
       success(values.status === "scheduled"
-        ? "Giveaway scheduled. CorePanel will publish it when the start time arrives."
+        ? "Giveaway scheduled. Bot Dashboard will publish it when the start time arrives."
         : "Giveaway draft saved. Publish it from the giveaway library when ready.");
     } catch (error) {
       showErrors(form, error.fields);
@@ -3707,7 +3707,7 @@ document.querySelector("#poll-form").addEventListener("submit", async (event) =>
       addPollOption("No");
       await loadPolls();
       success(values.status === "scheduled"
-        ? "Poll scheduled. CorePanel will publish it when the start time arrives."
+        ? "Poll scheduled. Bot Dashboard will publish it when the start time arrives."
         : "Poll draft saved. Publish it from the active polls list when ready.");
     } catch (error) {
       showErrors(form, error.fields);
@@ -3875,7 +3875,7 @@ document.querySelector("#branding-form").addEventListener("submit", async (event
   });
 });
 document.querySelector("#branding-reset").addEventListener("click", async () => {
-  if (!window.confirm("Reset this server's appearance settings to CorePanel defaults?")) return;
+  if (!window.confirm("Reset this server's appearance settings to Bot Dashboard defaults?")) return;
   const button = document.querySelector("#branding-reset");
   const form = document.querySelector("#branding-form");
   await withBusy(button, "Resetting...", async () => {
@@ -4346,7 +4346,7 @@ document.querySelector("#repost-verification-embed").addEventListener("click", a
 
 document.querySelector("#disable-verification-mode").addEventListener("click", async () => {
   if (!verificationFormIsSaved()) return;
-  if (!window.confirm("Disable verification and restore every channel overwrite CorePanel backed up? The verification channel and existing verified roles will remain.")) return;
+  if (!window.confirm("Disable verification and restore every channel overwrite Bot Dashboard backed up? The verification channel and existing verified roles will remain.")) return;
   const button = document.querySelector("#disable-verification-mode");
   await withBusy(button, "Restoring permissions...", async () => {
     try {
@@ -4927,9 +4927,9 @@ async function init() {
       const topic = window.location.pathname.split("/")[2];
       if (topic) await showDocsTopic(topic, false, window.location.hash.replace(/^#/, ""));
     }
-    const pendingTarget = sessionStorage.getItem("corepanel.pendingNavigation");
+    const pendingTarget = sessionStorage.getItem("botdashboard.pendingNavigation");
     if (pendingTarget) {
-      sessionStorage.removeItem("corepanel.pendingNavigation");
+      sessionStorage.removeItem("botdashboard.pendingNavigation");
       await performNavigation(JSON.parse(pendingTarget));
     }
   } catch (error) {

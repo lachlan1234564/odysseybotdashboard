@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>CorePanel Control</title>
+    <title>Bot Dashboard Control</title>
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" type="module"></script>
@@ -13,7 +13,7 @@
       <aside class="sidebar">
         <div class="sidebar-brand">
           <div class="brand-mark">O</div>
-          <div><strong>CorePanel</strong><span id="guild-name">Connecting...</span></div>
+          <div><strong>Bot Dashboard</strong><span id="guild-name">Connecting...</span></div>
         </div>
         <label class="guild-switcher">
           <span>Active server</span>
@@ -454,7 +454,7 @@
             </article>
             <article class="surface table-card">
               <div class="section-title">
-                <div><p class="eyebrow">Archive</p><h3>Ticket transcripts</h3><p>Full closed-ticket transcripts saved by CorePanel.</p></div>
+                <div><p class="eyebrow">Archive</p><h3>Ticket transcripts</h3><p>Full closed-ticket transcripts saved by Bot Dashboard.</p></div>
                 <div class="table-tools"><input id="ticket-transcript-search" type="search" placeholder="Search transcripts"></div>
               </div>
               <div id="ticket-transcripts" class="table-wrap"></div>
@@ -585,7 +585,7 @@
                   <label class="field">Booster bonus entries<input name="boosterBonusEntries" type="number" min="0" max="20" value="0"></label>
                   <label class="field">Bonus role<select name="bonusRoleId" data-role-select></select></label>
                   <label class="field">Bonus role entries<input name="bonusRoleEntries" type="number" min="0" max="20" value="0"></label>
-                  <label class="field">Winner role<select name="winnerRoleId" data-role-select></select><small>Given to winners if CorePanel's role is high enough.</small></label>
+                  <label class="field">Winner role<select name="winnerRoleId" data-role-select></select><small>Given to winners if Bot Dashboard's role is high enough.</small></label>
                   <label class="field span-2">Winner DM message<textarea name="winnerDmMessage" rows="3" maxlength="1000" placeholder="You won {prize} in {server}!"></textarea><small>Uses {user}, {user_id}, {prize}, and {giveaway_id}. Leave blank to avoid DMs.</small></label>
                 </div>
               </details>
@@ -739,7 +739,7 @@
             <div>
               <span class="badge">Server audit feed</span>
               <h2>Server logs</h2>
-              <p>Choose what CorePanel records. Normal messages being sent are never logged.</p>
+              <p>Choose what Bot Dashboard records. Normal messages being sent are never logged.</p>
             </div>
           </div>
           <form id="logging-form" class="settings-layout logging-layout">
@@ -752,7 +752,7 @@
                 <label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
               </div>
               <div class="form-grid">
-                <label class="field">Logging channel<select name="channelId" data-channel-select="text"></select><small>CorePanel needs View Channel, Send Messages, and Embed Links here.</small><span class="field-error" data-error-for="channelId"></span></label>
+                <label class="field">Logging channel<select name="channelId" data-channel-select="text"></select><small>Bot Dashboard needs View Channel, Send Messages, and Embed Links here.</small><span class="field-error" data-error-for="channelId"></span></label>
                 <div class="logging-assurance">
                   <strong>Privacy boundary</strong>
                   <span>Message edit and delete events include available message content. Ordinary message sends are not collected or copied.</span>
@@ -857,9 +857,9 @@
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">01</span><h3>Brand identity</h3><p>Used as reusable defaults across server messages.</p></div></div>
                 <div class="form-grid">
-                  <label class="field">Bot nickname in this server<input name="serverName" required maxlength="32" value="CorePanel"><small>Saving updates CorePanel's Discord nickname in the selected server. Discord requires Change Nickname permission.</small><span class="field-error" data-error-for="serverName"></span></label>
+                  <label class="field">Bot nickname in this server<input name="serverName" required maxlength="32" value="Bot Dashboard"><small>Saving updates Bot Dashboard's Discord nickname in the selected server. Discord requires Change Nickname permission.</small><span class="field-error" data-error-for="serverName"></span></label>
                   <label class="field">Dashboard accent<div class="color-control"><input name="accentColor" type="color" value="#c58b4b"><input name="accentColorText" value="#C58B4B" maxlength="7"></div><small>Updates dashboard highlights for the active server.</small></label>
-                  <label class="field">Footer text<input name="footerText" maxlength="200" placeholder="Powered by CorePanel"></label>
+                  <label class="field">Footer text<input name="footerText" maxlength="200" placeholder="Powered by Bot Dashboard"></label>
                   <label class="field">Ticket button style<select name="ticketButtonStyle"><option value="secondary">Neutral gray</option><option value="primary">Discord blue</option><option value="success">Success green</option></select><small>Used by ticket panels displayed as buttons.</small></label>
                   <label class="field span-2">Embed icon<div class="media-control"><input name="embedIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedIconUrl">Upload</button></div><span class="field-error" data-error-for="embedIconUrl"></span></label>
                 </div>
@@ -920,7 +920,7 @@
               </section>
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">02</span><h3>Auto Roles</h3><p>Assign selected roles independently from welcome messages.</p></div><label class="switch"><input name="autoRolesEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
-                <label class="field">Roles assigned on join<select name="autoRoleIds" data-role-select multiple size="5"></select><small>CorePanel needs Manage Roles and must sit above every selected role.</small><span class="field-error" data-error-for="autoRoleIds"></span></label>
+                <label class="field">Roles assigned on join<select name="autoRoleIds" data-role-select multiple size="5"></select><small>Bot Dashboard needs Manage Roles and must sit above every selected role.</small><span class="field-error" data-error-for="autoRoleIds"></span></label>
               </section>
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">03</span><h3>Channel message</h3><p>Public welcome in the chosen channel.</p></div></div>
@@ -1062,13 +1062,13 @@
                     </div>
                     <div class="privacy-disclosure">
                       <strong>Privacy-first verification</strong>
-                      <p>CorePanel confirms Discord identity and server membership. Optional VPN checks are disclosed. Raw IPs and browser/device fingerprints are not stored.</p>
+                      <p>Bot Dashboard confirms Discord identity and server membership. Optional VPN checks are disclosed. Raw IPs and browser/device fingerprints are not stored.</p>
                     </div>
                     <div id="verification-provider-status" class="provider-status-grid"></div>
                     <div class="form-grid">
                       <label class="field">Verified / community role<select name="verifiedRoleId" data-role-select></select><small>Only assigned after verification passes. The bot role must be above it.</small><span class="field-error" data-error-for="verifiedRoleId"></span></label>
                       <label class="field">Existing verification channel<select name="verificationChannelId" data-channel-select="text"></select><small>Choose one, or leave blank and enable automatic creation.</small><span class="field-error" data-error-for="verificationChannelId"></span></label>
-                      <label class="field">New channel name<input name="verificationChannelName" maxlength="100" value="verify"><small>Used only if CorePanel creates the channel.</small><span class="field-error" data-error-for="verificationChannelName"></span></label>
+                      <label class="field">New channel name<input name="verificationChannelName" maxlength="100" value="verify"><small>Used only if Bot Dashboard creates the channel.</small><span class="field-error" data-error-for="verificationChannelName"></span></label>
                       <label class="field">Verification log channel<select name="logChannelId" data-channel-select="text"></select><small>Receives setup, pass, fail, and role assignment events.</small><span class="field-error" data-error-for="logChannelId"></span></label>
                     </div>
                   </section>
@@ -1089,7 +1089,7 @@
                     <div class="section-title"><div><span class="step">03</span><h3>Unverified visibility</h3><p>Hidden selections override public selections. Existing staff and user overwrites are preserved.</p></div></div>
                     <div class="inline-alert warning">
                       <strong>Permission changes affect your live Discord server.</strong>
-                      Run the dry preview first. CorePanel backs up every overwrite it changes so safe disable can restore it later.
+                      Run the dry preview first. Bot Dashboard backs up every overwrite it changes so safe disable can restore it later.
                     </div>
                     <div class="form-grid">
                       <label class="field">Public categories<select name="publicCategoryIds" data-channel-select="category" multiple size="7"></select><small>Unverified users can see these categories and synced children.</small></label>
@@ -1322,7 +1322,7 @@
 
         <section class="page" id="page-docs">
           <div class="page-intro">
-            <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run CorePanel, from first setup to troubleshooting.</p></div>
+            <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run Bot Dashboard, from first setup to troubleshooting.</p></div>
             <div class="topbar-actions"><button type="button" id="docs-search-trigger" class="docs-search-trigger"><span>Search docs</span><kbd>⌘K</kbd></button></div>
           </div>
           <section class="docs-hero surface">
@@ -1404,7 +1404,7 @@
               <article class="surface docs-section" id="docs-getting-started">
                 <div class="section-title"><div><span class="step">01</span><h3>Getting Started</h3></div></div>
                 <div class="docs-body">
-                  <p>CorePanel is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.</p>
+                  <p>Bot Dashboard is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.</p>
                   <h4>Quick setup</h4>
                   <ol>
                     <li>Install dependencies: <code>pnpm install</code></li>
@@ -1748,7 +1748,7 @@
                   <h4>Commands not appearing in Discord</h4>
                   <ul>
                     <li>Run <code>pnpm deploy:commands</code> after any command definition change.</li>
-                    <li>The deploy script registers commands in every server where CorePanel is installed.</li>
+                    <li>The deploy script registers commands in every server where Bot Dashboard is installed.</li>
                     <li>Make sure the bot was invited with the <code>applications.commands</code> scope.</li>
                   </ul>
                   <h4>Role actions failing</h4>

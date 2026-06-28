@@ -3,7 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadBaseConfig } from "./config.js";
 
-const KEY_FILE = ".corepanel/secret-key";
+const KEY_FILE = ".bot-dashboard/secret-key";
+const LEGACY_KEY_FILE = ".corepanel/secret-key";
 
 export function secretStorageStatus(): {
   ready: boolean;
@@ -11,7 +12,7 @@ export function secretStorageStatus(): {
   message: string;
 } {
   const config = loadBaseConfig();
-  if (config.COREPANEL_SECRET_KEY) {
+  if (config.SETUP_SECRET_KEY || config.COREPANEL_SECRET_KEY) {
     return {
       ready: true,
       source: "environment",
@@ -22,25 +23,28 @@ export function secretStorageStatus(): {
     return {
       ready: true,
       source: "local-file",
-      message: "A local development encryption key will be stored in .corepanel/secret-key."
+      message: "A local development encryption key will be stored in .bot-dashboard/secret-key."
     };
   }
   return {
     ready: false,
     source: "missing",
-    message: "Set COREPANEL_SECRET_KEY in Railway before saving Discord bot tokens."
+    message: "Set SETUP_SECRET_KEY in Railway before saving Discord bot tokens."
   };
 }
 
 function loadSecretKeyMaterial(): string {
   const config = loadBaseConfig();
+  if (config.SETUP_SECRET_KEY) return config.SETUP_SECRET_KEY;
   if (config.COREPANEL_SECRET_KEY) return config.COREPANEL_SECRET_KEY;
   if (config.NODE_ENV === "production") {
-    throw new Error("COREPANEL_SECRET_KEY is required before storing encrypted setup secrets in production.");
+    throw new Error("SETUP_SECRET_KEY is required before storing encrypted setup secrets in production.");
   }
 
   const keyPath = path.join(config.projectRoot, KEY_FILE);
   if (fs.existsSync(keyPath)) return fs.readFileSync(keyPath, "utf8").trim();
+  const legacyKeyPath = path.join(config.projectRoot, LEGACY_KEY_FILE);
+  if (fs.existsSync(legacyKeyPath)) return fs.readFileSync(legacyKeyPath, "utf8").trim();
   const generated = crypto.randomBytes(32).toString("base64url");
   fs.mkdirSync(path.dirname(keyPath), { recursive: true, mode: 0o700 });
   fs.writeFileSync(keyPath, generated, { mode: 0o600 });

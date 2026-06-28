@@ -1,7 +1,7 @@
 const grid = document.querySelector("#server-grid");
 const status = document.querySelector("#server-select-status");
 const refresh = document.querySelector("#refresh-servers");
-const appBrand = { dashboardName: "CorePanel", botDisplayName: "CorePanel Bot" };
+const appBrand = { dashboardName: "Bot Dashboard", botDisplayName: "Discord Bot" };
 
 async function request(path, options = {}) {
   let response;
@@ -45,7 +45,7 @@ async function selectGuild(guildId, button) {
       method: "POST",
       body: JSON.stringify({ guildId })
     });
-    window.location.replace(result.next || "/");
+    window.location.replace(result.next || "/dashboard");
   } catch (error) {
     status.textContent = error.message;
     status.classList.add("error");
@@ -63,7 +63,7 @@ async function loadGuilds() {
     const data = await request("/guilds");
     if (data.autoSelected && data.guilds.length === 1) {
       status.textContent = "One server found. Opening its dashboard...";
-      window.location.replace("/");
+      window.location.replace("/dashboard");
       return;
     }
     status.textContent = `${data.guilds.length} server${data.guilds.length === 1 ? "" : "s"} available`;

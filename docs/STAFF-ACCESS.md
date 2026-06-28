@@ -146,7 +146,7 @@ After deployment:
 2. Open the `https://...railway.app` URL.
 3. Confirm the login page appears.
 4. Give the URL and dashboard password to trusted staff.
-5. Keep the bot token only in CorePanel setup storage, Railway Variables, or your private local `.env`.
+5. Keep the bot token only in Bot Dashboard setup storage, Railway Variables, or your private local `.env`.
 
 Use **one Railway application replica** for this MVP. Multiple replicas would create duplicate Discord bot processes and would not share in-memory sessions or cooldowns.
 

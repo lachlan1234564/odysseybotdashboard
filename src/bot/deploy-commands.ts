@@ -4,14 +4,14 @@ import { assertUniqueCommandNames, commandData } from "./commands.js";
 
 const config = await getRuntimeAppConfig();
 if (!config.discordToken || !config.discordClientId) {
-  throw new Error("CorePanel setup is incomplete. Save the Discord bot token and client ID in the dashboard setup flow before deploying commands.");
+  throw new Error("Bot Dashboard setup is incomplete. Save the Discord bot token and client ID in the dashboard setup flow before deploying commands.");
 }
 const rest = new REST({ version: "10" }).setToken(config.discordToken);
 assertUniqueCommandNames();
 
 const guilds = await rest.get(Routes.userGuilds()) as Array<{ id: string }>;
 if (!guilds.length) {
-  throw new Error("CorePanel is not installed in any Discord servers.");
+  throw new Error("Bot Dashboard is not installed in any Discord servers.");
 }
 
 console.log(`Deploying ${commandData.length} slash commands to ${guilds.length} server(s)...`);

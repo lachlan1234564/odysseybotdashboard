@@ -4,7 +4,10 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-if (process.env.COREPANEL_DISABLE_DOTENV !== "true") {
+if (
+  process.env.DASHBOARD_DISABLE_DOTENV !== "true"
+  && process.env.COREPANEL_DISABLE_DOTENV !== "true"
+) {
   dotenv.config({ path: path.join(projectRoot, ".env"), quiet: true });
 }
 
@@ -17,6 +20,7 @@ const baseSchema = z.object({
   UPLOADS_DIR: z.string().default("./uploads"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   TRUST_PROXY: z.enum(["true", "false"]).default("false"),
+  SETUP_SECRET_KEY: z.string().min(16).optional(),
   COREPANEL_SECRET_KEY: z.string().min(16).optional(),
   DASHBOARD_SESSION_SECRET: z.string().min(16).optional(),
   PUBLIC_BASE_URL: z.string().url().optional(),

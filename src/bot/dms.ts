@@ -167,8 +167,8 @@ export async function handleDmCommand(interaction: ChatInputCommandInteraction):
   await logDmAction(interaction.guild, {
     title: sent ? "Staff DM Sent" : "Staff DM Failed",
     description: sent
-      ? "A staff member sent a one-user DM through CorePanel."
-      : "CorePanel could not send the staff DM. The user may have DMs closed.",
+      ? "A staff member sent a one-user DM through Bot Dashboard."
+      : "Bot Dashboard could not send the staff DM. The user may have DMs closed.",
     targetUserId: user.id,
     executorId: interaction.user.id,
     status: sent ? "sent" : "failed",

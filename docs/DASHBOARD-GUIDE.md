@@ -542,11 +542,11 @@ Appearance sets fallback branding used when a specific panel, type, or template 
 | Field | What It Does | When to Use It | What Happens If Blank |
 |-------|--------------|----------------|----------------------|
 | **Server / bot name** | Displayed in footers and logs. | Always set this. | Falls back to generic text. |
-| **Dashboard accent** | Changes dashboard highlights for the selected server. | Match the dashboard to your server brand. | Uses the CorePanel default accent. |
+| **Dashboard accent** | Changes dashboard highlights for the selected server. | Match the dashboard to your server brand. | Uses the Bot Dashboard default accent. |
 | **Ticket button style** | Chooses neutral gray, Discord blue, or green ticket buttons. | Use when a panel is displayed as buttons. | Uses neutral gray. |
 | **Footer text** | Default footer for embeds. | Set a branded footer. | No footer appears unless specified elsewhere. |
 | **Embed icon** | Small icon in embed footers. | Upload your server logo. | No icon appears. |
-| **Ticket panel title and description** | Fallback copy for ticket entry messages. | Set a consistent support prompt. | Uses CorePanel defaults. |
+| **Ticket panel title and description** | Fallback copy for ticket entry messages. | Set a consistent support prompt. | Uses Bot Dashboard defaults. |
 | **Ticket panel color and banner** | Fallback color and large image for ticket entry messages. | Set branded ticket media. | Uses the default color and no banner. |
 | **Default announcement color** | Fallback color for announcements. | Set a brand color. | Uses `#5865F2` (Discord blurple). |
 | **Default announcement image/thumbnail** | Fallback media for announcements. | Set branded images. | No image/thumbnail appears unless specified in the template. |

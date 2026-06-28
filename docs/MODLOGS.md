@@ -1,6 +1,6 @@
 # Modlogs
 
-CorePanel writes moderation, ticket, and security activity to Discord channels and stores structured records in the database where supported.
+Bot Dashboard writes moderation, ticket, and security activity to Discord channels and stores structured records in the database where supported.
 
 ## Configure channels
 

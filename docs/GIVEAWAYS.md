@@ -36,9 +36,9 @@ Giveaways let staff post a Discord embed with an entry button, store entries in 
 
 ## Winner actions
 
-- **Winner role:** CorePanel will try to give the selected role to each winner. The bot role must be above that role.
-- **Winner DM message:** CorePanel will DM winners if winner DMs are enabled in **Direct Messages** and the user allows DMs from server members. Closed DMs are logged safely and do not break the giveaway.
-- **Default winner DM:** If a giveaway does not have its own winner DM message, CorePanel uses the default message from **Direct Messages**.
+- **Winner role:** Bot Dashboard will try to give the selected role to each winner. The bot role must be above that role.
+- **Winner DM message:** Bot Dashboard will DM winners if winner DMs are enabled in **Direct Messages** and the user allows DMs from server members. Closed DMs are logged safely and do not break the giveaway.
+- **Default winner DM:** If a giveaway does not have its own winner DM message, Bot Dashboard uses the default message from **Direct Messages**.
 
 Supported winner DM placeholders:
 
@@ -74,13 +74,13 @@ Slash command giveaways publish immediately. Use the dashboard when you need sch
 
 ## Required permissions
 
-CorePanel needs these permissions in the giveaway channel:
+Bot Dashboard needs these permissions in the giveaway channel:
 
 - View Channel
 - Send Messages
 - Embed Links
 
-For winner roles, CorePanel also needs:
+For winner roles, Bot Dashboard also needs:
 
 - Manage Roles
 - A bot role higher than the winner role

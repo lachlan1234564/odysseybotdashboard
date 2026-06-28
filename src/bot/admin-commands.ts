@@ -101,7 +101,7 @@ export async function handleBotStatus(interaction: ChatInputCommandInteraction):
 
   const embed = new EmbedBuilder()
     .setColor(0x5865F2)
-    .setTitle("CorePanel status")
+    .setTitle("Bot Dashboard status")
     .addFields(
       { name: "Uptime", value: `${hours}h ${minutes}m`, inline: true },
       { name: "Latency", value: `${client.ws.ping}ms`, inline: true },
@@ -110,7 +110,7 @@ export async function handleBotStatus(interaction: ChatInputCommandInteraction):
       { name: "Discord.js", value: `v14`, inline: true },
       { name: "Node.js", value: process.version, inline: true }
     )
-    .setFooter({ text: "CorePanel diagnostics" });
+    .setFooter({ text: "Bot Dashboard diagnostics" });
 
   await replyEphemeral(interaction, { embeds: [embed] });
 }

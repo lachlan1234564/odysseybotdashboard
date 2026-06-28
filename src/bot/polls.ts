@@ -116,7 +116,7 @@ export async function publishPollMessage(
     status: "active",
     startsAt: poll.startsAt ?? new Date().toISOString()
   }))!;
-  await sendPollLog(guild, updated, "Poll Started", "A poll was published from CorePanel.").catch(() => undefined);
+  await sendPollLog(guild, updated, "Poll Started", "A poll was published from Bot Dashboard.").catch(() => undefined);
   return updated;
 }
 

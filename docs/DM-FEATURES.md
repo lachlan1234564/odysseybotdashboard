@@ -1,6 +1,6 @@
 # Direct message features
 
-CorePanel can send direct messages in three controlled situations:
+Bot Dashboard can send direct messages in three controlled situations:
 
 - Staff use `/dm` to message one member at a time.
 - Moderation actions can DM the affected user.
@@ -34,7 +34,7 @@ Only trusted staff with dashboard/admin permission checks and Manage Server or A
 
 ## Privacy and logging
 
-By default, CorePanel logs that a staff DM was attempted, who sent it, who received it, and whether it was sent successfully.
+By default, Bot Dashboard logs that a staff DM was attempted, who sent it, who received it, and whether it was sent successfully.
 
 The message body is not copied into logs unless **Log message preview** is enabled. Only enable that if your log channel is private and your staff understand that DM text will be visible there.
 
@@ -49,7 +49,7 @@ Moderation DMs can be enabled for:
 - Unbans
 - Manual moderation cases
 
-For kicks and bans, CorePanel attempts the DM before removing the user when possible.
+For kicks and bans, Bot Dashboard attempts the DM before removing the user when possible.
 
 Useful template variables:
 
@@ -62,7 +62,7 @@ Useful template variables:
 - `{moderator}`
 - `{appeal}`
 
-If a user has DMs closed, the moderation action still continues. CorePanel logs the DM failure safely.
+If a user has DMs closed, the moderation action still continues. Bot Dashboard logs the DM failure safely.
 
 ## Giveaway winner DMs
 

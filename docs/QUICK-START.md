@@ -1,6 +1,6 @@
 # Quick Start
 
-Use this checklist to download CorePanel from GitHub and run it locally for the first time.
+Use this checklist to download Bot Dashboard from GitHub and run it locally for the first time.
 
 ## 1. Download the project
 
@@ -19,7 +19,7 @@ cd ~/Desktop/rapid-discord-bot
 
 ## 2. Start with dashboard setup
 
-CorePanel no longer needs a local `.env` file for normal first-run setup. The dashboard can start without a bot token, then guide you through setup at `/setup`.
+Bot Dashboard no longer needs a local `.env` file for normal first-run setup. The dashboard can start without a bot token, then guide you through setup at `/setup`.
 
 Only create `.env` if you want to override infrastructure values locally:
 
@@ -53,7 +53,8 @@ pnpm bot
 pnpm dashboard
 ```
 
-Open `http://127.0.0.1:3210/setup`, paste your Discord bot token and application ID, then create the dashboard password.
+Open `http://127.0.0.1:3210/` for the public Get Started page, then continue to `/setup`.
+Create your Discord application/bot in Discord Developer Portal, paste the bot token and application ID, copy the generated invite link, invite the bot to your server, then create the dashboard password.
 
 After setup is saved, stop and restart `pnpm dev` so the bot process logs in with the stored token. Then register slash commands:
 

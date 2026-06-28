@@ -1,6 +1,6 @@
 # Getting Started
 
-CorePanel is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.
+Bot Dashboard is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.
 
 ## Quick setup
 
@@ -18,7 +18,7 @@ CorePanel is a self-hosted Discord bot with a web dashboard. You create commands
 - Application/client ID — from Discord Developer Portal
 - Dashboard password — created on `/setup`
 - `DATABASE_URL` — optional locally; defaults to `file:./data/bot.db`
-- `COREPANEL_SECRET_KEY` — required on Railway to encrypt stored secrets
+- `SETUP_SECRET_KEY` — required on Railway to encrypt stored secrets
 - `TRUST_PROXY` — set to `true` behind Railway, Cloudflare Tunnel, nginx, or another reverse proxy
 
 Optional env compatibility values still work, but the dashboard setup wizard is the recommended path.

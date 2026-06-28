@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>CorePanel Setup</title>
+    <title>Bot Dashboard Setup</title>
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css">
     <script src="/setup.js" defer></script>
@@ -13,10 +13,11 @@
       <section class="setup-hero surface">
         <div>
           <span class="badge">First-run setup</span>
-          <h1>Set up CorePanel</h1>
+          <h1>Connect your Discord bot</h1>
           <p>
-            Connect your Discord bot, choose your dashboard name, and create the first admin password.
-            Secrets are saved server-side only and are never shown again after setup.
+            This dashboard does not create a Discord bot account for you. You create the application in
+            Discord Developer Portal, then paste its token and application ID here. Secrets are saved
+            server-side only and are never shown again after setup.
           </p>
         </div>
         <button type="button" class="theme-toggle" data-theme-toggle aria-label="Switch color theme">
@@ -32,9 +33,38 @@
         <div class="setup-progress" aria-label="Setup steps">
           <span><b>1</b> Brand</span>
           <span><b>2</b> Discord app</span>
-          <span><b>3</b> Access</span>
-          <span><b>4</b> Save</span>
+          <span><b>3</b> Invite</span>
+          <span><b>4</b> Access</span>
+          <span><b>5</b> Save</span>
         </div>
+
+        <section class="setup-section setup-guide">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Before you paste anything</p>
+              <h2>Create your bot in Discord first</h2>
+              <p>Open Discord Developer Portal in another tab, create an application, add a bot user, and copy the values below.</p>
+            </div>
+          </div>
+          <div class="setup-guide-grid">
+            <article>
+              <strong>1. Create the application</strong>
+              <p>Go to Discord Developer Portal, click <b>New Application</b>, then open <b>General Information</b>.</p>
+            </article>
+            <article>
+              <strong>2. Copy the application ID</strong>
+              <p>The <b>Application ID</b> is public enough to use in invite links. Paste it into Client/Application ID.</p>
+            </article>
+            <article>
+              <strong>3. Create or reset the bot token</strong>
+              <p>Open <b>Bot</b>, click <b>Reset Token</b> or copy the existing token, then paste it once below.</p>
+            </article>
+            <article>
+              <strong>4. Invite the bot</strong>
+              <p>After the client ID is entered, this page generates a safe invite link with bot and slash-command scopes.</p>
+            </article>
+          </div>
+        </section>
 
         <section class="setup-section">
           <div class="section-title">
@@ -46,13 +76,13 @@
           </div>
           <div class="form-grid two">
             <label class="field">Dashboard name
-              <input name="dashboardName" maxlength="40" value="CorePanel" required>
-              <small>Shown on the login page, sidebar, and browser title.</small>
+              <input name="dashboardName" maxlength="40" value="Bot Dashboard" required>
+              <small>The public/admin name shown on the login page, sidebar, browser title, and docs.</small>
               <span class="field-error" data-error-for="dashboardName"></span>
             </label>
             <label class="field">Bot display name
-              <input name="botDisplayName" maxlength="40" value="CorePanel Bot" required>
-              <small>Used in setup docs and default preview copy. Discord username changes still happen in Discord.</small>
+              <input name="botDisplayName" maxlength="40" value="Discord Bot" required>
+              <small>Used in dashboard previews and default bot-facing copy. The actual Discord username is changed in Discord.</small>
               <span class="field-error" data-error-for="botDisplayName"></span>
             </label>
             <label class="field">Support/server name
@@ -74,12 +104,12 @@
           <div class="form-grid two">
             <label class="field field-full">Discord bot token
               <input name="discordToken" type="password" required autocomplete="new-password" spellcheck="false" placeholder="Paste the bot token once">
-              <small>Stored encrypted server-side only. You will only see a masked version later.</small>
+              <small>Discord Developer Portal → Bot → Token. Stored encrypted server-side only; you will only see a masked version later.</small>
               <span class="field-error" data-error-for="discordToken"></span>
             </label>
             <label class="field">Client/Application ID
               <input name="discordClientId" inputmode="numeric" required placeholder="123456789012345678">
-              <small>Discord Developer Portal → General Information → Application ID.</small>
+              <small>Discord Developer Portal → General Information → Application ID. This is used to generate the invite link.</small>
               <span class="field-error" data-error-for="discordClientId"></span>
             </label>
             <label class="field">Client secret
@@ -89,9 +119,46 @@
             </label>
             <label class="field">Preferred server ID
               <input name="discordGuildId" inputmode="numeric" placeholder="Optional">
-              <small>Optional first server preference. CorePanel still discovers every server where the bot is installed.</small>
+              <small>Optional first server preference. The dashboard still discovers every server where the bot is installed.</small>
               <span class="field-error" data-error-for="discordGuildId"></span>
             </label>
+          </div>
+        </section>
+
+        <section class="setup-section">
+          <div class="section-title">
+            <div>
+              <p class="eyebrow">Invite link</p>
+              <h2>Invite your bot to Discord</h2>
+              <p>The invite link is generated from the client/application ID only. Your bot token is never placed in the URL.</p>
+            </div>
+          </div>
+          <div class="invite-builder">
+            <div class="form-grid two">
+              <label class="field">Permission preset
+                <select id="invite-permissions-mode">
+                  <option value="recommended">Recommended feature permissions</option>
+                  <option value="admin">Administrator (simple, broad access)</option>
+                  <option value="custom">Custom permission integer</option>
+                </select>
+                <small>Recommended is safer than Administrator and covers tickets, logs, moderation, roles, polls, and giveaways.</small>
+              </label>
+              <label class="field" id="custom-permissions-field">
+                Custom permission integer
+                <input id="invite-custom-permissions" inputmode="numeric" placeholder="1494917442774">
+                <small>Use this only if you know Discord permission integers.</small>
+              </label>
+            </div>
+            <div class="invite-output">
+              <label class="field field-full">Generated invite link
+                <input id="invite-link" readonly placeholder="Enter the client/application ID to generate an invite link">
+                <small>Open this link after saving setup or copy it now and invite the bot to your server.</small>
+              </label>
+              <div class="button-row">
+                <button type="button" id="copy-invite-link" class="secondary-button compact">Copy invite link</button>
+                <a id="open-invite-link" class="secondary-button compact disabled-link" href="#" target="_blank" rel="noreferrer">Open invite link</a>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -146,7 +213,10 @@
 
         <div class="setup-actions">
           <p id="setup-message" class="form-save-status" role="status">Complete the required fields, then save setup.</p>
-          <button type="submit">Save setup</button>
+          <div class="button-row">
+            <a class="secondary-button compact" href="/">Back home</a>
+            <button type="submit">Save setup</button>
+          </div>
         </div>
       </form>
     </main>

@@ -21,7 +21,7 @@ export const migrations = [
 
       CREATE TABLE IF NOT EXISTS branding (
         guild_id TEXT PRIMARY KEY,
-        server_name TEXT NOT NULL DEFAULT 'CorePanel',
+        server_name TEXT NOT NULL DEFAULT 'Bot Dashboard',
         footer_text TEXT NOT NULL DEFAULT '',
         ticket_panel_title TEXT NOT NULL DEFAULT 'Support Tickets',
         ticket_panel_description TEXT NOT NULL DEFAULT 'Choose a ticket type below to contact the team.',
@@ -418,7 +418,7 @@ export const migrations = [
       ADD COLUMN output_mode TEXT NOT NULL DEFAULT 'embed';
 
       UPDATE branding
-      SET server_name = 'CorePanel'
+      SET server_name = 'Bot Dashboard'
       WHERE server_name = 'Rapid Bot';
     `
   },
@@ -806,8 +806,8 @@ export const migrations = [
     sql: `
       CREATE TABLE IF NOT EXISTS app_setup (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        dashboard_name TEXT NOT NULL DEFAULT 'CorePanel',
-        bot_display_name TEXT NOT NULL DEFAULT 'CorePanel Bot',
+        dashboard_name TEXT NOT NULL DEFAULT 'Bot Dashboard',
+        bot_display_name TEXT NOT NULL DEFAULT 'Discord Bot',
         support_server_name TEXT NOT NULL DEFAULT '',
         discord_client_id TEXT NOT NULL DEFAULT '',
         discord_client_secret_encrypted TEXT NOT NULL DEFAULT '',
@@ -827,6 +827,22 @@ export const migrations = [
       INSERT INTO app_setup (id)
       VALUES (1)
       ON CONFLICT (id) DO NOTHING;
+    `
+  },
+  {
+    version: 25,
+    sql: `
+      UPDATE app_setup
+      SET dashboard_name = 'Bot Dashboard'
+      WHERE dashboard_name = 'CorePanel';
+
+      UPDATE app_setup
+      SET bot_display_name = 'Discord Bot'
+      WHERE bot_display_name = 'CorePanel Bot';
+
+      UPDATE branding
+      SET server_name = 'Bot Dashboard'
+      WHERE server_name = 'CorePanel';
     `
   }
 ] as const;

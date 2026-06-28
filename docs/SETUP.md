@@ -2,7 +2,7 @@
 
 This guide walks you through getting the bot running locally and then deploying it to Railway for production use. It is written for first-time server owners—you do not need prior Discord bot experience.
 
-> **Current setup flow:** CorePanel can start without a local `.env` bot token. For normal local or Railway setup, start the dashboard, open `/setup`, paste the Discord bot token/client ID there, and create the dashboard password. `.env` is still supported for infrastructure values and legacy overrides, but it is not the only setup path.
+> **Current setup flow:** Bot Dashboard can start without a local `.env` bot token. For normal local or Railway setup, start the dashboard, open `/`, click **Get Started**, paste the Discord bot token/client ID into `/setup`, generate the invite link, invite the bot, and create the dashboard password. `.env` is still supported for infrastructure values and legacy overrides, but it is not the only setup path.
 
 ---
 
@@ -74,7 +74,7 @@ A Discord application is the container that holds your bot. You create it once i
 
 1. Open [https://discord.com/developers/applications](https://discord.com/developers/applications) in your browser.
 2. Click **New Application** in the top-right corner.
-3. Give it a name, such as `CorePanel`, and click **Create**.
+3. Give it a name, such as `Bot Dashboard`, and click **Create**.
 4. You are now on the **General Information** page.
 5. Copy the **Application ID** (a long number near the top). This is your `DISCORD_CLIENT_ID`.
 6. On the left sidebar, click **Bot**.
@@ -85,6 +85,7 @@ A Discord application is the container that holds your bot. You create it once i
    - **Message Content Intent** for dashboard-configured Auto Mod rules.
 
 > **Security warning:** Your bot token is like a password. Anyone who has it can control your bot. Never paste it into chat, screenshots, or public repositories. Store it only in the hosted `/setup` flow or private Railway/local environment variables.
+The setup invite link uses only the application ID and permissions. It never includes the token.
 
 ---
 
@@ -114,6 +115,8 @@ The bot must be a member of your Discord server before it can do anything.
 5. Copy the generated URL at the bottom of the page.
 6. Paste that URL into a new browser tab and follow the prompts to add the bot to your server.
 
+The setup page can generate this URL for you after you paste the application ID.
+
 > **Important:** After the bot joins your server, go to **Server Settings > Roles**, find the bot's role (it usually has the same name as your application), and drag it above any roles the bot needs to manage. For example, if the bot should be able to time out members with the "Member" role, the bot's role must be higher in the list than "Member."
 
 ---
@@ -129,7 +132,7 @@ Your server has a unique ID number that the bot needs to know.
 5. Right-click your server icon in the left sidebar.
 6. Click **Copy Server ID**.
 
-This long number can be used as the optional `DISCORD_GUILD_ID` preference. CorePanel still discovers and manages every server where it is installed.
+This long number can be used as the optional `DISCORD_GUILD_ID` preference. Bot Dashboard still discovers and manages every server where it is installed.
 
 ---
 
@@ -159,7 +162,7 @@ pnpm setup
 
 ## Step 6: Optional `.env` File
 
-CorePanel's normal setup now happens in the dashboard at `/setup`. The `.env` file is optional for local development unless you need custom database, port, proxy, upload, or compatibility settings. The repository includes an example file called `.env.example`.
+Bot Dashboard's normal setup now happens in the dashboard at `/setup`. The `.env` file is optional for local development unless you need custom database, port, proxy, upload, or compatibility settings. The repository includes an example file called `.env.example`.
 
 1. If you need custom local settings, copy the example file:
 
@@ -194,7 +197,7 @@ NODE_ENV=development
 
 | Variable | Required? | What It Does | Example |
 |----------|-----------|--------------|---------|
-| `COREPANEL_SECRET_KEY` | Production | Encrypts stored setup secrets. Required on Railway. | generated secret |
+| `SETUP_SECRET_KEY` | Production | Encrypts stored setup secrets. Required on Railway. | generated secret |
 | `DISCORD_TOKEN` | Setup or env override | The secret token from Developer Portal > Bot | `MTAx...` |
 | `DISCORD_CLIENT_ID` | Setup or env override | The Application ID from Developer Portal > General Information | `1234567890123456789` |
 | `DISCORD_CLIENT_SECRET` | Verification only | OAuth client secret used by the optional member verification flow. Never share it. | — |
@@ -257,7 +260,7 @@ pnpm bot
 Keep this terminal window open. A successful login prints something like:
 
 ```
-CorePanel connected to Discord.
+Bot Dashboard connected to Discord.
 ```
 
 Test the bot in Discord by typing:

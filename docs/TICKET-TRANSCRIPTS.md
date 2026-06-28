@@ -33,7 +33,7 @@ The database transcript is created before the ticket channel is deleted, even if
 
 - A clear **Ticket Transcript Saved** title.
 - Saved status.
-- Ticket name, channel ID, and CorePanel ticket number.
+- Ticket name, channel ID, and Bot Dashboard ticket number.
 - Ticket requester and the person who closed it.
 - Ticket category, open time, close time, and close reason.
 - Number of exported messages.

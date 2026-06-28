@@ -155,7 +155,7 @@ const uploadsPath = resolveUploadsPath(config.UPLOADS_DIR);
 fs.mkdirSync(uploadsPath, { recursive: true });
 const docsPath = path.join(config.projectRoot, "docs");
 const docsTopics: readonly DocsTopicDefinition[] = [
-  { slug: "introduction", title: "Introduction", description: "What CorePanel does, what the dashboard controls, and how the pieces fit together.", files: ["GETTING-STARTED.md", "QUICK-START.md"], path: "Overview → Introduction", category: "Overview", aliases: ["start here", "what is corepanel bot", "overview"] },
+  { slug: "introduction", title: "Introduction", description: "What Bot Dashboard does, what the dashboard controls, and how the pieces fit together.", files: ["GETTING-STARTED.md", "QUICK-START.md"], path: "Overview → Introduction", category: "Overview", aliases: ["start here", "what is bot dashboard", "discord bot dashboard", "overview"] },
   { slug: "dashboard-guide", title: "Dashboard Overview", description: "A guided tour of the current dashboard pages and safe testing workflow.", files: ["DASHBOARD-GUIDE.md"], path: "Overview → Dashboard overview", category: "Overview", aliases: ["dashboard overview", "dashboard guide", "pages"] },
   { slug: "features", title: "Features", description: "A plain-language map of the bot modules and where to configure them.", files: ["DASHBOARD-GUIDE.md", "SECURITY-OVERVIEW.md"], path: "Overview → Features", category: "Overview", aliases: ["feature overview", "what can the bot do"], defaultHash: "dashboard-pages-overview" },
 
@@ -287,8 +287,8 @@ const setupSecret = z.string()
   .max(256, "That token looks too long.")
   .refine((value) => !/\s/.test(value), "Tokens cannot contain spaces or line breaks.");
 const setupSchema = z.object({
-  dashboardName: z.string().trim().min(2).max(40).default("CorePanel"),
-  botDisplayName: z.string().trim().min(2).max(40).default("CorePanel Bot"),
+  dashboardName: z.string().trim().min(2).max(40).default("Bot Dashboard"),
+  botDisplayName: z.string().trim().min(2).max(40).default("Discord Bot"),
   supportServerName: z.string().trim().max(60).default(""),
   discordToken: setupSecret,
   discordClientId: z.string().trim().regex(/^\d{16,22}$/, "Paste the Discord application/client ID."),
@@ -316,7 +316,7 @@ const setupSchema = z.object({
   }
 });
 const replaceTokenSchema = z.object({ discordToken: setupSecret });
-const resetSetupSchema = z.object({ confirm: z.literal("RESET COREPANEL") });
+const resetSetupSchema = z.object({ confirm: z.literal("RESET SETUP") });
 
 const settingsSchema = z.object({
   modLogChannelId: optionalId,
@@ -797,7 +797,7 @@ function dashboardComponentEmoji(value: string) {
 
 function getVerificationHmacSecret(): string {
   return crypto.createHash("sha256")
-    .update(`${runtimeConfig.dashboardPasswordHash || runtimeConfig.dashboardPassword || "corepanel"}:${runtimeConfig.discordClientId || "setup"}`)
+    .update(`${runtimeConfig.dashboardPasswordHash || runtimeConfig.dashboardPassword || "bot-dashboard"}:${runtimeConfig.discordClientId || "setup"}`)
     .digest("hex");
 }
 
@@ -1011,7 +1011,7 @@ async function sendDashboardChangeLog(
   await sendDiscordMessage(guildId, settings.channelId, {
     embeds: [{
       color: 0xA17A58,
-      author: { name: "CorePanel • Dashboard" },
+      author: { name: "Bot Dashboard • Dashboard" },
       title,
       description: "A successful configuration change was made from the protected dashboard.",
       fields: [
@@ -1146,7 +1146,7 @@ router.post("/setup", async (req, res, next) => {
   try {
     await refreshRuntimeConfig();
     if (!setupRequired()) {
-      res.status(409).json({ error: "CorePanel is already configured. Log in to replace or reset credentials." });
+      res.status(409).json({ error: "Bot Dashboard is already configured. Log in to replace or reset credentials." });
       return;
     }
     const input = setupSchema.parse(req.body);
@@ -1180,7 +1180,7 @@ router.get("/session", (req, res) => {
     next: setupRequired()
       ? "/setup"
       : req.session.authenticated
-      ? req.session.selectedGuildId ? "/" : "/servers"
+      ? req.session.selectedGuildId ? "/dashboard" : "/servers"
       : "/login"
   });
 });
@@ -1528,7 +1528,7 @@ router.use((req, res, next) => {
     return;
   }
   res.status(428).json({
-    error: "CorePanel setup is incomplete. Open /setup and save the Discord bot configuration first.",
+    error: "Bot Dashboard setup is incomplete. Open /setup and save the Discord bot configuration first.",
     setupRequired: true
   });
 });
@@ -1537,7 +1537,7 @@ router.get("/guilds", async (req, res, next) => {
   try {
     const guilds = await listDiscordGuilds();
     if (!guilds.length) {
-      throw publicRequestError("CorePanel is not installed in any Discord servers.", 503);
+      throw publicRequestError("Bot Dashboard is not installed in any Discord servers.", 503);
     }
     const selection = resolveGuildSelection(guilds, req.session.selectedGuildId);
     if (selection.selectedGuildId) req.session.selectedGuildId = selection.selectedGuildId;
@@ -1558,11 +1558,11 @@ router.post("/guilds/select", async (req, res, next) => {
     const guildId = z.string().regex(/^\d+$/).parse(req.body?.guildId);
     const guilds = await listDiscordGuilds(true);
     if (!guilds.some((guild) => guild.id === guildId)) {
-      res.status(400).json({ error: "CorePanel is not installed in that server." });
+      res.status(400).json({ error: "Bot Dashboard is not installed in that server." });
       return;
     }
     req.session.selectedGuildId = guildId;
-    res.json({ ok: true, next: "/" });
+    res.json({ ok: true, next: "/dashboard" });
   } catch (error) {
     next(error);
   }
@@ -2563,7 +2563,7 @@ async function refreshAutoModReadiness(guildId: string): Promise<AutoModReadines
       && (basePermissions & PermissionFlagsBits.Administrator) === 0n
       && (basePermissions & PermissionFlagsBits.ModerateMembers) === 0n
     ) {
-      warnings.push("Timeout is selected, but CorePanel does not have Moderate Members.");
+      warnings.push("Timeout is selected, but Bot Dashboard does not have Moderate Members.");
     }
     if (!logChannelId) {
       warnings.push("No AutoMod or global moderation log channel is configured.");
@@ -2574,7 +2574,7 @@ async function refreshAutoModReadiness(guildId: string): Promise<AutoModReadines
       || (logPermissions & PermissionFlagsBits.SendMessages) === 0n
       || (logPermissions & PermissionFlagsBits.EmbedLinks) === 0n
     ) {
-      warnings.push(`CorePanel cannot send embeds in #${logChannel.name}. Check View Channel, Send Messages, and Embed Links.`);
+      warnings.push(`Bot Dashboard cannot send embeds in #${logChannel.name}. Check View Channel, Send Messages, and Embed Links.`);
     }
     const response: AutoModReadinessResult = {
       ok: warnings.length === 0,
@@ -2625,13 +2625,13 @@ function autoModReadinessFailureCopy(error: unknown): { summary?: string; warnin
     : undefined;
   if ([10004, 10007, 50001].includes(code ?? 0)) {
     return {
-      summary: "CorePanel could not access the selected Discord server.",
+      summary: "Bot Dashboard could not access the selected Discord server.",
       warning: "Confirm the bot is still installed in this server and can view its channels. Saved AutoMod settings remain available."
     };
   }
   if (code === 50013) {
     return {
-      summary: "Discord responded, but CorePanel is missing access needed for the readiness check.",
+      summary: "Discord responded, but Bot Dashboard is missing access needed for the readiness check.",
       warning: "Review the bot role and channel permissions. Saved AutoMod settings can still be edited and saved."
     };
   }
@@ -2859,10 +2859,10 @@ async function verificationDiscordState(
     else if (!verifiedRole) warnings.push("The configured verified role no longer exists.");
     else if (verifiedRole.managed) warnings.push("Discord-managed roles cannot be assigned by the bot.");
     else if (verifiedRole.position >= botHighestPosition) {
-      warnings.push("Move the CorePanel role above the verified/community role.");
+      warnings.push("Move the Bot Dashboard role above the verified/community role.");
     }
     if (!permissionChecks.every((check) => check.ok)) {
-      warnings.push("CorePanel is missing one or more permissions required for verification setup.");
+      warnings.push("Bot Dashboard is missing one or more permissions required for verification setup.");
     }
     if (
       settings.verificationChannelId
@@ -2882,7 +2882,7 @@ async function verificationDiscordState(
       warnings.push("The saved verification log channel is missing or is not a text channel.");
     }
     if (settings.autoKickUnverified && !permissionChecks.some((check) => check.label === "Kick Members" && check.ok)) {
-      warnings.push("Auto-kick is enabled, but CorePanel is missing Kick Members.");
+      warnings.push("Auto-kick is enabled, but Bot Dashboard is missing Kick Members.");
     }
     return {
       available: true,

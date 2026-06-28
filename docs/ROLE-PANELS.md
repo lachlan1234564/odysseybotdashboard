@@ -1,6 +1,6 @@
 # Role Panels
 
-Role panels let members give themselves approved roles from a Discord message. CorePanel supports both button panels and dropdown panels.
+Role panels let members give themselves approved roles from a Discord message. Bot Dashboard supports both button panels and dropdown panels.
 
 ## What Role Panels Do
 
@@ -82,7 +82,7 @@ Example:
 - Max roles per category: `1`
 - Exclusive categories: enabled
 
-If a member chooses `NA` and later chooses `EU`, CorePanel removes `NA` and gives `EU`.
+If a member chooses `NA` and later chooses `EU`, Bot Dashboard removes `NA` and gives `EU`.
 
 ## Required Roles
 
@@ -93,7 +93,7 @@ You can set:
 - A global required role for the whole panel.
 - A required role for one specific role option.
 
-If a member does not have the required role, CorePanel sends a private message explaining what they need.
+If a member does not have the required role, Bot Dashboard sends a private message explaining what they need.
 
 ## Add-Only Mode
 
@@ -123,7 +123,7 @@ Set a panel-specific **Log channel**, or let it fall back to your server mod log
 
 ### The Bot Cannot Give a Role
 
-Move the CorePanel role above the role you want it to assign. Also confirm the bot has **Manage Roles**.
+Move the Bot Dashboard role above the role you want it to assign. Also confirm the bot has **Manage Roles**.
 
 ### A Role Was Deleted
 
@@ -135,7 +135,7 @@ Use a normal emoji first. For custom emoji, make sure the bot can access that em
 
 ### Dropdown Role Limits Feel Wrong
 
-Discord select menus can show up to 25 options. Category limits are enforced by CorePanel after the member submits the selection.
+Discord select menus can show up to 25 options. Category limits are enforced by Bot Dashboard after the member submits the selection.
 
 ### Members Cannot See the Panel
 

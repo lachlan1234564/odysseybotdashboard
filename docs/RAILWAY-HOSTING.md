@@ -14,7 +14,7 @@ Railway is the intended production host because the Discord bot needs a long-run
 Add these in the Railway application service:
 
 ```dotenv
-COREPANEL_SECRET_KEY=generate_with_openssl_rand_base64_32
+SETUP_SECRET_KEY=generate_with_openssl_rand_base64_32
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 DATABASE_SSL=true
 UPLOADS_DIR=/app/uploads
@@ -33,7 +33,7 @@ Generate the secret with:
 openssl rand -base64 32
 ```
 
-Keep `COREPANEL_SECRET_KEY` stable. It encrypts the bot token and OAuth client secret that you save from the hosted `/setup` page.
+Keep `SETUP_SECRET_KEY` stable. It encrypts the bot token and OAuth client secret that you save from the hosted `/setup` page.
 
 Optional compatibility variables such as `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DASHBOARD_PASSWORD`, `PUBLIC_BASE_URL`, `VERIFY_PUBLIC_BASE_URL`, and `DISCORD_OAUTH_REDIRECT_URI` still work, but the recommended public-hosting flow is to enter those values in `/setup`.
 
@@ -56,12 +56,14 @@ The production `start` script runs database setup before starting the dashboard 
 After the first deploy:
 
 1. Open the Railway public URL.
-2. Go to `/setup`.
-3. Paste the Discord bot token and application/client ID.
-4. Add the OAuth client secret only if you will use verification.
-5. Create the dashboard password.
-6. Save setup.
-7. Restart the Railway service if it was already running before setup was saved.
+2. Click **Get Started** on the public home page.
+3. Create your Discord application and bot in Discord Developer Portal.
+4. Paste the Discord bot token and application/client ID into `/setup`.
+5. Copy or open the generated invite link and invite the bot to your server.
+6. Add the OAuth client secret only if you will use verification.
+7. Create the dashboard password.
+8. Save setup.
+9. Restart the Railway service if it was already running before setup was saved.
 
 ## Register Discord commands
 

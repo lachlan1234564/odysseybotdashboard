@@ -4,6 +4,7 @@ dist/
 data/
 uploads/
 .corepanel/
+.bot-dashboard/
 *.log
 .DS_Store
 .pnpm-debug.log*

@@ -159,7 +159,7 @@ export async function postTicketPanel(guild: Guild, panelId: number, channel: Se
   if (!panel?.active) throw new Error("Ticket panel not found or inactive.");
   const payload = await ticketPanelMessage(guild, panel, channel);
   const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-  if (!botMember) throw new Error("CorePanel could not verify its server permissions.");
+  if (!botMember) throw new Error("Bot Dashboard could not verify its server permissions.");
   const permissions = channel.permissionsFor?.(botMember);
   if (permissions) {
     const required = [
@@ -178,7 +178,7 @@ export async function postTicketPanel(guild: Guild, panelId: number, channel: Se
         !permissions.has(PermissionFlagsBits.EmbedLinks) ? "Embed Links" : "",
         payload.files?.length && !permissions.has(PermissionFlagsBits.AttachFiles) ? "Attach Files" : ""
       ].filter(Boolean);
-      throw new Error(`CorePanel is missing these permissions in the target channel: ${names.join(", ")}.`);
+      throw new Error(`Bot Dashboard is missing these permissions in the target channel: ${names.join(", ")}.`);
     }
   }
   await channel.send(payload);
@@ -311,7 +311,7 @@ export function buildTicketTranscriptEmbed(input: {
       { name: "Closed", value: formatDiscordDate(closedAt), inline: true },
       { name: "Close reason", value: reason || "No reason provided.", inline: false }
     )
-    .setFooter({ text: "CorePanel ticket archive" })
+    .setFooter({ text: "Bot Dashboard ticket archive" })
     .setTimestamp(new Date(closedAt));
 }
 
@@ -671,7 +671,7 @@ async function createTicket(interaction: TicketCreateInteraction, panelId: numbe
   const staffRoleIds = [...new Set([...settings.staffRoleIds, ...type.staffRoleIds])];
   const botMember = interaction.guild.members.me ?? await interaction.guild.members.fetchMe();
   if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    await interaction.editReply("CorePanel needs the Manage Channels permission before it can create ticket channels.");
+    await interaction.editReply("Bot Dashboard needs the Manage Channels permission before it can create ticket channels.");
     return;
   }
   const parentId = type.categoryId ?? settings.ticketCategoryId;

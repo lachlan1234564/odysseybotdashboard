@@ -14,7 +14,7 @@ export function buildHelpEmbed(settings: GuildSettings) {
 
   return new EmbedBuilder()
     .setColor(asColor("#5865F2"))
-    .setTitle("CorePanel Command Guide")
+    .setTitle("Bot Dashboard Command Guide")
     .setDescription("Commands are grouped below. Permission labels describe who can run each command.")
     .addFields(
       {

@@ -25,7 +25,7 @@ Use an HTTPS image URL, or click **Upload**. Uploaded images are stored in the c
 
 ## Link safety
 
-Social links must use HTTPS. Localhost, private-network addresses, and malformed URLs are rejected. CorePanel disables automatic mentions in Social Promotion messages.
+Social links must use HTTPS. Localhost, private-network addresses, and malformed URLs are rejected. Bot Dashboard disables automatic mentions in Social Promotion messages.
 
 ## Discord permissions
 

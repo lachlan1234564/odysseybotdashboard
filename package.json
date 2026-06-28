@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "CorePanel, a modular Discord bot with a self-hosted admin dashboard.",
+  "description": "Bot Dashboard, a modular Discord bot with a self-hosted admin dashboard.",
   "packageManager": "pnpm@10.34.1",
   "bin": {
     "rapidbot": "./scripts/rapidbot.mjs"

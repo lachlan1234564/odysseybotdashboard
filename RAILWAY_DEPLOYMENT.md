@@ -1,8 +1,8 @@
 # Railway Deployment Guide
 
-This guide explains how to host CorePanel publicly on Railway.
+This guide explains how to host Bot Dashboard publicly on Railway.
 
-CorePanel is a long-running Discord bot plus dashboard backend. Railway is a good fit because the bot needs a persistent Node process. Vercel-style serverless functions are not recommended for the main bot process.
+Bot Dashboard is a long-running Discord bot plus dashboard backend. Railway is a good fit because the bot needs a persistent Node process. Vercel-style serverless functions are not recommended for the main bot process.
 
 ## 1. Create Railway Services
 
@@ -17,7 +17,7 @@ Create:
 Add these variables to the Railway application service:
 
 ```bash
-COREPANEL_SECRET_KEY=replace_with_output_from_openssl_rand_base64_32
+SETUP_SECRET_KEY=replace_with_output_from_openssl_rand_base64_32
 DATABASE_URL=${{Postgres.DATABASE_URL}}
 DATABASE_SSL=true
 NODE_ENV=production
@@ -30,7 +30,7 @@ Generate the secret key locally:
 openssl rand -base64 32
 ```
 
-Keep `COREPANEL_SECRET_KEY` stable. If you change it later, CorePanel cannot decrypt the saved bot token or OAuth client secret.
+Keep `SETUP_SECRET_KEY` stable. If you change it later, Bot Dashboard cannot decrypt the saved bot token or OAuth client secret.
 
 Railway provides `PORT` automatically.
 
@@ -74,17 +74,20 @@ Health check:
 After Railway deploys:
 
 1. Open your Railway public URL.
-2. Go to `/setup`.
-3. Paste your Discord bot token.
-4. Paste your Discord client/application ID.
-5. Add the Discord client secret if you will use verification.
-6. Add public URLs if you know them.
-7. Choose the dashboard name and bot display name.
-8. Create the dashboard password.
-9. Save setup.
-10. Restart the Railway service if it started before the token was saved.
+2. Read the public home page and click **Get Started**.
+3. In Discord Developer Portal, create your own application and bot user.
+4. Paste your Discord bot token.
+5. Paste your Discord client/application ID.
+6. Copy or open the generated invite link. It includes `bot` and `applications.commands` scopes and never includes the token.
+7. Invite the bot to your Discord server.
+8. Add the Discord client secret if you will use verification.
+9. Add public URLs if you know them.
+10. Choose the dashboard name and bot display name.
+11. Create the dashboard password.
+12. Save setup.
+13. Restart the Railway service if it started before the token was saved.
 
-The bot token is encrypted server-side only. CorePanel shows only a masked token after saving.
+The bot token is encrypted server-side only. Bot Dashboard shows only a masked token after saving.
 
 ## 5. Deploy Slash Commands
 
@@ -98,7 +101,7 @@ This registers the slash commands in every Discord server where the bot is insta
 
 ## 6. Invite The Bot
 
-In Discord Developer Portal:
+The setup page generates the recommended invite link automatically as soon as you enter the client/application ID. If you want to build it manually in Discord Developer Portal:
 
 1. Open your application.
 2. Go to **OAuth2 → URL Generator**.
@@ -132,7 +135,7 @@ Give staff the hosted dashboard URL and dashboard password only.
 Do not give staff:
 
 - Discord bot token
-- `COREPANEL_SECRET_KEY`
+- `SETUP_SECRET_KEY`
 - Railway database credentials
 - `.env` files
 - Railway owner/admin access unless they are trusted operators
@@ -141,7 +144,7 @@ Do not give staff:
 
 If you reset the bot token in Discord:
 
-1. Log in to CorePanel.
+1. Log in to Bot Dashboard.
 2. Use the token replacement flow when available, or return to `/setup` after a setup reset.
 3. Paste the new token.
 4. Restart the Railway service.
@@ -151,7 +154,7 @@ If you reset the bot token in Discord:
 
 **Setup says encryption is not ready**
 
-Set `COREPANEL_SECRET_KEY` in Railway and redeploy.
+Set `SETUP_SECRET_KEY` in Railway and redeploy.
 
 **Dashboard keeps returning to setup**
 

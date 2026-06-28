@@ -1,6 +1,6 @@
-# CorePanel
+# Bot Dashboard
 
-CorePanel is a self-hosted Discord bot dashboard built with TypeScript, `discord.js` v14, Express, pnpm, SQLite for local development, and PostgreSQL for Railway production hosting.
+Bot Dashboard is a self-hosted Discord bot dashboard built with TypeScript, `discord.js` v14, Express, pnpm, SQLite for local development, and PostgreSQL for Railway production hosting.
 
 It gives server owners a private admin panel for tickets, transcripts, AutoMod, logging, verification, role panels, giveaways, polls, moderation, custom commands, socials, welcome/boost messages, and server settings.
 
@@ -13,6 +13,7 @@ pnpm dev
 ```
 
 Open `http://127.0.0.1:3210/setup`, paste your Discord bot details, create a dashboard password, then restart the bot if it was already running without a token.
+You can also open `http://127.0.0.1:3210/` first for the public Get Started page.
 
 After setup, deploy slash commands:
 
@@ -23,6 +24,8 @@ pnpm deploy:commands
 ## Main Features
 
 - Public-ready setup wizard at `/setup`
+- Public home page at `/` with a Get Started flow
+- Discord bot invite link generation from the setup form
 - Encrypted server-side Discord bot token storage
 - Dashboard login with a password created during setup
 - Multi-server dashboard selection
@@ -46,16 +49,19 @@ pnpm deploy:commands
 
 ## No Local `.env` Required For Normal Setup
 
-CorePanel can start without a bot token. If the token is missing, the dashboard opens in setup mode instead of crashing.
+Bot Dashboard can start without a bot token. If the token is missing, the dashboard opens in setup mode instead of crashing.
 
 For normal hosted setup:
 
 1. Deploy the app.
-2. Open `/setup`.
-3. Paste the Discord bot token and client ID.
-4. Create the dashboard password.
-5. Save setup.
-6. Restart the Railway service if the bot started before setup was completed.
+2. Open the public home page at `/`.
+3. Click **Get Started**.
+4. Create a Discord application/bot in Discord Developer Portal.
+5. Paste the bot token and client/application ID into `/setup`.
+6. Copy or open the generated invite link.
+7. Invite the bot to your server.
+8. Create the dashboard password and save setup.
+9. Restart the Railway service if the bot started before setup was completed.
 
 The token is encrypted at rest, stored server-side only, and never returned to the browser after saving.
 
@@ -65,7 +71,7 @@ Most Discord values can be entered in `/setup`. Railway still needs a few infras
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `COREPANEL_SECRET_KEY` | Production | Encrypts stored bot tokens and OAuth secrets. Generate with `openssl rand -base64 32`. |
+| `SETUP_SECRET_KEY` | Production | Encrypts stored bot tokens and OAuth secrets. Generate with `openssl rand -base64 32`. |
 | `DATABASE_URL` | Railway | Railway Postgres connection string. SQLite default works locally. |
 | `DATABASE_SSL` | Railway | Set `true` for Railway Postgres if needed. |
 | `TRUST_PROXY` | Railway/proxy | Set `true` behind Railway or Cloudflare proxy. |
@@ -101,9 +107,9 @@ pnpm start
 
 Recommended production setup:
 
-- Railway service runs CorePanel as a long-running Node process.
+- Railway service runs Bot Dashboard as a long-running Node process.
 - Railway Postgres stores shared settings.
-- Railway variables store `COREPANEL_SECRET_KEY`, database settings, and optional compatibility secrets.
+- Railway variables store `SETUP_SECRET_KEY`, database settings, and optional compatibility secrets.
 - Staff open the hosted dashboard URL and log in with the dashboard password.
 
 Railway build/start commands are already configured:
@@ -132,7 +138,7 @@ In Discord Developer Portal:
 5. Enable privileged intents as needed:
    - Server Members Intent
    - Message Content Intent
-6. Invite the bot with permissions for the features you use.
+6. Use the generated invite link from `/setup`, or invite the bot manually with permissions for the features you use.
 
 Common required permissions:
 
@@ -154,14 +160,14 @@ Move the bot role above roles it needs to assign, remove, mute, verify, or moder
 - Never commit `.env`, database files, upload folders, logs, or `node_modules`.
 - Never share the Discord bot token with staff.
 - Staff should get dashboard access, not Railway secret access, unless they are trusted operators.
-- `COREPANEL_SECRET_KEY` must stay stable. Changing it prevents decrypting previously saved bot tokens.
+- `SETUP_SECRET_KEY` must stay stable. Changing it prevents decrypting previously saved bot tokens.
 - Use the token replacement flow if you rotate the Discord bot token.
 
 ## Troubleshooting
 
 **Dashboard opens setup every time**
 
-Make sure the database persists and `COREPANEL_SECRET_KEY` is stable across restarts.
+Make sure the database persists and `SETUP_SECRET_KEY` is stable across restarts.
 
 **Bot is offline after setup**
 

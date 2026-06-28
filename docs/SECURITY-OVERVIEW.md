@@ -1,6 +1,6 @@
 # Security Overview
 
-CorePanel includes Anti Raid, Anti Nuke, and Role Protection. Start with alert or log-only behavior, review the logs, and tune thresholds before enabling automatic punishment.
+Bot Dashboard includes Anti Raid, Anti Nuke, and Role Protection. Start with alert or log-only behavior, review the logs, and tune thresholds before enabling automatic punishment.
 
 ## Anti Raid
 
