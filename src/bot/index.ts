@@ -13,13 +13,14 @@ import {
   StringSelectMenuInteraction
 } from "discord.js";
 import {
+  getRuntimeAppConfig,
   listAnnouncements,
   listCustomCommands,
   updateTicketActivity,
+  createVerificationRecord,
   getWelcomeSettings,
   getVerificationSettings
 } from "../database/index.js";
-import { loadDiscordConfig } from "../shared/config.js";
 import { handleAnnounce, handleAnnouncementButton } from "./announcements.js";
 import { handleCustomCommand } from "./custom-commands.js";
 import { handleCaseCommand, handleModeration } from "./moderation.js";
@@ -98,15 +99,21 @@ import {
   logVoiceUpdate,
   logWebhookUpdate
 } from "./server-logging.js";
-import { handleVerificationCommand } from "./verification.js";
+import { handleVerificationCommand, processVerificationAutoKicks } from "./verification.js";
 import { sendVerificationEventLog } from "../shared/verification-gate.js";
 import {
   handleGiveawayButton,
   handleGiveawayCommand,
   processDueGiveaways
 } from "./giveaways.js";
+import {
+  handlePollCommand,
+  handlePollVote,
+  processDuePolls
+} from "./polls.js";
+import { handleDmCommand } from "./dms.js";
 
-const config = loadDiscordConfig();
+const runtimeConfig = await getRuntimeAppConfig();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -128,12 +135,18 @@ const client = new Client({
 });
 
 client.once(Events.ClientReady, (readyClient) => {
-  console.log(`Odyssey Bot connected to Discord in ${readyClient.guilds.cache.size} server(s).`);
+  console.log(`CorePanel connected to Discord in ${readyClient.guilds.cache.size} server(s).`);
   processScheduledAnnouncements(readyClient).catch((error) => {
     logError("Scheduled announcement sweep failed", error);
   });
   processDueGiveaways(readyClient).catch((error) => {
     logError("Giveaway sweep failed", error);
+  });
+  processDuePolls(readyClient).catch((error) => {
+    logError("Poll sweep failed", error);
+  });
+  processVerificationAutoKicks(readyClient).catch((error) => {
+    logError("Verification auto-kick sweep failed", error);
   });
   setInterval(() => {
     processInactiveTickets(readyClient.guilds.cache).catch((error) => {
@@ -150,6 +163,16 @@ client.once(Events.ClientReady, (readyClient) => {
       logError("Giveaway sweep failed", error);
     });
   }, 30_000).unref();
+  setInterval(() => {
+    processDuePolls(readyClient).catch((error) => {
+      logError("Poll sweep failed", error);
+    });
+  }, 30_000).unref();
+  setInterval(() => {
+    processVerificationAutoKicks(readyClient).catch((error) => {
+      logError("Verification auto-kick sweep failed", error);
+    });
+  }, 10 * 60_000).unref();
 });
 
 client.on(Events.MessageCreate, async (message) => {
@@ -255,6 +278,19 @@ async function handleWelcome(member: import("discord.js").GuildMember): Promise<
     }
   }
   if (verification.enabled) {
+    await createVerificationRecord({
+      guildId: member.guild.id,
+      userId: member.id,
+      status: "pending",
+      reasonCodes: ["member_joined"],
+      riskScore: 0,
+      accountCreatedAt: member.user.createdAt.toISOString(),
+      serverJoinedAt: member.joinedAt?.toISOString() ?? null,
+      vpnDetected: null,
+      expiresAt: new Date(Date.now() + verification.recordRetentionHours * 3_600_000).toISOString()
+    }).catch((error) => {
+      logError("Verification pending record creation failed", error);
+    });
     await sendVerificationEventLog(
       member.client.rest as unknown as import("discord.js").REST,
       verification,
@@ -611,12 +647,16 @@ const commandHandlers: Record<SlashCommandName, SlashCommandHandler> = {
   announce: handleAnnounce,
   "reaction-roles": handleReactionRolesCommand,
   giveaway: handleGiveawayCommand,
+  poll: handlePollCommand,
   verification: handleVerificationCommand,
+  dm: handleDmCommand,
   warn: handleModeration,
   warnings: handleModeration,
   timeout: handleModeration,
+  untimeout: handleModeration,
   kick: handleModeration,
   ban: handleModeration,
+  unban: handleModeration,
   clear: handleModeration,
   case: handleCaseCommand,
   lockdown: handleLockdown,
@@ -681,6 +721,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       await handleRolePanelSelect(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("giveaway:enter:")) {
       await handleGiveawayButton(interaction);
+    } else if (interaction.isButton() && interaction.customId.startsWith("poll:vote:")) {
+      await handlePollVote(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket-close:")) {
       await handleTicketCloseDecision(interaction as ButtonInteraction);
     } else if (interaction.isButton() && interaction.customId.startsWith("ticket:")) {
@@ -717,4 +759,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 });
 
-client.login(config.DISCORD_TOKEN);
+if (!runtimeConfig.discordToken) {
+  console.warn("[CorePanel] Discord bot startup skipped: setup is incomplete. Open the dashboard setup page and save a bot token.");
+} else if (runtimeConfig.secretError) {
+  console.warn(`[CorePanel] Discord bot startup skipped: ${runtimeConfig.secretError}`);
+} else {
+  client.login(runtimeConfig.discordToken).catch((error) => {
+    logError("Discord bot login failed", error);
+  });
+}

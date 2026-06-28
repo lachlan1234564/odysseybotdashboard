@@ -56,7 +56,7 @@ These values are filled when the message or custom command runs inside a registe
 
 | Placeholder | Result |
 |---|---|
-| `{ticket_id}` | Odyssey Bot's database ticket number |
+| `{ticket_id}` | CorePanel's database ticket number |
 | `{ticket_category}` | Ticket type label, such as `Billing` |
 | `{created_at}` | Ticket or event creation time |
 | `{closed_at}` | Ticket closure time when available |

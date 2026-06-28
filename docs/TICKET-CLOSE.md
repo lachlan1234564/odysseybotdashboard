@@ -55,8 +55,8 @@ The ticket type's **Allowed / community roles** also qualify. Those roles normal
 ## After acceptance
 
 1. The request card changes to **Close Request Accepted**.
-2. The bot saves the newest 100 messages when a transcript channel is configured.
-3. A final **Ticket Closing** card shows the transcript status.
+2. The bot saves a dashboard transcript and fetches up to the newest 1,000 messages.
+3. A final **Ticket Transcript Saved** card shows the transcript status when a transcript/log channel is configured.
 4. The ticket channel is removed after the configured delay, with a minimum visible delay of 5 seconds.
 
 If the request is denied, the card changes to **Close Request Denied** and the ticket stays open.

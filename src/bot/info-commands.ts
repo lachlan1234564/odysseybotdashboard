@@ -77,7 +77,7 @@ export async function handleServerInfo(interaction: ChatInputCommandInteraction)
   const embed = new EmbedBuilder()
     .setColor(asColor(branding.accentColor))
     .setTitle(guild.name)
-    .setDescription("A live overview of this Discord server and its Odyssey Bot setup.")
+    .setDescription("A live overview of this Discord server and its CorePanel setup.")
     .addFields(
       {
         name: "Owner",
@@ -118,7 +118,7 @@ export async function handleServerInfo(interaction: ChatInputCommandInteraction)
         inline: false
       },
       {
-        name: "Odyssey Bot setup",
+        name: "CorePanel setup",
         value: features.length
           ? features.map((feature) => `- ${feature}`).join("\n")
           : "No optional features are configured yet. Open the dashboard to set up tickets, Auto Mod, and more.",
@@ -126,7 +126,7 @@ export async function handleServerInfo(interaction: ChatInputCommandInteraction)
       }
     )
     .setFooter({
-      text: branding.footerText || "Odyssey Bot • Server overview",
+      text: branding.footerText || "CorePanel • Server overview",
       iconURL: interaction.client.user?.displayAvatarURL()
     })
     .setTimestamp();
@@ -169,7 +169,7 @@ export async function handleUserInfo(interaction: ChatInputCommandInteraction): 
       { name: "Warnings", value: warnings.length ? `${warnings.length} warning(s)` : "No warnings", inline: true },
       { name: "Roles", value: roleNames, inline: false }
     )
-    .setFooter({ text: "Odyssey Bot user info" });
+    .setFooter({ text: "CorePanel user info" });
 
   await replyToCommand(interaction, { embeds: [embed] });
 }
@@ -267,7 +267,7 @@ export async function handleSocialsPost(interaction: ChatInputCommandInteraction
   const missingPermissions = requiredPermissions.filter((permission) => !permissions?.has(permission));
   if (missingPermissions.length > 0) {
     await replyToCommand(interaction, {
-      content: "Odyssey Bot cannot post there. Check View Channel, Send Messages, and Embed Links permissions."
+      content: "CorePanel cannot post there. Check View Channel, Send Messages, and Embed Links permissions."
     });
     return;
   }

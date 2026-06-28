@@ -1,6 +1,7 @@
 const grid = document.querySelector("#server-grid");
 const status = document.querySelector("#server-select-status");
 const refresh = document.querySelector("#refresh-servers");
+const appBrand = { dashboardName: "CorePanel", botDisplayName: "CorePanel Bot" };
 
 async function request(path, options = {}) {
   let response;
@@ -71,7 +72,7 @@ async function loadGuilds() {
         <div class="server-card-icon">${guildIcon(guild)}</div>
         <div class="server-card-copy">
           <strong>${escapeHtml(guild.name)}</strong>
-          <span>${guild.id === data.selectedGuildId ? "Currently selected" : "Odyssey Bot connected"}</span>
+          <span>${guild.id === data.selectedGuildId ? "Currently selected" : `${escapeHtml(appBrand.botDisplayName)} connected`}</span>
         </div>
         <button type="button" data-guild-id="${guild.id}">Open dashboard</button>
       </article>
@@ -95,7 +96,17 @@ document.querySelector("#server-logout").addEventListener("click", async () => {
 });
 
 request("/session")
-  .then((session) => session.authenticated ? loadGuilds() : window.location.replace("/login"))
+  .then((session) => {
+    if (session.setupRequired) return window.location.replace(session.next || "/setup");
+    appBrand.dashboardName = session.dashboardName || appBrand.dashboardName;
+    appBrand.botDisplayName = session.botDisplayName || appBrand.botDisplayName;
+    document.title = `Choose a Server | ${appBrand.dashboardName}`;
+    const eyebrow = document.querySelector(".server-select-header .eyebrow");
+    const mark = document.querySelector(".brand-mark");
+    if (eyebrow) eyebrow.textContent = `${appBrand.dashboardName} dashboard`;
+    if (mark) mark.textContent = appBrand.dashboardName.slice(0, 1).toUpperCase();
+    return session.authenticated ? loadGuilds() : window.location.replace("/login");
+  })
   .catch((error) => {
     status.textContent = error.message;
     status.classList.add("error");

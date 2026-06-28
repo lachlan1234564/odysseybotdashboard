@@ -21,7 +21,7 @@ export const migrations = [
 
       CREATE TABLE IF NOT EXISTS branding (
         guild_id TEXT PRIMARY KEY,
-        server_name TEXT NOT NULL DEFAULT 'Odyssey Bot',
+        server_name TEXT NOT NULL DEFAULT 'CorePanel',
         footer_text TEXT NOT NULL DEFAULT '',
         ticket_panel_title TEXT NOT NULL DEFAULT 'Support Tickets',
         ticket_panel_description TEXT NOT NULL DEFAULT 'Choose a ticket type below to contact the team.',
@@ -418,7 +418,7 @@ export const migrations = [
       ADD COLUMN output_mode TEXT NOT NULL DEFAULT 'embed';
 
       UPDATE branding
-      SET server_name = 'Odyssey Bot'
+      SET server_name = 'CorePanel'
       WHERE server_name = 'Rapid Bot';
     `
   },
@@ -675,6 +675,158 @@ export const migrations = [
       );
       CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_guild ON ticket_transcripts(guild_id, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_ticket ON ticket_transcripts(guild_id, ticket_id);
+    `
+  },
+  {
+    version: 17,
+    sql: `
+      ALTER TABLE ticket_transcripts ADD COLUMN opened_at TEXT;
+      ALTER TABLE ticket_transcripts ADD COLUMN closed_at TEXT;
+      ALTER TABLE ticket_transcripts ADD COLUMN category_label TEXT NOT NULL DEFAULT '';
+      ALTER TABLE ticket_transcripts ADD COLUMN claimed_by TEXT;
+      ALTER TABLE ticket_transcripts ADD COLUMN priority TEXT NOT NULL DEFAULT 'normal';
+
+      CREATE INDEX IF NOT EXISTS idx_ticket_transcripts_search
+        ON ticket_transcripts(guild_id, opener_id, ticket_id);
+    `
+  },
+  {
+    version: 18,
+    sql: `
+      CREATE TABLE IF NOT EXISTS polls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        guild_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        message_id TEXT,
+        question TEXT NOT NULL,
+        options_json TEXT NOT NULL DEFAULT '[]',
+        ends_at TEXT,
+        anonymous INTEGER NOT NULL DEFAULT 0,
+        multiple_choice INTEGER NOT NULL DEFAULT 0,
+        required_role_id TEXT,
+        show_live_results INTEGER NOT NULL DEFAULT 1,
+        status TEXT NOT NULL DEFAULT 'draft',
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE INDEX IF NOT EXISTS idx_polls_guild ON polls(guild_id, status, ends_at);
+
+      CREATE TABLE IF NOT EXISTS poll_votes (
+        poll_id INTEGER NOT NULL,
+        guild_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        option_ids TEXT NOT NULL DEFAULT '[]',
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(poll_id, user_id),
+        FOREIGN KEY(poll_id) REFERENCES polls(id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_poll_votes_guild ON poll_votes(guild_id, poll_id);
+    `
+  },
+  {
+    version: 19,
+    sql: `
+      ALTER TABLE giveaways ADD COLUMN starts_at TEXT;
+      ALTER TABLE giveaways ADD COLUMN host_user_id TEXT;
+      ALTER TABLE giveaways ADD COLUMN winner_role_id TEXT;
+      ALTER TABLE giveaways ADD COLUMN winner_dm_message TEXT NOT NULL DEFAULT '';
+      ALTER TABLE giveaways ADD COLUMN create_message TEXT NOT NULL DEFAULT '';
+      ALTER TABLE giveaways ADD COLUMN image_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE giveaways ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE giveaways ADD COLUMN button_text TEXT NOT NULL DEFAULT 'Enter Giveaway';
+      CREATE INDEX IF NOT EXISTS idx_giveaways_due_start ON giveaways(status, starts_at);
+
+      ALTER TABLE polls ADD COLUMN title TEXT NOT NULL DEFAULT '';
+      ALTER TABLE polls ADD COLUMN starts_at TEXT;
+      ALTER TABLE polls ADD COLUMN results_visibility TEXT NOT NULL DEFAULT 'public';
+      CREATE INDEX IF NOT EXISTS idx_polls_due_start ON polls(status, starts_at);
+    `
+  },
+  {
+    version: 20,
+    sql: `
+      ALTER TABLE role_panels ADD COLUMN image_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE role_panels ADD COLUMN thumbnail_url TEXT NOT NULL DEFAULT '';
+      ALTER TABLE role_panels ADD COLUMN button_style TEXT NOT NULL DEFAULT 'secondary';
+      ALTER TABLE role_panels ADD COLUMN toggle_mode TEXT NOT NULL DEFAULT 'toggle';
+      ALTER TABLE role_panels ADD COLUMN category_rules_json TEXT NOT NULL DEFAULT '[]';
+
+      ALTER TABLE role_panel_roles ADD COLUMN button_style TEXT NOT NULL DEFAULT '';
+    `
+  },
+  {
+    version: 21,
+    sql: `
+      ALTER TABLE moderation_cases ADD COLUMN target_tag TEXT NOT NULL DEFAULT '';
+      ALTER TABLE moderation_cases ADD COLUMN moderator_tag TEXT NOT NULL DEFAULT '';
+      ALTER TABLE moderation_cases ADD COLUMN expires_at TEXT;
+      ALTER TABLE moderation_cases ADD COLUMN audit_log_executor_id TEXT;
+      ALTER TABLE moderation_cases ADD COLUMN audit_log_executor_tag TEXT NOT NULL DEFAULT '';
+
+      CREATE INDEX IF NOT EXISTS idx_moderation_cases_search
+        ON moderation_cases(guild_id, case_number, target_user_id, moderator_id, action_type, status);
+      CREATE INDEX IF NOT EXISTS idx_moderation_cases_target_tag
+        ON moderation_cases(guild_id, target_tag);
+    `
+  },
+  {
+    version: 22,
+    sql: `
+      ALTER TABLE verification_settings ADD COLUMN auto_kick_unverified INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE verification_settings ADD COLUMN auto_kick_after_hours INTEGER NOT NULL DEFAULT 24;
+    `
+  },
+  {
+    version: 23,
+    sql: `
+      CREATE TABLE IF NOT EXISTS dm_settings (
+        guild_id TEXT PRIMARY KEY,
+        dm_command_enabled INTEGER NOT NULL DEFAULT 1,
+        dm_command_log_content INTEGER NOT NULL DEFAULT 0,
+        dm_command_rate_limit_seconds INTEGER NOT NULL DEFAULT 30,
+        moderation_dm_enabled INTEGER NOT NULL DEFAULT 0,
+        dm_on_warn INTEGER NOT NULL DEFAULT 1,
+        dm_on_timeout INTEGER NOT NULL DEFAULT 1,
+        dm_on_kick INTEGER NOT NULL DEFAULT 1,
+        dm_on_ban INTEGER NOT NULL DEFAULT 1,
+        dm_on_unban INTEGER NOT NULL DEFAULT 0,
+        dm_on_manual_case INTEGER NOT NULL DEFAULT 0,
+        moderation_dm_template TEXT NOT NULL DEFAULT 'You received a moderation action in {server}: {action}. Reason: {reason}. Case: {case}. {duration}',
+        moderation_appeal_message TEXT NOT NULL DEFAULT '',
+        giveaway_winner_dm_enabled INTEGER NOT NULL DEFAULT 1,
+        giveaway_default_winner_dm_message TEXT NOT NULL DEFAULT 'You won the giveaway in {serverName}: {prize}. Please contact staff or check the giveaway channel for next steps.',
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `
+  },
+  {
+    version: 24,
+    sql: `
+      CREATE TABLE IF NOT EXISTS app_setup (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        dashboard_name TEXT NOT NULL DEFAULT 'CorePanel',
+        bot_display_name TEXT NOT NULL DEFAULT 'CorePanel Bot',
+        support_server_name TEXT NOT NULL DEFAULT '',
+        discord_client_id TEXT NOT NULL DEFAULT '',
+        discord_client_secret_encrypted TEXT NOT NULL DEFAULT '',
+        discord_client_secret_last4 TEXT NOT NULL DEFAULT '',
+        discord_token_encrypted TEXT NOT NULL DEFAULT '',
+        discord_token_last4 TEXT NOT NULL DEFAULT '',
+        discord_guild_id TEXT NOT NULL DEFAULT '',
+        public_base_url TEXT NOT NULL DEFAULT '',
+        verify_public_base_url TEXT NOT NULL DEFAULT '',
+        discord_oauth_redirect_uri TEXT NOT NULL DEFAULT '',
+        dashboard_password_hash TEXT NOT NULL DEFAULT '',
+        admin_user_ids TEXT NOT NULL DEFAULT '[]',
+        setup_completed_at TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+
+      INSERT INTO app_setup (id)
+      VALUES (1)
+      ON CONFLICT (id) DO NOTHING;
     `
   }
 ] as const;

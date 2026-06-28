@@ -63,10 +63,10 @@ export function friendlyDiscordError(error: unknown, action: string): string {
   const prefix = action.trim().replace(/[.!?]+$/, "");
   const code = errorField(error, "code");
   if (code === 50001) {
-    return `${prefix}: Discord reports that Odyssey Bot is missing access to that channel.`;
+    return `${prefix}: Discord reports that CorePanel is missing access to that channel.`;
   }
   if (code === 50013) {
-    return `${prefix}: Odyssey Bot is missing one or more required channel permissions. Check View Channel, Send Messages, Embed Links, and Attach Files.`;
+    return `${prefix}: CorePanel is missing one or more required channel permissions. Check View Channel, Send Messages, Embed Links, and Attach Files.`;
   }
   if (code === 10003) {
     return `${prefix}: that Discord channel no longer exists. Refresh the dashboard and choose another channel.`;

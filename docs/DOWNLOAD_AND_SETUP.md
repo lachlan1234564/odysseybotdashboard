@@ -1,67 +1,170 @@
 # Download and Setup
 
-This guide is for someone downloading Odyssey Bot from GitHub and running the bot plus dashboard for the first time.
+This guide walks through downloading CorePanel from GitHub and running the Discord bot plus dashboard for the first time.
 
-## What Odyssey Bot Is
+CorePanel is a long-running Node.js Discord bot with a protected web dashboard. The bot talks to Discord. The dashboard lets you configure server settings, tickets, commands, giveaways, polls, verification, AutoMod, logging, role panels, and more. The database stores the settings for each Discord server.
 
-Odyssey Bot is a Discord administration bot with a local or hosted dashboard. It can manage tickets, custom commands, announcements, role panels, giveaways, moderation cases, verification, AutoMod, server logs, welcomes, and social promotion embeds.
+## Important: Use `/setup` For Normal Setup
 
-The Discord bot is a long-running Node process. The dashboard is a protected web app that saves settings into the shared database.
+CorePanel can start without a local `.env` bot token. The recommended flow is:
 
-## Requirements
+```bash
+pnpm install
+pnpm db:setup
+pnpm dev
+```
 
-- Node.js 20 or newer
-- pnpm
-- A Discord Developer Portal application
-- A bot token
-- Your application/client ID
-- A Discord server where you can invite the bot
-- SQLite for local use, or Railway Postgres for production
-- Optional: Discord client secret and Cloudflare Tunnel for public verification links
+Then open `http://127.0.0.1:3210/setup`, paste the bot token and application ID, and create the dashboard password. After saving setup, restart `pnpm dev` so the bot process connects to Discord.
 
-## Download From GitHub
+The `.env` file is now mainly for infrastructure values such as `DATABASE_URL`, `COREPANEL_SECRET_KEY`, ports, proxy mode, and optional compatibility overrides.
 
-### Option 1: Clone With Git
+## What You Need Before Starting
+
+You need:
+
+- A computer or server where you can run Node.js.
+- Node.js 20 or newer.
+- pnpm 10 or newer.
+- A Discord account.
+- A Discord server where you have permission to invite/manage bots.
+- A Discord Developer Portal application.
+- A bot token.
+- A Discord application/client ID.
+- SQLite locally, or Railway PostgreSQL for production.
+
+Optional, only for Discord OAuth member verification:
+
+- Discord OAuth client secret.
+- A public HTTPS verification URL.
+- `DISCORD_OAUTH_REDIRECT_URI`.
+- Cloudflare Tunnel or another HTTPS host if running from your own machine.
+
+## Step 1: Download From GitHub
+
+### Option A: Download ZIP
+
+Use this if you do not know Git yet.
+
+1. Open the GitHub repository page.
+2. Click **Code**.
+3. Click **Download ZIP**.
+4. Unzip the file.
+5. Rename the folder if you want.
+6. Open Terminal inside that folder.
+
+### Option B: Clone With Git
+
+Use this if you have Git installed.
 
 ```bash
 git clone <YOUR_GITHUB_REPO_URL>
 cd <REPO_FOLDER>
 ```
 
-### Option 2: Download ZIP
+Replace `<YOUR_GITHUB_REPO_URL>` with the repository URL and `<REPO_FOLDER>` with the folder that was created.
 
-1. Open the GitHub repository.
-2. Click **Code**.
-3. Click **Download ZIP**.
-4. Unzip it.
-5. Open a terminal inside the project folder.
-
-## Install Dependencies
+## Step 2: Install Dependencies
 
 ```bash
 pnpm install
 ```
 
-## Create Your Environment File
+If `pnpm` is not found, enable it through Corepack:
+
+```bash
+corepack enable
+corepack prepare pnpm@latest --activate
+pnpm install
+```
+
+## Step 3: Optional `.env`
+
+For local development, you can skip this if the default SQLite database and port are fine. Create it only if you need custom local infrastructure settings:
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` and fill in placeholder values only on your own machine or host.
+Open `.env` in your editor if you created it.
 
-Required local values:
+Do not upload `.env` to GitHub. Do not send it to staff. It contains secrets.
+
+## Step 4: Create the Discord Application
+
+1. Open [Discord Developer Portal](https://discord.com/developers/applications).
+2. Click **New Application**.
+3. Name it, for example `CorePanel`.
+4. Open **General Information**.
+5. Copy **Application ID**.
+6. Keep it ready for the `/setup` page:
+
+```dotenv
+DISCORD_CLIENT_ID=your_application_id
+```
+
+## Step 5: Create the Bot Token
+
+1. In the Developer Portal, open **Bot**.
+2. Click **Add Bot** if needed.
+3. Click **Reset Token** or **Copy Token**.
+4. Keep it ready for the `/setup` page:
+
+```dotenv
+DISCORD_TOKEN=your_bot_token
+```
+
+Important: the bot token is private. Anyone with it can control your bot.
+
+## Step 6: Enable Privileged Intents
+
+In **Bot → Privileged Gateway Intents**, enable:
+
+- **Server Members Intent**
+- **Message Content Intent**
+
+These are needed for member automation, verification, welcome messages, AutoMod message checks, and some logging behavior.
+
+## Step 7: Fill In `/setup`
+
+After you start the dashboard in Step 13, open:
+
+```text
+http://127.0.0.1:3210/setup
+```
+
+Enter:
+
+- Dashboard name
+- Discord bot token
+- Discord application/client ID
+- Optional OAuth client secret for verification
+- Optional preferred server ID
+- Dashboard password
+
+Optional local `.env` compatibility values still work if you prefer them:
 
 ```dotenv
 DISCORD_TOKEN=your_bot_token
 DISCORD_CLIENT_ID=your_application_id
-DASHBOARD_PASSWORD=choose_a_long_random_password
 DATABASE_URL=file:./data/bot.db
+DATABASE_SSL=false
 DASHBOARD_PORT=3210
 DASHBOARD_HOST=127.0.0.1
+UPLOADS_DIR=./uploads
+NODE_ENV=development
 ```
 
-Optional verification values:
+Optional preferred server:
+
+```dotenv
+DISCORD_GUILD_ID=your_server_id
+```
+
+This only chooses the first server shown in a new dashboard session. It does not limit CorePanel to one server.
+
+## Step 8: Optional Verification Values
+
+Only add these if you want Discord OAuth verification. You can enter them in `/setup`, or store them as private environment variables.
 
 ```dotenv
 DISCORD_CLIENT_SECRET=your_oauth_client_secret
@@ -71,16 +174,61 @@ PUBLIC_BASE_URL=https://admin.example.com
 TRUST_PROXY=true
 ```
 
-Never share `.env` with staff. Staff should receive dashboard access only, not the Discord bot token.
+Where to find `DISCORD_CLIENT_SECRET`:
 
-## Invite the Bot
+1. Developer Portal → your app.
+2. Open **OAuth2**.
+3. Copy **Client Secret**.
 
-In the Discord Developer Portal:
+Do not use the bot token as the client secret. They are different values.
 
-1. Open your application.
-2. Go to **OAuth2 → URL Generator**.
-3. Select `bot` and `applications.commands`.
-4. Add permissions needed for your features:
+The redirect URI must match exactly in both places:
+
+- Discord Developer Portal → OAuth2 → Redirects
+- `/setup` or environment variable → `DISCORD_OAUTH_REDIRECT_URI`
+
+Example:
+
+```text
+https://verify.example.com/api/verify/callback
+```
+
+## Step 9: Optional VPN/Proxy Check Variables
+
+VPN/proxy checks are off unless both values are configured and the dashboard toggle is enabled.
+
+```dotenv
+VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
+VPN_CHECK_API_KEY=your_provider_api_key
+```
+
+Use a provider endpoint that supports an IP placeholder. Do not store raw user IPs unnecessarily.
+
+## Step 10: Set Up the Database
+
+For local SQLite:
+
+```bash
+pnpm db:setup
+```
+
+This creates `data/bot.db` and applies migrations.
+
+For Railway PostgreSQL, set `DATABASE_URL` to the Railway Postgres URL and run the same command:
+
+```bash
+pnpm db:setup
+```
+
+## Step 11: Invite the Bot
+
+In Developer Portal:
+
+1. Open **OAuth2 → URL Generator**.
+2. Select scopes:
+   - `bot`
+   - `applications.commands`
+3. Select bot permissions:
    - View Channels
    - Send Messages
    - Embed Links
@@ -92,63 +240,233 @@ In the Discord Developer Portal:
    - Kick Members
    - Ban Members
    - View Audit Log
-5. Open the generated URL and invite the bot to your server.
+4. Copy the generated URL.
+5. Open it in your browser.
+6. Invite the bot to your server.
 
-## Required Intents
+After inviting, move the CorePanel role above roles it needs to manage. This matters for:
 
-In **Bot → Privileged Gateway Intents**, enable:
+- Verification role assignment
+- Role panels
+- Muted role/timeouts
+- Ticket permissions
+- Moderation actions
 
-- Server Members Intent
-- Message Content Intent
-
-These are required for member automation, verification, logging, and AutoMod message rules.
-
-## Set Up the Database
-
-```bash
-pnpm db:setup
-```
-
-This creates local SQLite tables. On Railway Postgres, run the same command after setting `DATABASE_URL`.
-
-## Deploy Slash Commands
+## Step 12: Deploy Slash Commands
 
 ```bash
 pnpm deploy:commands
 ```
 
-This registers commands in every server where the bot is installed.
+This registers slash commands in every Discord server where the bot is installed.
 
-## Run Locally
+Run it again when code changes static command definitions. You do not need to run it after changing dashboard settings.
 
-Run the bot:
+## Step 13: Run Locally
 
-```bash
-pnpm bot
-```
-
-Run the dashboard in another terminal:
-
-```bash
-pnpm dashboard
-```
-
-Or run both together:
+Run both the bot and dashboard:
 
 ```bash
 pnpm dev
 ```
 
-Open `http://127.0.0.1:3210`, log in with `DASHBOARD_PASSWORD`, choose your server, then configure channels and roles from the dashboard.
+Or run them in separate terminals.
 
-## Production Build
+Terminal 1:
+
+```bash
+pnpm bot
+```
+
+Terminal 2:
+
+```bash
+pnpm dashboard
+```
+
+Open:
+
+```text
+http://127.0.0.1:3210
+```
+
+Log in using `DASHBOARD_PASSWORD`.
+
+## Step 14: First Dashboard Setup
+
+After login:
+
+1. Choose your Discord server.
+2. Open **Server Settings**.
+3. Set staff/admin roles.
+4. Set logging channels.
+5. Set announcement channel.
+6. Set ticket category/transcript channel if using tickets.
+7. Save settings.
+
+Then configure the feature you want:
+
+- Tickets → create ticket types and panels.
+- Command Studio → create custom commands.
+- Announcements → create templates.
+- Automation → configure AutoMod, role panels, sticky messages, and schedules.
+- Security → configure anti-raid, anti-nuke, role protection, and verification.
+- Moderation → view warnings and cases.
+- Logging → enable event categories.
+
+## Building for Production
+
+Compile TypeScript:
 
 ```bash
 pnpm build
+```
+
+Run the compiled production app:
+
+```bash
 pnpm start
 ```
 
-For Railway, use a long-running service, not Vercel serverless functions. Vercel is only reasonable later for a separate frontend-only dashboard.
+`pnpm start` runs database setup first, then starts the combined production bot/dashboard process.
+
+## Railway Production Setup
+
+Railway is recommended because the Discord bot must stay online as a long-running Node process.
+
+Use:
+
+- One Railway service for CorePanel.
+- One Railway PostgreSQL database.
+- One Railway volume for uploads if you use image uploads.
+
+Set Railway variables:
+
+```dotenv
+DISCORD_TOKEN=your_bot_token
+DISCORD_CLIENT_ID=your_application_id
+DASHBOARD_PASSWORD=use_a_long_unique_production_password
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+DATABASE_SSL=true
+UPLOADS_DIR=/app/uploads
+NODE_ENV=production
+```
+
+Optional verification:
+
+```dotenv
+DISCORD_CLIENT_SECRET=your_oauth_client_secret
+DISCORD_OAUTH_REDIRECT_URI=https://verify.example.com/api/verify/callback
+VERIFY_PUBLIC_BASE_URL=https://verify.example.com
+PUBLIC_BASE_URL=https://admin.example.com
+TRUST_PROXY=true
+```
+
+Railway supplies `PORT` automatically. Do not hard-code it.
+
+Build/start settings are already in `railway.json`:
+
+```text
+Build: pnpm install --frozen-lockfile && pnpm build
+Start: pnpm start
+Health check: /health
+```
+
+## Actual Package Scripts
+
+These are the real scripts from `package.json`:
+
+| Command | What it does |
+|---|---|
+| `pnpm setup` | Runs `pnpm install` and `pnpm db:setup`. |
+| `pnpm dev` | Runs bot and dashboard together. |
+| `pnpm bot` | Starts the TypeScript bot. |
+| `pnpm dashboard` | Starts the dashboard and opens the browser. |
+| `pnpm dashboard:no-open` | Starts the dashboard without opening the browser. |
+| `pnpm deploy:commands` | Registers slash commands in Discord. |
+| `pnpm db:setup` | Applies database migrations. |
+| `pnpm test` | Runs tests. |
+| `pnpm typecheck` | Runs TypeScript checking. |
+| `pnpm build` | Compiles TypeScript. |
+| `pnpm start` | Runs migrations and starts production bot/dashboard. |
+| `pnpm start:bot` | Starts only the compiled bot. |
+| `pnpm start:dashboard` | Starts only the compiled dashboard. |
+
+## What Goes In `.env` vs Dashboard
+
+Put only secrets/startup values in `.env`:
+
+- Bot token
+- Client ID
+- Client secret
+- Dashboard password
+- Database URL
+- Public URLs
+- Port/host settings
+- Optional VPN provider key
+
+Configure these from the dashboard:
+
+- Discord channel IDs
+- Discord role IDs
+- Ticket categories/types/panels
+- Transcript channels
+- Announcement templates
+- Embed colors/images
+- Giveaways
+- Polls
+- Role panels
+- Logging categories
+- AutoMod rules
+- Verification settings
+- Moderation settings
+
+## Common Mistakes
+
+### Bot is offline
+
+- `pnpm bot` or `pnpm dev` is not running.
+- `DISCORD_TOKEN` is wrong.
+- The bot was not invited to the server.
+- The token was reset in Developer Portal but `.env` was not updated.
+
+### Slash commands do not appear
+
+- Run `pnpm deploy:commands`.
+- Make sure the bot is in the server.
+- Restart Discord or wait briefly for the command list to refresh.
+
+### Dashboard opens but bot does nothing
+
+- The dashboard and bot are separate processes in development.
+- Run `pnpm dev`, or run `pnpm bot` in a second terminal.
+
+### Permission errors
+
+- Move the bot role higher.
+- Give the bot required permissions.
+- For moderation logs, grant **View Audit Log**.
+- For verification/role panels, grant **Manage Roles**.
+- For tickets, grant **Manage Channels**.
+
+### Verification fails
+
+- Set `DISCORD_CLIENT_SECRET`.
+- Set `VERIFY_PUBLIC_BASE_URL`.
+- Set `DISCORD_OAUTH_REDIRECT_URI`.
+- Add the exact same redirect URI in Discord Developer Portal.
+- Do not put the bot token in `DISCORD_CLIENT_SECRET`.
+
+### Uploaded images disappear in production
+
+- Use a persistent Railway volume.
+- Set `UPLOADS_DIR=/app/uploads`.
+
+### Database errors
+
+- Run `pnpm db:setup`.
+- Check `DATABASE_URL`.
+- For Railway Postgres, set `DATABASE_SSL=true` if required.
 
 ## Updating From GitHub
 
@@ -160,28 +478,20 @@ pnpm deploy:commands
 pnpm build
 ```
 
-Restart the bot/dashboard after updating.
+Restart the process after updating.
 
-## Common Mistakes
+## Where to Read More
 
-- Forgetting to enable privileged intents.
-- Putting channel IDs or role IDs in `.env` instead of the dashboard.
-- Bot role is below roles it needs to assign.
-- Missing View Audit Log, so executor names show as unknown.
-- Running only the dashboard but not the bot.
-- Not redeploying slash commands after adding new commands.
-
-## Useful Commands
-
-```bash
-pnpm install
-pnpm db:setup
-pnpm deploy:commands
-pnpm dev
-pnpm build
-pnpm start
-```
-
-## Getting Help
-
-Use the dashboard **Docs / Help** area for setup guides and troubleshooting. For bugs, include the terminal error, the dashboard page, and which Discord server feature you were testing.
+- [README](../README.md)
+- [Dashboard guide](DASHBOARD-GUIDE.md)
+- [Tickets](TICKET-PANELS.md)
+- [Ticket transcripts](TICKET-TRANSCRIPTS.md)
+- [Giveaways](GIVEAWAYS.md)
+- [Polls](POLLS.md)
+- [Role panels](ROLE-PANELS.md)
+- [Moderation cases](MODERATION-CASES.md)
+- [Verification](verification-process.md)
+- [Logging](MODLOGS.md)
+- [AutoMod](AUTO-MOD.md)
+- [Railway hosting](RAILWAY-HOSTING.md)
+- [Troubleshooting](TROUBLESHOOTING.md)

@@ -111,8 +111,10 @@ export async function logModeration(input: {
   reason?: string;
   metadata?: Record<string, unknown>;
   channelId?: string | null;
+  caseNumber?: number | null;
+  durationSeconds?: number | null;
 }): Promise<void> {
-  const { interaction, action, targetUserId, reason = "", metadata, channelId } = input;
+  const { interaction, action, targetUserId, reason = "", metadata, channelId, caseNumber, durationSeconds } = input;
   if (!interaction.guildId || !interaction.guild) return;
 
   await recordModerationAction({
@@ -133,17 +135,24 @@ export async function logModeration(input: {
     { name: "Status", value: "Completed", inline: true },
     { name: "Moderator", value: `<@${interaction.user.id}> \`${interaction.user.id}\``, inline: true }
   ];
+  if (caseNumber) {
+    fields.unshift({ name: "Case", value: `#${caseNumber}`, inline: true });
+  }
   if (targetUserId) {
     fields.push({ name: "Target", value: `<@${targetUserId}> \`${targetUserId}\``, inline: true });
   }
   if (channelId) {
     fields.push({ name: "Channel", value: `<#${channelId}> \`${channelId}\``, inline: true });
   }
+  if (durationSeconds) {
+    fields.push({ name: "Duration", value: `${Math.round(durationSeconds / 60)} minute(s)`, inline: true });
+  }
   fields.push({ name: "Reason", value: reason || "No reason provided" });
 
+  const titleAction = action.split(/[_-]/).filter(Boolean).map((part) => `${part[0]?.toUpperCase() ?? ""}${part.slice(1)}`).join(" ");
   const embed = new EmbedBuilder()
     .setColor(asColor(branding.ticketPanelColor))
-    .setTitle(`Moderation: ${action}`)
+    .setTitle(`${titleAction || "Moderation Action"}${caseNumber ? ` — Case #${caseNumber}` : ""}`)
     .addFields(fields)
     .setTimestamp();
 

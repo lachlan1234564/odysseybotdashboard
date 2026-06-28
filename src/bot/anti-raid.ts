@@ -65,23 +65,22 @@ export async function handleGuildMemberAdd(member: GuildMember): Promise<void> {
   if (member.roles.cache.some((r) => settings.bypassRoleIds.includes(r.id))) return;
 
   const accountAgeDays = (Date.now() - member.user.createdTimestamp) / (1000 * 60 * 60 * 24);
-  if (settings.minAccountAgeDays > 0 && accountAgeDays < settings.minAccountAgeDays) {
-    await handleSuspiciousJoin(member, settings, `Account is ${Math.floor(accountAgeDays)} days old (minimum ${settings.minAccountAgeDays})`);
-    return;
-  }
-
   const hasAvatar = Boolean(member.user.avatar);
-  if (settings.blockNoAvatar && !hasAvatar) {
-    await handleSuspiciousJoin(member, settings, "No avatar detected");
-    return;
-  }
-
   const events = getGuildJoins(guild.id);
   events.push({ userId: member.id, timestamp: Date.now(), hasAvatar, accountAgeDays });
   pruneJoins(guild.id, settings.timeWindowSeconds * 1000);
 
   if (events.length >= settings.joinThreshold) {
     await triggerRaidResponse(guild, settings, events);
+  }
+
+  if (settings.minAccountAgeDays > 0 && accountAgeDays < settings.minAccountAgeDays) {
+    await handleSuspiciousJoin(member, settings, `Account is ${Math.floor(accountAgeDays)} days old (minimum ${settings.minAccountAgeDays})`);
+    return;
+  }
+
+  if (settings.blockNoAvatar && !hasAvatar) {
+    await handleSuspiciousJoin(member, settings, "No avatar detected");
   }
 }
 
@@ -158,7 +157,7 @@ async function triggerRaidResponse(guild: Guild, settings: ReturnType<typeof get
           if (!me) continue;
           const botPerms = channel.permissionsFor(me);
           if (botPerms?.has(PermissionFlagsBits.ManageChannels)) {
-            await channel.permissionOverwrites.edit(guild.roles.everyone.id, { SendMessages: true }).catch(() => undefined);
+            await channel.permissionOverwrites.edit(guild.roles.everyone.id, { SendMessages: null }).catch(() => undefined);
           }
         }
       }

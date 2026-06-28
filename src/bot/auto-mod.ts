@@ -1,6 +1,7 @@
 import { Message, PermissionFlagsBits } from "discord.js";
 import {
   addWarning,
+  createModerationCase,
   getAutoModSettings,
   getGuildSettings,
   recordModerationAction
@@ -132,6 +133,7 @@ export async function handleAutoModMessage(message: Message): Promise<void> {
   let incidentFailed = 0;
   let incidentChannels: string[] = [];
   let actionResult = "logged only";
+  let caseNumber: number | null = null;
   if (settings.action !== "log" && decision.incident?.kind === "repeated-ping") {
     const removableMessages = decision.incident.messages.filter(
       (entry) => !settings.ignoredChannelIds.includes(entry.channelId)
@@ -147,12 +149,26 @@ export async function handleAutoModMessage(message: Message): Promise<void> {
   }
 
   if (settings.action === "warn") {
-    await addWarning({
+    const warningId = await addWarning({
       guildId: message.guildId,
       userId: message.author.id,
       moderatorId: message.guild.members.me?.id ?? "automod",
       reason: `Auto Mod: ${decision.matchedRule}`
     });
+    const moderationCase = await createModerationCase({
+      guildId: message.guildId,
+      targetUserId: message.author.id,
+      targetTag: message.author.tag || message.author.username,
+      moderatorId: message.guild.members.me?.id ?? "automod",
+      moderatorTag: message.guild.members.me?.user.tag ?? "AutoMod",
+      auditLogExecutorId: message.guild.members.me?.id ?? null,
+      auditLogExecutorTag: message.guild.members.me?.user.tag ?? "AutoMod",
+      actionType: "warn",
+      reason: `Auto Mod: ${decision.matchedRule}`,
+      evidenceUrl: `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`,
+      notes: `AutoMod warning #${warningId}`
+    });
+    caseNumber = moderationCase.caseNumber;
     actionResult += "; warning stored";
   }
 
@@ -163,6 +179,23 @@ export async function handleAutoModMessage(message: Message): Promise<void> {
         `Auto Mod: ${decision.matchedRule}`
       ).then(() => `; timed out for ${settings.timeoutMinutes} minute(s)`)
         .catch((error: Error) => `; timeout failed: ${error.name}`);
+      if (!actionResult.includes("timeout failed")) {
+        const moderationCase = await createModerationCase({
+          guildId: message.guildId,
+          targetUserId: message.author.id,
+          targetTag: message.author.tag || message.author.username,
+          moderatorId: message.guild.members.me?.id ?? "automod",
+          moderatorTag: message.guild.members.me?.user.tag ?? "AutoMod",
+          auditLogExecutorId: message.guild.members.me?.id ?? null,
+          auditLogExecutorTag: message.guild.members.me?.user.tag ?? "AutoMod",
+          actionType: "timeout",
+          reason: `Auto Mod: ${decision.matchedRule}`,
+          durationSeconds: settings.timeoutMinutes * 60,
+          expiresAt: new Date(Date.now() + settings.timeoutMinutes * 60_000).toISOString(),
+          evidenceUrl: `https://discord.com/channels/${message.guildId}/${message.channelId}/${message.id}`
+        });
+        caseNumber = moderationCase.caseNumber;
+      }
     } else {
       actionResult += "; timeout failed: missing Moderate Members or role hierarchy";
     }
@@ -180,7 +213,7 @@ export async function handleAutoModMessage(message: Message): Promise<void> {
     ].filter(Boolean).join("\n")
     : "Message content omitted from logs for privacy.";
   const embed = buildActionLogEmbed({
-    title: "Auto Mod rule triggered",
+    title: `Auto Mod rule triggered${caseNumber ? ` — Case #${caseNumber}` : ""}`,
     action: settings.action,
     status: actionResult,
     reason: decision.matchedRule,
@@ -207,6 +240,7 @@ export async function handleAutoModMessage(message: Message): Promise<void> {
       channelId: message.channelId,
       result: actionResult,
       logResult,
+      caseNumber,
       incident: decision.incident?.kind ?? null,
       incidentMessagesDeleted: incidentDeleted,
       incidentChannels

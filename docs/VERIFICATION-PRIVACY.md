@@ -2,13 +2,13 @@
 
 ## Discord fingerprint or alt detection
 
-Odyssey Bot does **not** fingerprint browsers or claim to detect alternate accounts.
+CorePanel does **not** fingerprint browsers or claim to detect alternate accounts.
 
 A website cannot reliably prove that two Discord accounts belong to the same person. Browser fingerprints, IP addresses, VPN checks, and similar signals are invasive, can be inaccurate, and can punish people who share devices or networks.
 
 ## Current privacy-respecting verification
 
-Odyssey Bot includes an optional Discord OAuth2 verification page. It collects only:
+CorePanel includes an optional Discord OAuth2 verification page. It collects only:
 
 - The Discord user ID from the `identify` scope.
 - Basic account creation age calculated from the Discord ID.
@@ -20,7 +20,7 @@ It does not create browser fingerprints, derive device hashes, or store device i
 
 ## Configure Discord OAuth
 
-1. Open Discord Developer Portal and select the Odyssey Bot application.
+1. Open Discord Developer Portal and select the CorePanel application.
 2. Add this redirect URL under OAuth2:
 
    `https://verify.YOUR_DOMAIN.com/api/verify/callback`
@@ -40,7 +40,7 @@ The OAuth request uses the `identify` and `guilds.members.read` scopes. Server m
 VPN/proxy checks are off unless both `VPN_CHECK_URL_TEMPLATE` and `VPN_CHECK_API_KEY` are configured and the dashboard toggle is enabled.
 
 - The provider receives the current request IP because that is required to perform the check.
-- Odyssey Bot does not store the raw IP.
+- CorePanel does not store the raw IP.
 - Leave **Fail if provider is unavailable** disabled unless your community explicitly needs strict enforcement.
 - Provider results can be wrong for shared networks, mobile carriers, privacy relays, and corporate connections.
 

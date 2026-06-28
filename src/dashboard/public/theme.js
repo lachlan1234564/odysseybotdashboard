@@ -1,5 +1,5 @@
 (() => {
-  const storageKey = "odyssey.dashboard.theme";
+  const storageKey = "corepanel.dashboard.theme";
   const allowedThemes = new Set(["light", "dark"]);
   const media = window.matchMedia("(prefers-color-scheme: light)");
 
@@ -30,7 +30,7 @@
     document.documentElement.style.colorScheme = nextTheme;
     if (persist) window.localStorage.setItem(storageKey, nextTheme);
     syncButtons(nextTheme);
-    window.dispatchEvent(new CustomEvent("odyssey:themechange", {
+    window.dispatchEvent(new CustomEvent("corepanel:themechange", {
       detail: { theme: nextTheme }
     }));
     return nextTheme;
@@ -54,7 +54,7 @@
     if (!savedTheme()) applyTheme(preferredTheme());
   });
 
-  window.OdysseyTheme = {
+  window.CorePanelTheme = {
     apply: (theme) => applyTheme(theme, true),
     current: () => document.documentElement.dataset.theme,
     toggle: toggleTheme

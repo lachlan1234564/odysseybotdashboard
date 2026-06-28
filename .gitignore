@@ -3,6 +3,7 @@ dist/
 .env
 data/
 uploads/
+.corepanel/
 *.log
 .DS_Store
 .pnpm-debug.log*

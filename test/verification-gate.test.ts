@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import {
   buildStableVerificationUrl,
   planVerificationVisibility,
-  sanitizeVerificationChannelName
+  sanitizeVerificationChannelName,
+  shouldAutoKickUnverified
 } from "../src/shared/verification-plan.js";
 
 test("builds a stable server-specific verification URL", () => {
@@ -59,4 +60,33 @@ test("synced child channels inherit category gate changes", () => {
     lockAllChannels: true
   });
   assert.equal(plan.find((item) => item.channel.id === "401")?.inherited, true);
+});
+
+test("auto-kick eligibility protects trusted and recently joined members", () => {
+  const base = {
+    enabled: true,
+    autoKickUnverified: true,
+    autoKickAfterHours: 24,
+    verifiedRoleId: "verified",
+    joinedAt: "2026-06-18T00:00:00.000Z",
+    memberRoleIds: ["member"],
+    trustedRoleIds: ["staff"],
+    isBot: false,
+    hasAdminPermission: false,
+    nowMs: Date.parse("2026-06-20T01:00:00.000Z")
+  };
+
+  assert.equal(shouldAutoKickUnverified(base).kick, true);
+  assert.equal(
+    shouldAutoKickUnverified({ ...base, memberRoleIds: ["staff"] }).reason,
+    "trusted_role"
+  );
+  assert.equal(
+    shouldAutoKickUnverified({ ...base, joinedAt: "2026-06-19T12:00:00.000Z" }).reason,
+    "within_pending_window"
+  );
+  assert.equal(
+    shouldAutoKickUnverified({ ...base, memberRoleIds: ["verified"] }).reason,
+    "already_verified"
+  );
 });

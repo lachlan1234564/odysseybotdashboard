@@ -4,7 +4,9 @@ import dotenv from "dotenv";
 import { z } from "zod";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-dotenv.config({ path: path.join(projectRoot, ".env"), quiet: true });
+if (process.env.COREPANEL_DISABLE_DOTENV !== "true") {
+  dotenv.config({ path: path.join(projectRoot, ".env"), quiet: true });
+}
 
 const baseSchema = z.object({
   DATABASE_URL: z.string().default("file:./data/bot.db"),
@@ -14,19 +16,26 @@ const baseSchema = z.object({
   DASHBOARD_HOST: z.string().default("127.0.0.1"),
   UPLOADS_DIR: z.string().default("./uploads"),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  TRUST_PROXY: z.enum(["true", "false"]).default("false")
+  TRUST_PROXY: z.enum(["true", "false"]).default("false"),
+  COREPANEL_SECRET_KEY: z.string().min(16).optional(),
+  DASHBOARD_SESSION_SECRET: z.string().min(16).optional(),
+  PUBLIC_BASE_URL: z.string().url().optional(),
+  VERIFY_PUBLIC_BASE_URL: z.string().url().optional()
 });
 
 const discordSchema = baseSchema.extend({
   DISCORD_TOKEN: z.string().min(1, "DISCORD_TOKEN is required"),
   DISCORD_CLIENT_ID: z.string().min(1, "DISCORD_CLIENT_ID is required"),
   DISCORD_GUILD_ID: z.string().min(1).optional(),
-  PUBLIC_BASE_URL: z.string().url().optional(),
-  VERIFY_PUBLIC_BASE_URL: z.string().url().optional()
+  DISCORD_CLIENT_SECRET: z.string().min(1).optional(),
+  DISCORD_OAUTH_REDIRECT_URI: z.string().url().optional()
 });
 
-const dashboardSchema = discordSchema.extend({
-  DASHBOARD_PASSWORD: z.string().min(8, "DASHBOARD_PASSWORD must be at least 8 characters"),
+const dashboardSchema = baseSchema.extend({
+  DISCORD_TOKEN: z.string().min(1).optional(),
+  DISCORD_CLIENT_ID: z.string().min(1).optional(),
+  DISCORD_GUILD_ID: z.string().min(1).optional(),
+  DASHBOARD_PASSWORD: z.string().min(8, "DASHBOARD_PASSWORD must be at least 8 characters").optional(),
   DISCORD_CLIENT_SECRET: z.string().min(1).optional(),
   DISCORD_OAUTH_REDIRECT_URI: z.string().url().optional(),
   VPN_CHECK_URL_TEMPLATE: z.string().min(1).optional(),

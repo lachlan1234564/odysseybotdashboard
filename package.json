@@ -3,14 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "A modular Discord bot with a local admin dashboard.",
+  "description": "CorePanel, a modular Discord bot with a self-hosted admin dashboard.",
   "packageManager": "pnpm@10.34.1",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ]
-  },
   "bin": {
     "rapidbot": "./scripts/rapidbot.mjs"
   },

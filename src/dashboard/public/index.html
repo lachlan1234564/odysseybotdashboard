@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Odyssey Bot Control</title>
+    <title>CorePanel Control</title>
     <script src="/theme.js"></script>
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" type="module"></script>
@@ -13,7 +13,7 @@
       <aside class="sidebar">
         <div class="sidebar-brand">
           <div class="brand-mark">O</div>
-          <div><strong>Odyssey Bot</strong><span id="guild-name">Connecting...</span></div>
+          <div><strong>CorePanel</strong><span id="guild-name">Connecting...</span></div>
         </div>
         <label class="guild-switcher">
           <span>Active server</span>
@@ -35,16 +35,18 @@
           <button class="nav-item" data-page="announcements"><span>04</span>Announcements</button>
           <button class="nav-item" data-page="socials"><span>05</span>Social Promotion</button>
           <button class="nav-item" data-page="giveaways"><span>06</span>Giveaways</button>
-          <button class="nav-item" data-page="moderation"><span>07</span>Moderation</button>
+          <button class="nav-item" data-page="polls"><span>07</span>Polls</button>
+          <button class="nav-item" data-page="moderation"><span>08</span>Moderation</button>
         </nav>
         <div class="nav-label">Configuration</div>
         <nav>
-          <button class="nav-item" data-page="settings"><span>08</span>Server Settings</button>
-          <button class="nav-item" data-page="logging"><span>09</span>Server Logs</button>
-          <button class="nav-item" data-page="branding"><span>10</span>Appearance</button>
-          <button class="nav-item" data-page="welcome"><span>11</span>Welcome &amp; Goodbye</button>
+          <button class="nav-item" data-page="settings"><span>09</span>Server Settings</button>
+          <button class="nav-item" data-page="logging"><span>10</span>Server Logs</button>
+          <button class="nav-item" data-page="dms"><span>11</span>Direct Messages</button>
+          <button class="nav-item" data-page="branding"><span>12</span>Appearance</button>
+          <button class="nav-item" data-page="welcome"><span>13</span>Welcome &amp; Goodbye</button>
           <div class="nav-group">
-            <button class="nav-item nav-parent" data-nav-toggle="security"><span>12</span>Security<i></i></button>
+            <button class="nav-item nav-parent" data-nav-toggle="security"><span>14</span>Security<i></i></button>
             <div class="nav-submenu" data-nav-menu="security">
               <button data-page="security" data-security-view="anti-raid">Anti Raid</button>
               <button data-page="security" data-security-view="anti-nuke">Anti Nuke</button>
@@ -53,7 +55,7 @@
             </div>
           </div>
           <div class="nav-group">
-            <button class="nav-item nav-parent" data-nav-toggle="automation"><span>12</span>Automation<i></i></button>
+            <button class="nav-item nav-parent" data-nav-toggle="automation"><span>15</span>Automation<i></i></button>
             <div class="nav-submenu" data-nav-menu="automation">
               <button data-page="automation" data-automation-view="auto-mod">Auto Mod</button>
               <button data-page="automation" data-automation-view="role-panels">Role Panels</button>
@@ -64,7 +66,7 @@
         </nav>
         <div class="nav-label">Help</div>
         <nav>
-          <button class="nav-item" data-page="docs"><span>13</span>Docs / Help</button>
+          <button class="nav-item" data-page="docs"><span>16</span>Docs / Help</button>
         </nav>
         <div class="sidebar-footer">
           <div class="connection-dot"></div>
@@ -308,8 +310,17 @@
 
         <section class="page" id="page-tickets">
           <div class="page-intro">
-            <div><span class="badge">Ticket workflow</span><h2>Ticket Studio</h2><p>Define ticket types first, then compose them into reusable panels or multi-panel menus.</p></div>
+            <div><span class="badge">Ticket workflow</span><h2>Ticket Studio</h2><p>Create a simple support entry point, preview it, publish it, then manage tickets and transcripts from one place.</p></div>
             <div class="topbar-actions"><button class="secondary-button" data-doc-topic="tickets">Tickets docs</button></div>
+          </div>
+          <div class="ticket-setup-flow" aria-label="Ticket setup steps">
+            <span><b>1</b>Create panel</span>
+            <span><b>2</b>Choose channel</span>
+            <span><b>3</b>Add categories</span>
+            <span><b>4</b>Set staff role</span>
+            <span><b>5</b>Preview</span>
+            <span><b>6</b>Publish</span>
+            <span><b>7</b>Manage tickets</span>
           </div>
           <div id="ticket-load-status" class="surface section-status hidden" role="status" aria-live="polite"></div>
 
@@ -318,18 +329,18 @@
               <form id="panel-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Panel identity</h3><p>One server can have many distinct ticket entry points.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Panel basics</h3><p>Name the panel, choose the Discord channel where it should be posted, then choose how members open tickets.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
                   <div class="form-grid">
-                    <label class="field">Internal name<input name="name" required maxlength="100" placeholder="Main support"></label>
-                    <label class="field">Target channel<select name="targetChannelId" data-channel-select="text"></select></label>
+                    <label class="field">Panel name<input name="name" required maxlength="100" placeholder="Main support"><small>Only staff see this name in the dashboard.</small></label>
+                    <label class="field">Where to post it<select name="targetChannelId" data-channel-select="text"></select><small>The public support channel that will hold the ticket panel.</small></label>
                     <label class="field">Panel kind<select name="panelKind"><option value="standard">Ticket type panel</option><option value="multi">Multi-panel menu</option></select></label>
                     <label class="field">Presentation<select name="displayMode"><option value="dropdown">Dropdown menu</option><option value="buttons">Buttons</option></select></label>
-                    <label class="field span-2" data-panel-types>Ticket types<select name="ticketTypeIds" data-ticket-type-select multiple size="7"></select><small>Choose the options displayed on this panel.</small><span class="field-error" data-error-for="ticketTypeIds"></span></label>
+                    <label class="field span-2" data-panel-types>Ticket categories<select name="ticketTypeIds" data-ticket-type-select multiple size="7"></select><small>Pick the ticket categories members can choose from. Create them in Ticket Types if this list is empty.</small><span class="field-error" data-error-for="ticketTypeIds"></span></label>
                     <label class="field span-2 hidden" data-panel-children>Child panels<select name="childPanelIds" data-child-panel-select multiple size="7"></select><small>A multi-panel shows a menu of other standard panels.</small><span class="field-error" data-error-for="childPanelIds"></span></label>
                   </div>
                 </section>
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">02</span><h3>Message design</h3><p>The message members see before opening a ticket.</p></div></div>
+                  <div class="section-title"><div><span class="step">02</span><h3>Panel message</h3><p>This is the message members see before they open a ticket.</p></div></div>
                   <div class="form-grid">
                     <label class="field">Title<input name="title" required maxlength="256" value="Support Tickets"></label>
                     <label class="field">Color<div class="color-control"><input name="color" type="color" value="#5865f2"><input name="colorText" value="#5865F2" maxlength="7"></div></label>
@@ -341,13 +352,14 @@
                     <label class="field">Footer icon<div class="media-control"><input name="footerIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="footerIconUrl">Upload</button></div></label>
                   </div>
                 </section>
-                <div class="sticky-actions"><button type="submit">Save ticket panel</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
+                <div class="sticky-actions"><button type="submit">Save panel</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
               </form>
               <aside class="preview-column">
                 <section class="surface preview-surface">
                   <div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Ticket entry message</h3></div><span class="live-pill">Live</span></div>
                   <div id="panel-preview" class="discord-stage"></div>
-                  <div class="test-row"><select id="panel-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="panel-send-test">Send saved panel</button></div>
+                  <div class="test-row"><select id="panel-test-channel" data-channel-select="text"></select><button type="button" class="secondary-button" id="panel-send-test">Publish saved panel</button></div>
+                  <p class="microcopy">Save the panel first, then publish it to the selected Discord channel.</p>
                 </section>
                 <section class="surface saved-surface"><div class="section-title"><div><p class="eyebrow">Library</p><h3>Ticket panels</h3></div><span id="panel-count" class="count-pill">0</span></div><div id="panel-list" class="item-list"></div></section>
               </aside>
@@ -359,7 +371,7 @@
               <form id="ticket-form" class="builder-stack">
                 <input type="hidden" name="id">
                 <section class="surface form-section">
-                  <div class="section-title"><div><span class="step">01</span><h3>Type and routing</h3><p>Define where the ticket goes and who can support it.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
+                  <div class="section-title"><div><span class="step">01</span><h3>Category and staff</h3><p>Create the choices members will see, then choose where each ticket goes and who can help.</p></div><label class="switch"><input name="active" type="checkbox" checked><span></span><strong class="switch-state">Active</strong></label></div>
                   <div class="form-grid">
                     <label class="field">Name<input name="label" required maxlength="100" placeholder="Billing support"><small>Shown to members in the ticket panel.</small></label>
                     <label class="field">Emoji
@@ -379,8 +391,8 @@
                       <div id="ticket-emoji-grid" class="emoji-grid"></div>
                     </div>
                     <label class="field span-2">Short description<input name="description" maxlength="100" placeholder="Questions about payments and subscriptions"><small>Optional helper text beneath the ticket option.</small></label>
-                    <label class="field">Discord category<select name="categoryId" data-channel-select="category"></select><small>New ticket channels are created here. Leave blank to use the server default.</small><span class="field-error" data-error-for="categoryId"></span></label>
-                    <label class="field">Staff role<select name="staffRoleIds" data-role-select multiple size="5"></select><small>Select one or more roles that can view, claim, and close this ticket type.</small><span class="field-error" data-error-for="staffRoleIds"></span></label>
+                    <label class="field">Discord category<select name="categoryId" data-channel-select="category"></select><small>New private ticket channels are created here. Leave blank to use the server default.</small><span class="field-error" data-error-for="categoryId"></span></label>
+                    <label class="field">Support staff role<select name="staffRoleIds" data-role-select multiple size="5"></select><small>These roles can view, claim, and close tickets in this category.</small><span class="field-error" data-error-for="staffRoleIds"></span></label>
                   </div>
                 </section>
                 <section class="surface form-section">
@@ -395,7 +407,7 @@
                   </div>
                 </section>
                 <details class="surface advanced-settings">
-                  <summary><span><strong>Advanced ticket rules</strong><small>Optional permissions, transcripts, limits, and lifecycle controls.</small></span><b>Optional</b></summary>
+                  <summary><span><strong>Advanced</strong><small>Optional permissions, transcripts, limits, and lifecycle controls.</small></span><b>Optional</b></summary>
                   <div class="details-body">
                     <div class="form-grid">
                       <label class="field">Transcript channel override<select name="transcriptChannelId" data-channel-select="text"></select><span class="field-error" data-error-for="transcriptChannelId"></span></label>
@@ -418,7 +430,7 @@
                 <input name="sortOrder" type="hidden" value="0">
                 <div class="sticky-actions ticket-save-actions">
                   <div id="ticket-save-status" class="form-save-status hidden" role="status" aria-live="polite"></div>
-                  <button type="submit">Save ticket type</button>
+                  <button type="submit">Save ticket category</button>
                   <button type="button" class="secondary-button cancel-edit">Cancel edit</button>
                 </div>
               </form>
@@ -430,8 +442,24 @@
           </div>
 
           <div class="ticket-view" id="ticket-view-history">
-            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Activity</p><h3>Recent tickets</h3></div></div><div id="ticket-history" class="table-wrap"></div></article>
-            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Archive</p><h3>Ticket transcripts</h3><p>Closed ticket transcripts saved by Odyssey Bot.</p></div></div><div id="ticket-transcripts" class="table-wrap"></div></article>
+            <article class="surface table-card">
+              <div class="section-title">
+                <div><p class="eyebrow">Activity</p><h3>Recent tickets</h3><p>Search opened, claimed, and closed tickets. Closed tickets link to transcripts when available.</p></div>
+                <div class="table-tools">
+                  <input id="ticket-history-search" type="search" placeholder="Search user, category, channel, reason">
+                  <select id="ticket-history-status"><option value="">All statuses</option><option value="open">Open</option><option value="closed">Closed</option></select>
+                </div>
+              </div>
+              <div id="ticket-history" class="table-wrap"></div>
+            </article>
+            <article class="surface table-card">
+              <div class="section-title">
+                <div><p class="eyebrow">Archive</p><h3>Ticket transcripts</h3><p>Full closed-ticket transcripts saved by CorePanel.</p></div>
+                <div class="table-tools"><input id="ticket-transcript-search" type="search" placeholder="Search transcripts"></div>
+              </div>
+              <div id="ticket-transcripts" class="table-wrap"></div>
+            </article>
+            <article id="ticket-transcript-viewer" class="surface transcript-viewer hidden" aria-live="polite"></article>
           </div>
 
           <div class="ticket-view" id="ticket-view-close-requests">
@@ -520,24 +548,47 @@
 
         <section class="page" id="page-giveaways">
           <div class="page-intro">
-            <div><span class="badge">Community rewards</span><h2>Giveaways</h2><p>Create restart-safe giveaways with role requirements, bonus entries, and winner history.</p></div>
+            <div><span class="badge">Community rewards</span><h2>Giveaways</h2><p>Create polished giveaways with scheduling, winner roles, images, bonus entries, and restart-safe history.</p></div>
           </div>
           <div class="builder-layout">
             <form id="giveaway-form" class="builder-stack">
               <section class="surface form-section">
-                <div class="section-title"><div><span class="step">01</span><h3>Create giveaway</h3><p>Save as draft, then start it when the preview looks right.</p></div></div>
+                <div class="section-title"><div><span class="step">01</span><h3>Basic giveaway</h3><p>Choose the prize, destination channel, winner count, and when it ends.</p></div></div>
                 <div class="form-grid">
                   <label class="field">Prize<input name="prize" required maxlength="200" placeholder="Nitro, merch, custom role"></label>
                   <label class="field">Channel<select name="channelId" data-channel-select="text" required></select></label>
                   <label class="field span-2">Description<textarea name="description" rows="4" maxlength="1000" placeholder="How to enter, eligibility, and extra notes."></textarea></label>
                   <label class="field">Winners<input name="winnersCount" type="number" min="1" max="20" value="1"></label>
                   <label class="field">Ends at<input name="endsAt" type="datetime-local" required></label>
+                  <label class="field">Save mode<select name="status"><option value="draft">Draft - publish manually</option><option value="scheduled">Scheduled - publish later</option></select><small>Scheduled giveaways publish automatically when the bot is running.</small></label>
+                  <label class="field">Starts at<input name="startsAt" type="datetime-local"><small>Required only for scheduled giveaways.</small></label>
+                </div>
+                <span class="field-error" data-error-for="endsAt"></span>
+                <span class="field-error" data-error-for="startsAt"></span>
+              </section>
+
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">02</span><h3>Presentation</h3><p>Make the posted giveaway message feel intentional.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Button label<input name="buttonText" maxlength="80" value="Enter Giveaway" placeholder="Enter Giveaway"></label>
+                  <label class="field">Host user ID<input name="hostUserId" inputmode="numeric" placeholder="Optional Discord user ID"></label>
+                  <label class="field span-2">Message above embed<textarea name="createMessage" rows="2" maxlength="2000" placeholder="Optional text sent above the giveaway embed."></textarea></label>
+                  <label class="field">Thumbnail URL<input name="thumbnailUrl" placeholder="https://..."></label>
+                  <label class="field">Large image URL<input name="imageUrl" placeholder="https://..."></label>
+                </div>
+              </section>
+
+              <details class="surface form-section">
+                <summary>Advanced eligibility and winner actions <span>Optional</span></summary>
+                <div class="details-body form-grid">
                   <label class="field">Required role<select name="requiredRoleId" data-role-select></select></label>
                   <label class="field">Booster bonus entries<input name="boosterBonusEntries" type="number" min="0" max="20" value="0"></label>
                   <label class="field">Bonus role<select name="bonusRoleId" data-role-select></select></label>
                   <label class="field">Bonus role entries<input name="bonusRoleEntries" type="number" min="0" max="20" value="0"></label>
+                  <label class="field">Winner role<select name="winnerRoleId" data-role-select></select><small>Given to winners if CorePanel's role is high enough.</small></label>
+                  <label class="field span-2">Winner DM message<textarea name="winnerDmMessage" rows="3" maxlength="1000" placeholder="You won {prize} in {server}!"></textarea><small>Uses {user}, {user_id}, {prize}, and {giveaway_id}. Leave blank to avoid DMs.</small></label>
                 </div>
-              </section>
+              </details>
               <div class="sticky-actions"><button type="submit">Save giveaway draft</button></div>
             </form>
             <aside class="preview-column">
@@ -547,10 +598,116 @@
           </div>
         </section>
 
+        <section class="page" id="page-polls">
+          <div class="page-intro">
+            <div><span class="badge">Community voting</span><h2>Polls</h2><p>Create clean Discord polls with option icons, scheduling, role access, and readable results.</p></div>
+          </div>
+          <div class="builder-layout">
+            <form id="poll-form" class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Poll setup</h3><p>Write the question and choose where the button poll should be posted.</p></div></div>
+                <div class="form-grid">
+                  <label class="field">Title<input name="title" maxlength="120" placeholder="Community Poll #1"></label>
+                  <label class="field">Channel<select name="channelId" data-channel-select="text" required></select></label>
+                  <label class="field span-2">Question<input name="question" required maxlength="256" placeholder="What should we do for the next event?"></label>
+                </div>
+                <span class="field-error" data-error-for="startsAt"></span>
+                <span class="field-error" data-error-for="endsAt"></span>
+              </section>
+              <section class="surface form-section">
+                <div class="field-builder-header">
+                  <div><span class="step">02</span><strong>Answer options</strong><small>Add 2 to 10 choices. Emojis can be Unicode or Discord custom emoji.</small></div>
+                  <button type="button" class="secondary-button compact" id="add-poll-option">Add option</button>
+                </div>
+                <div id="poll-options" class="field-builder poll-options"></div>
+                <span class="field-error" data-error-for="options"></span>
+              </section>
+              <details class="surface form-section poll-advanced">
+                <summary>Advanced scheduling and voting controls <span>Optional</span></summary>
+                <div class="details-body">
+                  <div class="form-grid">
+                    <label class="field">Save mode<select name="status"><option value="draft">Draft - publish manually</option><option value="scheduled">Scheduled - publish later</option></select><small>Scheduled polls publish automatically when the bot is running.</small></label>
+                    <label class="field">Starts at<input name="startsAt" type="datetime-local"><small>Required only for scheduled polls.</small></label>
+                    <label class="field">Ends at<input name="endsAt" type="datetime-local"><small>Leave blank for manual close.</small></label>
+                    <label class="field">Required role<select name="requiredRoleId" data-role-select></select><small>Only members with this role can vote.</small></label>
+                    <label class="field span-2">Result visibility<select name="resultsVisibility"><option value="public">Show live results publicly</option><option value="after_close">Show results after close</option><option value="hidden">Hide results on public message</option></select><small>The public poll message stays clean either way. Staff can still view stored results in the dashboard.</small></label>
+                  </div>
+                  <div class="check-grid">
+                    <label class="check-card"><input type="checkbox" name="multipleChoice"><span><strong>Multiple choice</strong><small>Let voters toggle more than one button option.</small></span></label>
+                    <label class="check-card"><input type="checkbox" name="anonymous"><span><strong>Anonymous dashboard results</strong><small>Hide voter IDs in dashboard result responses.</small></span></label>
+                    <label class="check-card"><input type="checkbox" name="showLiveResults" checked><span><strong>Update live message</strong><small>Refresh the Discord message after votes when results are public.</small></span></label>
+                  </div>
+                </div>
+              </details>
+              <div class="sticky-actions"><button type="submit">Save poll</button></div>
+            </form>
+            <aside class="preview-column">
+              <section class="surface preview-surface"><div class="section-title"><div><p class="eyebrow">Live preview</p><h3>Poll message</h3></div><span class="live-pill">Live</span></div><div id="poll-preview" class="discord-stage"></div></section>
+              <section class="surface saved-surface">
+                <div class="section-title"><div><p class="eyebrow">Active</p><h3>Open polls</h3></div><span id="poll-active-count" class="count-pill">0</span></div>
+                <div id="poll-active-list" class="item-list"></div>
+              </section>
+              <section class="surface saved-surface">
+                <div class="section-title"><div><p class="eyebrow">Archive</p><h3>Ended and cancelled</h3></div><span id="poll-ended-count" class="count-pill">0</span></div>
+                <div id="poll-ended-list" class="item-list"></div>
+              </section>
+            </aside>
+          </div>
+        </section>
+
         <section class="page" id="page-moderation">
-          <div class="page-intro"><div><span class="badge">Audit trail</span><h2>Moderation</h2><p>Warnings and actions recorded by the bot, kept compact and searchable by Discord ID.</p></div></div>
+          <div class="page-intro"><div><span class="badge">Audit trail</span><h2>Moderation</h2><p>Searchable case records for warnings, timeouts, kicks, bans, clears, and manual staff notes.</p></div></div>
+          <div class="builder-layout moderation-case-layout">
+            <div class="builder-stack">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">01</span><h3>Find moderation cases</h3><p>Search by case number, user ID, username, moderator, action, status, reason, or note.</p></div></div>
+                <form id="case-filter-form" class="form-grid">
+                  <label class="field">Search<input name="query" placeholder="username, user ID, reason, or #42"></label>
+                  <label class="field">Case number<input name="caseNumber" type="number" min="1" placeholder="42"></label>
+                  <label class="field">Action<select name="actionType"><option value="">Any action</option><option value="warn">Warn</option><option value="timeout">Timeout</option><option value="untimeout">Remove timeout</option><option value="kick">Kick</option><option value="ban">Ban</option><option value="unban">Unban</option><option value="message_delete">Message delete</option><option value="manual">Manual</option><option value="role_punishment">Role punishment</option></select></label>
+                  <label class="field">Status<select name="status"><option value="">Any status</option><option value="active">Active</option><option value="expired">Expired</option><option value="reversed">Reversed</option><option value="resolved">Resolved</option><option value="deleted">Deleted</option></select></label>
+                  <label class="field">Moderator ID<input name="moderatorId" placeholder="123456789012345678"></label>
+                  <div class="button-row align-end"><button type="submit">Search cases</button><button type="button" class="secondary-button" id="case-filter-reset">Reset</button><button type="button" class="secondary-button" id="case-export">Export CSV</button></div>
+                </form>
+              </section>
+
+              <article class="surface table-card">
+                <div class="section-title"><div><p class="eyebrow">Case system</p><h3>Moderation cases</h3><p>Structured records created by moderation commands and manual staff actions.</p></div><span id="case-count" class="count-pill">0</span></div>
+                <div id="cases-table" class="table-wrap"></div>
+              </article>
+            </div>
+
+            <aside class="preview-column">
+              <section class="surface form-section">
+                <div class="section-title"><div><span class="step">02</span><h3>Create manual case</h3><p>Use this for staff notes, off-platform context, or actions taken outside the bot.</p></div></div>
+                <form id="case-create-form" class="compact-form">
+                  <label class="field">Target user ID<input name="targetUserId" placeholder="123456789012345678"><span class="field-error" data-error-for="targetUserId"></span></label>
+                  <label class="field">Target username/tag<input name="targetTag" maxlength="120" placeholder="username#0000 or display name"></label>
+                  <label class="field">Action type<input name="actionType" required maxlength="40" value="manual"></label>
+                  <label class="field">Reason<textarea name="reason" rows="3" maxlength="1000" placeholder="Why this case exists"></textarea></label>
+                  <label class="field">Evidence/message link<input name="evidenceUrl" placeholder="https://discord.com/channels/..."></label>
+                  <label class="field">Status<select name="status"><option value="active">Active</option><option value="resolved">Resolved</option><option value="reversed">Reversed</option><option value="expired">Expired</option><option value="deleted">Deleted</option></select></label>
+                  <label class="field">Staff notes<textarea name="notes" rows="3" maxlength="2000" placeholder="Internal staff note"></textarea></label>
+                  <div class="sticky-actions inline"><button type="submit">Create case</button></div>
+                </form>
+              </section>
+
+              <section class="surface form-section case-detail-card">
+                <div class="section-title"><div><span class="step">03</span><h3>Case details</h3><p>Select a case to edit its reason, note, or status.</p></div></div>
+                <div id="case-detail-empty" class="empty-state"><strong>No case selected</strong><span>Choose View on a case to inspect and update it.</span></div>
+                <form id="case-edit-form" class="compact-form hidden">
+                  <input type="hidden" name="caseNumber">
+                  <div id="case-detail-summary" class="case-summary-grid"></div>
+                  <label class="field">Reason<textarea name="reason" rows="3" maxlength="1000"></textarea></label>
+                  <label class="field">Status<select name="status"><option value="active">Active</option><option value="expired">Expired</option><option value="reversed">Reversed</option><option value="resolved">Resolved</option><option value="deleted">Deleted</option></select></label>
+                  <label class="field">Staff notes<textarea name="notes" rows="5" maxlength="2000"></textarea></label>
+                  <div class="button-row"><button type="submit">Save case</button><button type="button" class="secondary-button" id="case-mark-resolved">Mark resolved</button><button type="button" class="secondary-button" id="case-mark-reversed">Mark reversed</button><button type="button" class="secondary-button" id="case-copy-summary">Copy summary</button></div>
+                </form>
+              </section>
+            </aside>
+          </div>
+
           <div class="data-stack">
-            <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Case system</p><h3>Moderation cases</h3><p>Structured case records created by moderation commands and manual staff actions.</p></div></div><div id="cases-table" class="table-wrap"></div></article>
             <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Warnings</p><h3>Recent warnings</h3></div></div><div id="warnings-table" class="table-wrap"></div></article>
             <article class="surface table-card"><div class="section-title"><div><p class="eyebrow">Actions</p><h3>Moderation history</h3></div></div><div id="actions-table" class="table-wrap"></div></article>
           </div>
@@ -582,7 +739,7 @@
             <div>
               <span class="badge">Server audit feed</span>
               <h2>Server logs</h2>
-              <p>Choose what Odyssey Bot records. Normal messages being sent are never logged.</p>
+              <p>Choose what CorePanel records. Normal messages being sent are never logged.</p>
             </div>
           </div>
           <form id="logging-form" class="settings-layout logging-layout">
@@ -595,7 +752,7 @@
                 <label class="switch"><input name="enabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
               </div>
               <div class="form-grid">
-                <label class="field">Logging channel<select name="channelId" data-channel-select="text"></select><small>Odyssey Bot needs View Channel, Send Messages, and Embed Links here.</small><span class="field-error" data-error-for="channelId"></span></label>
+                <label class="field">Logging channel<select name="channelId" data-channel-select="text"></select><small>CorePanel needs View Channel, Send Messages, and Embed Links here.</small><span class="field-error" data-error-for="channelId"></span></label>
                 <div class="logging-assurance">
                   <strong>Privacy boundary</strong>
                   <span>Message edit and delete events include available message content. Ordinary message sends are not collected or copied.</span>
@@ -637,6 +794,59 @@
           </form>
         </section>
 
+        <section class="page" id="page-dms">
+          <div class="page-intro">
+            <div>
+              <span class="badge">Staff communication</span>
+              <h2>Direct messages</h2>
+              <p>Control safe one-user staff DMs, moderation notices, and giveaway winner messages.</p>
+            </div>
+            <div class="topbar-actions"><button class="secondary-button" data-doc-topic="dm-features">DM docs</button></div>
+          </div>
+          <form id="dm-settings-form" class="settings-layout">
+            <section class="surface form-section">
+              <div class="section-title">
+                <div><span class="step">01</span><h3>Staff /dm command</h3><p>One member at a time, permission-checked, rate-limited, and audit logged.</p></div>
+                <label class="switch"><input name="dmCommandEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
+              </div>
+              <div class="form-grid">
+                <label class="field">Rate limit seconds<input name="dmCommandRateLimitSeconds" type="number" min="5" max="3600" value="30"><small>Applies per staff member, per server. This helps prevent accidental spam.</small><span class="field-error" data-error-for="dmCommandRateLimitSeconds"></span></label>
+                <label class="check-card"><input name="dmCommandLogContent" type="checkbox"><span><strong>Log message preview</strong><small>Off by default. Enable only if your staff log channel is private and trusted.</small></span></label>
+              </div>
+            </section>
+
+            <section class="surface form-section">
+              <div class="section-title">
+                <div><span class="step">02</span><h3>Moderation DMs</h3><p>Tell members what happened when staff warn, timeout, kick, ban, or create manual cases.</p></div>
+                <label class="switch"><input name="moderationDmEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
+              </div>
+              <div class="option-grid">
+                <label class="check-card"><input name="dmOnWarn" type="checkbox"><span><strong>Warnings</strong><small>DM when /warn is used.</small></span></label>
+                <label class="check-card"><input name="dmOnTimeout" type="checkbox"><span><strong>Timeout changes</strong><small>DM for timeout and timeout removal.</small></span></label>
+                <label class="check-card"><input name="dmOnKick" type="checkbox"><span><strong>Kicks</strong><small>Attempt the DM before kicking.</small></span></label>
+                <label class="check-card"><input name="dmOnBan" type="checkbox"><span><strong>Bans</strong><small>Attempt the DM before banning.</small></span></label>
+                <label class="check-card"><input name="dmOnUnban" type="checkbox"><span><strong>Unbans</strong><small>DM when the bot can resolve the user.</small></span></label>
+                <label class="check-card"><input name="dmOnManualCase" type="checkbox"><span><strong>Manual cases</strong><small>DM when staff create a manual case.</small></span></label>
+              </div>
+              <label class="field">Moderation DM template<textarea name="moderationDmTemplate" rows="4" maxlength="1800">You received a moderation action in {server}: {action}. Reason: {reason}. Case: {case}. {duration}</textarea><small>Variables: <code>{server}</code> <code>{action}</code> <code>{reason}</code> <code>{case}</code> <code>{duration}</code> <code>{moderator}</code> <code>{appeal}</code></small><span class="field-error" data-error-for="moderationDmTemplate"></span></label>
+              <label class="field">Appeal/contact message<textarea name="moderationAppealMessage" rows="3" maxlength="1000" placeholder="Appeal in #support or contact the staff team."></textarea><small>Optional. Added to moderation DMs when configured.</small><span class="field-error" data-error-for="moderationAppealMessage"></span></label>
+            </section>
+
+            <section class="surface form-section">
+              <div class="section-title">
+                <div><span class="step">03</span><h3>Giveaway winner DMs</h3><p>Send one clean DM to each winner when a giveaway ends or is rerolled.</p></div>
+                <label class="switch"><input name="giveawayWinnerDmEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label>
+              </div>
+              <label class="field">Default winner message<textarea name="giveawayDefaultWinnerDmMessage" rows="3" maxlength="1000">You won the giveaway in {serverName}: {prize}. Please contact staff or check the giveaway channel for next steps.</textarea><small>Used when the giveaway does not have its own custom winner DM. Variables: <code>{serverName}</code> <code>{server}</code> <code>{prize}</code> <code>{user}</code> <code>{giveaway_id}</code></small><span class="field-error" data-error-for="giveawayDefaultWinnerDmMessage"></span></label>
+            </section>
+
+            <div class="sticky-actions ticket-save-actions">
+              <div id="dm-settings-save-status" class="form-save-status hidden" role="status" aria-live="polite"></div>
+              <button type="submit">Save DM settings</button>
+            </div>
+          </form>
+        </section>
+
         <section class="page" id="page-branding">
           <div class="page-intro">
             <div><span class="badge">Visual identity</span><h2>Appearance</h2><p>Set reusable colors, media, panel defaults, and see the result before saving.</p></div>
@@ -647,9 +857,9 @@
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">01</span><h3>Brand identity</h3><p>Used as reusable defaults across server messages.</p></div></div>
                 <div class="form-grid">
-                  <label class="field">Bot nickname in this server<input name="serverName" required maxlength="32" value="Odyssey Bot"><small>Saving updates Odyssey Bot's Discord nickname in the selected server. Discord requires Change Nickname permission.</small><span class="field-error" data-error-for="serverName"></span></label>
+                  <label class="field">Bot nickname in this server<input name="serverName" required maxlength="32" value="CorePanel"><small>Saving updates CorePanel's Discord nickname in the selected server. Discord requires Change Nickname permission.</small><span class="field-error" data-error-for="serverName"></span></label>
                   <label class="field">Dashboard accent<div class="color-control"><input name="accentColor" type="color" value="#c58b4b"><input name="accentColorText" value="#C58B4B" maxlength="7"></div><small>Updates dashboard highlights for the active server.</small></label>
-                  <label class="field">Footer text<input name="footerText" maxlength="200" placeholder="Powered by Odyssey Bot"></label>
+                  <label class="field">Footer text<input name="footerText" maxlength="200" placeholder="Powered by CorePanel"></label>
                   <label class="field">Ticket button style<select name="ticketButtonStyle"><option value="secondary">Neutral gray</option><option value="primary">Discord blue</option><option value="success">Success green</option></select><small>Used by ticket panels displayed as buttons.</small></label>
                   <label class="field span-2">Embed icon<div class="media-control"><input name="embedIconUrl" placeholder="URL or upload"><button type="button" class="upload-button" data-upload-target="embedIconUrl">Upload</button></div><span class="field-error" data-error-for="embedIconUrl"></span></label>
                 </div>
@@ -710,7 +920,7 @@
               </section>
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">02</span><h3>Auto Roles</h3><p>Assign selected roles independently from welcome messages.</p></div><label class="switch"><input name="autoRolesEnabled" type="checkbox"><span></span><strong class="switch-state">Disabled</strong></label></div>
-                <label class="field">Roles assigned on join<select name="autoRoleIds" data-role-select multiple size="5"></select><small>Odyssey Bot needs Manage Roles and must sit above every selected role.</small><span class="field-error" data-error-for="autoRoleIds"></span></label>
+                <label class="field">Roles assigned on join<select name="autoRoleIds" data-role-select multiple size="5"></select><small>CorePanel needs Manage Roles and must sit above every selected role.</small><span class="field-error" data-error-for="autoRoleIds"></span></label>
               </section>
               <section class="surface form-section">
                 <div class="section-title"><div><span class="step">03</span><h3>Channel message</h3><p>Public welcome in the chosen channel.</p></div></div>
@@ -852,13 +1062,13 @@
                     </div>
                     <div class="privacy-disclosure">
                       <strong>Privacy-first verification</strong>
-                      <p>Odyssey Bot confirms Discord identity and server membership. Optional VPN checks are disclosed. Raw IPs and browser/device fingerprints are not stored.</p>
+                      <p>CorePanel confirms Discord identity and server membership. Optional VPN checks are disclosed. Raw IPs and browser/device fingerprints are not stored.</p>
                     </div>
                     <div id="verification-provider-status" class="provider-status-grid"></div>
                     <div class="form-grid">
                       <label class="field">Verified / community role<select name="verifiedRoleId" data-role-select></select><small>Only assigned after verification passes. The bot role must be above it.</small><span class="field-error" data-error-for="verifiedRoleId"></span></label>
                       <label class="field">Existing verification channel<select name="verificationChannelId" data-channel-select="text"></select><small>Choose one, or leave blank and enable automatic creation.</small><span class="field-error" data-error-for="verificationChannelId"></span></label>
-                      <label class="field">New channel name<input name="verificationChannelName" maxlength="100" value="verify"><small>Used only if Odyssey Bot creates the channel.</small><span class="field-error" data-error-for="verificationChannelName"></span></label>
+                      <label class="field">New channel name<input name="verificationChannelName" maxlength="100" value="verify"><small>Used only if CorePanel creates the channel.</small><span class="field-error" data-error-for="verificationChannelName"></span></label>
                       <label class="field">Verification log channel<select name="logChannelId" data-channel-select="text"></select><small>Receives setup, pass, fail, and role assignment events.</small><span class="field-error" data-error-for="logChannelId"></span></label>
                     </div>
                   </section>
@@ -879,7 +1089,7 @@
                     <div class="section-title"><div><span class="step">03</span><h3>Unverified visibility</h3><p>Hidden selections override public selections. Existing staff and user overwrites are preserved.</p></div></div>
                     <div class="inline-alert warning">
                       <strong>Permission changes affect your live Discord server.</strong>
-                      Run the dry preview first. Odyssey Bot backs up every overwrite it changes so safe disable can restore it later.
+                      Run the dry preview first. CorePanel backs up every overwrite it changes so safe disable can restore it later.
                     </div>
                     <div class="form-grid">
                       <label class="field">Public categories<select name="publicCategoryIds" data-channel-select="category" multiple size="7"></select><small>Unverified users can see these categories and synced children.</small></label>
@@ -904,10 +1114,16 @@
                       <label class="field">Record retention (hours)<input name="recordRetentionHours" type="number" min="1" max="8760" value="168"></label>
                       <label class="field">Minimum account age (days)<input name="minAccountAgeDays" type="number" min="0" max="3650" value="0"><small>0 disables this signal.</small></label>
                       <label class="field">Minimum server time (days)<input name="minServerDays" type="number" min="0" max="3650" value="0"><small>0 disables this signal.</small></label>
+                      <label class="field">Auto-kick after (hours)<input name="autoKickAfterHours" type="number" min="1" max="720" value="24"><small>Used only when auto-kick is enabled.</small></label>
                     </div>
                     <div class="option-grid">
                       <label class="check-card"><input name="vpnCheckEnabled" type="checkbox"><span><strong>VPN / proxy check</strong><small>Runs only when the optional provider is configured.</small></span></label>
                       <label class="check-card"><input name="vpnFailClosed" type="checkbox"><span><strong>Fail if provider is unavailable</strong><small>Usually leave this off to avoid blocking during provider outages.</small></span></label>
+                      <label class="check-card warning-card"><input name="autoKickUnverified" type="checkbox"><span><strong>Auto-kick unverified users</strong><small>Disabled by default. Skips bots, admins, and configured staff/admin roles.</small></span></label>
+                    </div>
+                    <div class="inline-alert warning">
+                      <strong>Auto-kick is a live moderation action.</strong>
+                      Keep it off until the verification role, bot hierarchy, Kick Members permission, and public link all show ready.
                     </div>
                   </section>
 
@@ -954,7 +1170,12 @@
               </div>
 
               <article class="surface table-card verification-record-card">
-                <div class="section-title"><div><p class="eyebrow">Recent verifications</p><h3>Verification records</h3><p>Limited records contain Discord user ID, result, disclosed reason codes, and expiry. Raw IPs and fingerprints are not stored.</p></div></div>
+                <div class="section-title"><div><p class="eyebrow">Member queue</p><h3>Pending verification users</h3><p>Current server members who do not have the verified role yet. Staff can approve or deny manually.</p></div></div>
+                <div id="verification-pending-users" class="table-wrap"></div>
+              </article>
+
+              <article class="surface table-card verification-record-card">
+                <div class="section-title"><div><p class="eyebrow">Recent verifications</p><h3>Verification records</h3><p>Limited records contain Discord user ID, result, disclosed reason codes, and expiry. Raw IPs and fingerprints are not stored.</p></div><div id="verification-record-summary" class="record-summary-pills"></div></div>
                 <div id="verification-records" class="table-wrap"></div>
               </article>
             </div>
@@ -1020,17 +1241,28 @@
                     <label class="field">Panel name<input name="name" required maxlength="100" placeholder="Community Roles"></label>
                     <label class="field">Post channel<select name="channelId" data-channel-select="text"></select></label>
                     <label class="field">Layout<select name="layout"><option value="buttons">Buttons</option><option value="dropdown">Dropdown menu</option></select><small>Buttons are best for a few roles. Dropdowns are cleaner for larger menus.</small></label>
-                    <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select><small>Optional. Falls back to the mod log channel.</small></label>
+                    <label class="field">Panel color<div class="color-control"><input name="color" type="color" value="#5865f2"><input name="colorText" value="#5865F2" maxlength="7"></div></label>
                     <label class="field span-2">Discord title<input name="title" required maxlength="256" value="Choose your roles"></label>
                     <label class="field span-2">Description<textarea name="description" rows="4" maxlength="4000" placeholder="Click a button to add or remove a role."></textarea></label>
-                    <label class="field">Color<div class="color-control"><input name="color" type="color" value="#5865f2"><input name="colorText" value="#5865F2" maxlength="7"></div></label>
-                    <label class="field">Global required role<select name="requiredRoleId" data-role-select></select><small>Optional role required before claiming any role on this panel.</small></label>
-                    <label class="field">Max per category<input name="maxSelectedPerCategory" type="number" min="0" max="25" value="0"><small>0 means unlimited unless category replacement is enabled.</small></label>
-                    <label class="check-card"><input name="removeRoleOnSelect" type="checkbox"><span><strong>Replace within category</strong><small>When enabled, selecting one role removes older roles in the same category.</small></span></label>
-                    <label class="field span-2">Roles<select name="roleIds" data-role-select multiple size="8"></select><small>The bot role must be above every selected role. Select roles, then customize how each option appears below.</small><span class="field-error" data-error-for="roleIds"></span></label>
                   </div>
-                  <div class="field-builder-header"><div><strong>Role options</strong><small>Labels, descriptions, categories, and emojis shown on the live panel.</small></div></div>
+                  <div class="field-builder-header"><div><strong>Role options</strong><small>Add the roles members can claim. Each option can have its own label, emoji, description, category, and button style.</small></div><button type="button" class="secondary-button compact" id="add-role-panel-option">Add role option</button></div>
+                  <span class="field-error" data-error-for="roleIds"></span>
                   <div id="role-panel-options" class="role-option-grid"></div>
+                  <details class="advanced-settings">
+                    <summary><span><strong>Advanced role rules</strong><small>Required roles, category limits, add-only mode, images, and logging.</small></span><b>Optional</b></summary>
+                    <div class="details-body">
+                      <div class="form-grid">
+                        <label class="field">Global required role<select name="requiredRoleId" data-role-select></select><small>Optional role required before claiming any role on this panel.</small></label>
+                        <label class="field">Log channel<select name="logChannelId" data-channel-select="text"></select><small>Optional. Falls back to the mod log channel.</small></label>
+                        <label class="field">Default button style<select name="buttonStyle"><option value="secondary">Neutral</option><option value="primary">Primary</option><option value="success">Success</option><option value="danger">Danger</option></select></label>
+                        <label class="field">Click behavior<select name="toggleMode"><option value="toggle">Add or remove role</option><option value="add_only">Only add role</option></select><small>Add-only panels will not remove a role when clicked again.</small></label>
+                        <label class="field">Max roles per category<input name="maxSelectedPerCategory" type="number" min="0" max="25" value="0"><small>0 means unlimited unless replacement is enabled.</small></label>
+                        <label class="check-card"><input name="removeRoleOnSelect" type="checkbox"><span><strong>Exclusive categories</strong><small>When enabled, selecting one role removes older roles in the same category.</small></span></label>
+                        <label class="field">Thumbnail URL<input name="thumbnailUrl" placeholder="https://example.com/icon.png"></label>
+                        <label class="field">Image/banner URL<input name="imageUrl" placeholder="https://example.com/banner.png"></label>
+                      </div>
+                    </div>
+                  </details>
                 </section>
                 <div class="sticky-actions"><button type="submit">Save role panel</button><button type="button" class="secondary-button cancel-edit">Cancel edit</button></div>
               </form>
@@ -1090,14 +1322,14 @@
 
         <section class="page" id="page-docs">
           <div class="page-intro">
-            <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run Odyssey Bot, from first setup to troubleshooting.</p></div>
+            <div><span class="badge">Help center</span><h2>Documentation</h2><p>Everything you need to run CorePanel, from first setup to troubleshooting.</p></div>
             <div class="topbar-actions"><button type="button" id="docs-search-trigger" class="docs-search-trigger"><span>Search docs</span><kbd>⌘K</kbd></button></div>
           </div>
           <section class="docs-hero surface">
             <div>
               <p class="eyebrow">Setup guide system</p>
               <h3>Find the right setup step without hunting through the repo</h3>
-              <p>Docs are grouped by first setup, feature guides, feature references, and troubleshooting. Code blocks use the real scripts from this project and secrets stay in your local <code>.env</code>.</p>
+              <p>Docs are grouped by first setup, feature guides, feature references, and troubleshooting. Code blocks use the real scripts from this project and secrets stay server-side or in Railway service variables.</p>
             </div>
             <div class="docs-hero-actions">
               <button type="button" data-doc-topic="quick-start">Open Quick Start</button>
@@ -1172,7 +1404,7 @@
               <article class="surface docs-section" id="docs-getting-started">
                 <div class="section-title"><div><span class="step">01</span><h3>Getting Started</h3></div></div>
                 <div class="docs-body">
-                  <p>Odyssey Bot is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.</p>
+                  <p>CorePanel is a self-hosted Discord bot with a web dashboard. You create commands, ticket systems, announcements, and security rules in the dashboard, and the bot executes them in Discord.</p>
                   <h4>Quick setup</h4>
                   <ol>
                     <li>Install dependencies: <code>pnpm install</code></li>
@@ -1180,14 +1412,14 @@
                     <li>Register slash commands: <code>pnpm deploy:commands</code></li>
                     <li>Start the bot: <code>pnpm bot</code></li>
                     <li>Start the dashboard: <code>pnpm dashboard</code></li>
-                    <li>Open <code>http://127.0.0.1:3210</code> and log in with your <code>DASHBOARD_PASSWORD</code></li>
+                    <li>Open <code>http://127.0.0.1:3210</code>, complete <code>/setup</code>, then log in with the dashboard password you created</li>
                   </ol>
                   <h4>Required environment variables</h4>
                   <ul>
-                    <li><code>DISCORD_TOKEN</code> — Bot token from Discord Developer Portal</li>
-                    <li><code>DISCORD_CLIENT_ID</code> — Application ID</li>
+                    <li>Bot token — paste once in the setup wizard; it is encrypted server-side</li>
+                    <li>Client/Application ID — paste in setup or Railway variables</li>
                     <li><code>DISCORD_GUILD_ID</code> — Optional preferred server for a new dashboard session</li>
-                    <li><code>DASHBOARD_PASSWORD</code> — Dashboard login password (min 8 chars)</li>
+                    <li>Dashboard password — created in setup and stored as a hash</li>
                     <li><code>DATABASE_URL</code> — <code>file:./data/bot.db</code> for SQLite</li>
                   </ul>
                 </div>
@@ -1395,7 +1627,7 @@
                   <h4>Permissions</h4>
                   <p>Staff means Manage Channels or a configured staff role. Community means the ticket opener or a member with one of the ticket type's Allowed / community roles. The reviewer must be on the opposite side from the requester.</p>
                   <h4>Transcripts</h4>
-                  <p>When a transcript channel is configured, the bot exports the newest 100 ticket messages as a text file before deleting the closed channel.</p>
+                  <p>When a ticket closes, the bot saves a dashboard transcript with ticket metadata and up to the newest 1,000 fetched messages. If a transcript channel is configured, it also posts a downloadable text file before deleting the closed channel.</p>
                 </div>
               </article>
 
@@ -1516,7 +1748,7 @@
                   <h4>Commands not appearing in Discord</h4>
                   <ul>
                     <li>Run <code>pnpm deploy:commands</code> after any command definition change.</li>
-                    <li>The deploy script registers commands in every server where Odyssey Bot is installed.</li>
+                    <li>The deploy script registers commands in every server where CorePanel is installed.</li>
                     <li>Make sure the bot was invited with the <code>applications.commands</code> scope.</li>
                   </ul>
                   <h4>Role actions failing</h4>

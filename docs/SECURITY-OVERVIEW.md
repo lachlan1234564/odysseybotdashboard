@@ -1,6 +1,6 @@
 # Security Overview
 
-Odyssey Bot includes Anti Raid, Anti Nuke, and Role Protection. Start with alert or log-only behavior, review the logs, and tune thresholds before enabling automatic punishment.
+CorePanel includes Anti Raid, Anti Nuke, and Role Protection. Start with alert or log-only behavior, review the logs, and tune thresholds before enabling automatic punishment.
 
 ## Anti Raid
 

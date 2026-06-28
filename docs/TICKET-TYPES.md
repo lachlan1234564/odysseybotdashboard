@@ -11,7 +11,7 @@ Ticket types define what happens after a member chooses an option on a ticket pa
 5. Select staff roles that can view, write, claim, and close these tickets.
 6. Design the welcome embed and save the type.
 
-The common settings stay visible. Less frequently used permissions, transcript overrides, limits, pings, and automatic closing are under **Advanced ticket rules**.
+The common settings stay visible. Less frequently used permissions, transcript overrides, limits, pings, and automatic closing are under **Advanced**.
 
 ## Access rules
 
@@ -22,7 +22,7 @@ The common settings stay visible. Less frequently used permissions, transcript o
 
 ## Lifecycle controls
 
-Open **Advanced ticket rules** to configure these options:
+Open **Advanced** to configure these options:
 
 - **Max open per user** limits duplicate active tickets of this type.
 - **Channel naming format** supports `{username}`, `{type}`, and `{userId}`.
@@ -34,4 +34,4 @@ Open **Advanced ticket rules** to configure these options:
 
 ## Logging
 
-Choose a transcript/log channel override on the type, or use the default ticket log channel from **Server Settings**. When configured, the bot exports the newest 100 ticket messages when the ticket closes.
+Choose a transcript/log channel override on the type, or use the default ticket log channel from **Server Settings**. When the ticket closes, the bot saves a dashboard transcript and can post a downloadable text file to that channel.

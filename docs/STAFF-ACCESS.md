@@ -78,7 +78,7 @@ The current MVP uses **one shared password**:
 - It does **not** identify individual staff members.
 - Saved dashboard changes use `local-dashboard` as the audit actor.
 - Dashboard sessions are stored in memory and reset on deployment.
-- Changing `DASHBOARD_PASSWORD` invalidates the derived session secret after a restart.
+- Changing the setup password or `DASHBOARD_PASSWORD` compatibility override invalidates the derived session secret after a restart.
 - There is **no** password reset email, multi-factor authentication, or OAuth.
 
 **Best practice:** Use a long unique password and share it only with trusted staff. Rotate it when a staff member should lose access.
@@ -146,7 +146,7 @@ After deployment:
 2. Open the `https://...railway.app` URL.
 3. Confirm the login page appears.
 4. Give the URL and dashboard password to trusted staff.
-5. Keep the bot token only in Railway Variables and your private local `.env`.
+5. Keep the bot token only in CorePanel setup storage, Railway Variables, or your private local `.env`.
 
 Use **one Railway application replica** for this MVP. Multiple replicas would create duplicate Discord bot processes and would not share in-memory sessions or cooldowns.
 

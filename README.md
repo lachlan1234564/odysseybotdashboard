@@ -1,325 +1,206 @@
-# Odyssey Bot
+# CorePanel
 
-Odyssey Bot is a modular Discord administration bot built with TypeScript, discord.js v14, a password-protected web dashboard, and a shared database. Use SQLite for local development or PostgreSQL when deploying to Railway.
+CorePanel is a self-hosted Discord bot dashboard built with TypeScript, `discord.js` v14, Express, pnpm, SQLite for local development, and PostgreSQL for Railway production hosting.
 
-This README is a quick reference. The same beginner-friendly guides below are rendered inside the authenticated dashboard under **Docs / Help**, which is the easiest place to read them:
-
-- **[Setup and Railway deployment](docs/SETUP.md)** — Get the bot running from scratch.
-- **[Download and setup from GitHub](docs/DOWNLOAD_AND_SETUP.md)** — Clone/download, configure `.env`, invite the bot, and run locally.
-- **[Dashboard and feature guide](docs/DASHBOARD-GUIDE.md)** — Learn every dashboard page and feature.
-- **[Staff dashboard access](docs/STAFF-ACCESS.md)** — Give staff safe access without leaking credentials.
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** — Fix common problems step by step.
-
----
+It gives server owners a private admin panel for tickets, transcripts, AutoMod, logging, verification, role panels, giveaways, polls, moderation, custom commands, socials, welcome/boost messages, and server settings.
 
 ## Quick Start
-
-Run these commands from `~/Desktop/rapid-discord-bot`:
 
 ```bash
 pnpm install
 pnpm db:setup
-pnpm deploy:commands
-pnpm bot
-```
-
-Open a second terminal in the same folder:
-
-```bash
-pnpm dashboard
-```
-
-`pnpm dashboard` starts the local dashboard and opens `http://127.0.0.1:3210`. Log in with `DASHBOARD_PASSWORD` from `.env`.
-
-To run the bot and dashboard together:
-
-```bash
 pnpm dev
 ```
 
-For your very first time, follow the complete walkthrough in [docs/SETUP.md](docs/SETUP.md).
+Open `http://127.0.0.1:3210/setup`, paste your Discord bot details, create a dashboard password, then restart the bot if it was already running without a token.
 
----
+After setup, deploy slash commands:
 
-## What the Project Does
-
-The project has three main parts:
-
-- **Discord bot:** Logs in to Discord, handles slash commands, creates tickets, sends announcements, runs custom actions, and performs moderation.
-- **Dashboard:** A web interface with forms, Discord resource dropdowns, live previews, image uploads, and settings—without putting channel or role IDs in `.env`.
-- **Database:** Stores guild settings, branding, custom commands, ticket configuration and records, announcement templates, warnings, and moderation history.
-
-The bot and dashboard share the same TypeScript config and database layer.
-
----
-
-## Current Features
-
-### Discord Commands
-
-| Command | Who Can Use It | What It Does |
-|---------|----------------|--------------|
-| `/ping` | Everyone | Confirm the bot is online and show gateway latency |
-| `/help` | Everyone | List commands by category with permission labels |
-| `/server info` | Everyone | View server stats and bot setup overview |
-| `/user-info member` | Everyone | View account age, join date, roles, and warnings |
-| `/automod-status` | Bot admins | View current Auto Mod rules and link settings |
-| `/socials-post [channel]` | Bot admins | Publish the configured social promotion embed |
-| `/bot-status` | Everyone | View bot uptime, latency, memory, and server count |
-| `/custom name [text] [reason] [target]` | Configurable per command | Run a dashboard-created command |
-| `/ticket-panel [panel] [channel]` | Bot admins | Post a saved ticket panel |
-| `/reaction-roles panel [channel]` | Bot admins | Post a saved self-service role panel |
-| `/giveaway start/end/reroll/cancel` | Manage Server | Create and manage restart-safe giveaways |
-| `/case view/search/create/edit/note` | Moderate Members | View and manage moderation cases |
-| `/announce template [channel]` | Bot admins | Preview and confirm an announcement |
-| `/close-request [reason]` | Ticket staff | Ask the ticket opener/community to approve closure |
-| `/lockdown [channel]` | Bot admins | Lock text channels — prevent @everyone from sending messages |
-| `/unlockdown [channel]` | Bot admins | Unlock channels after a lockdown |
-| `/warn member reason` | Moderate Members | Store a warning |
-| `/warnings member` | Moderate Members | Show recent warnings |
-| `/timeout member minutes [reason]` | Moderate Members | Time out a member |
-| `/kick member [reason]` | Kick Members | Kick a member |
-| `/ban member [delete_days] [reason]` | Ban Members | Ban a member |
-| `/clear amount` | Manage Messages | Delete recent messages |
-
-### Dashboard Features
-
-- **Command Studio:** Build custom actions (plain messages, embeds, channel sends, role management, ticket panels, announcements) with permissions, cooldowns, and live preview.
-- **Ticket Studio:** Create ticket types with routing, staff roles, welcome messages, and lifecycle rules. Compose them into panels (dropdown or buttons) or multi-panel menus.
-- **Ticket Transcripts:** Closed tickets are saved as database-backed transcripts with message metadata and optional transcript-channel download files.
-- **Announcements:** Save embed or plain-text templates with a preview-and-confirm flow in Discord.
-- **Social Promotion:** Build and publish guild-specific embed or plain-text social directories with safe links, uploads, and live preview.
-- **Automation:** Configure channel-specific link policies, invite blocking, role panels, sticky messages, and scheduled announcements.
-- **Role Panels 2.0:** Publish button or dropdown self-service role panels with categories, optional required roles, emojis, descriptions, and safer role hierarchy validation.
-- **Giveaways:** Create durable giveaways, collect entries through Discord buttons, end early, cancel, or reroll winners.
-- **Member messages:** Configure public welcomes, optional DMs, safe auto-roles, and goodbye messages.
-- **Security:** Configure anti-raid, anti-nuke, role protection, and a privacy-conscious Discord OAuth verification gate with reversible channel permissions.
-- **Moderation:** View warnings, raw moderation actions, and structured moderation cases.
-- **Server Settings:** Configure channels, categories, staff roles, admin roles, and muted role.
-- **Appearance:** Set fallback branding, colors, and images.
-- **Server Logs:** Configure a private, per-guild audit feed for member, message-change, voice, channel, role, server, invite, thread, moderation, and dashboard events. Normal message sends are never logged.
-
-### Infrastructure
-
-- Guild-scoped slash commands registered to every server where the bot is installed
-- Authenticated dashboard server switcher with isolated settings and content per guild
-- Live custom command, embed, announcement, and ticket previews
-- Authenticated test sends to a selected Discord channel
-- Image URLs and local PNG, JPEG, GIF, or WebP uploads up to 8 MB
-- Local SQLite and Railway PostgreSQL support
-
-### Logging Intents and Permissions
-
-For complete server logging, enable **Server Members Intent** and **Message Content Intent**
-in the Discord Developer Portal. The bot also subscribes to guild invite, voice state,
-webhook, and emoji/sticker gateway events.
-
-Give the bot role **View Audit Log** to attribute administrative actions where Discord
-provides an audit entry. In the private logging channel, grant **View Channel**,
-**Read Message History**, **Send Messages**, and **Embed Links**. Events still log with
-an unknown executor when audit-log access is unavailable.
-
----
-
-## MVP Limitations
-
-- Dashboard-created commands run through `/custom`. They do not automatically become new top-level commands such as `/rules`. To add true top-level commands, edit `src/bot/commands.ts` and run `pnpm deploy:commands`.
-- The dashboard uses one shared admin password. Discord OAuth is available only for member verification; per-staff OAuth dashboard accounts are not implemented yet.
-- Dashboard sessions and command cooldowns are stored in memory and reset when the process restarts.
-- Uploaded files require a persistent Railway volume in production.
-- Ticket logging records events and saves up to the newest 1,000 fetched messages as a dashboard-viewable transcript, with an optional downloadable transcript file in the configured transcript channel.
-- Use one Railway application replica. The bot and dashboard can manage multiple Discord servers from that process.
-- The `deleteUsage` custom command option is stored for future message/prefix command support. Discord slash-command invocations cannot be deleted like messages.
-
----
-
-## Environment Variables
-
-Create `.env` in the project root. Do not commit or share it.
-
-```dotenv
-DISCORD_TOKEN=your_bot_token
-DISCORD_CLIENT_ID=your_application_id
-# Optional member verification:
-# DISCORD_CLIENT_SECRET=your_oauth_client_secret
-# DISCORD_OAUTH_REDIRECT_URI=https://verify.YOUR_DOMAIN.com/api/verify/callback
-# VERIFY_PUBLIC_BASE_URL=https://verify.YOUR_DOMAIN.com
-# PUBLIC_BASE_URL=https://admin.YOUR_DOMAIN.com
-# Optional preferred dashboard server:
-DISCORD_GUILD_ID=your_server_id
-DASHBOARD_PASSWORD=use_a_long_random_password
-DATABASE_URL=file:./data/bot.db
-DATABASE_SSL=false
-DASHBOARD_PORT=3210
-DASHBOARD_HOST=127.0.0.1
-UPLOADS_DIR=./uploads
-NODE_ENV=development
-# TRUST_PROXY=true  # enable behind Cloudflare Tunnel or reverse proxy
-# VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
-# VPN_CHECK_API_KEY=your_provider_api_key
+```bash
+pnpm deploy:commands
 ```
 
-Only secrets and process startup values belong in `.env`. Configure Discord channels, roles, colors, images, ticket settings, and announcements in the dashboard.
+## Main Features
 
-For a complete variable reference, see [docs/SETUP.md](docs/SETUP.md).
+- Public-ready setup wizard at `/setup`
+- Encrypted server-side Discord bot token storage
+- Dashboard login with a password created during setup
+- Multi-server dashboard selection
+- Tickets, ticket types, close flows, and transcripts
+- Custom command builder
+- Announcements and social promotion embeds
+- AutoMod, anti-raid, anti-nuke, and role protection
+- Server event logging
+- Verification gate with Discord OAuth support
+- Role panels, giveaways, polls, moderation cases, and DM tools
+- Built-in Help/Docs area inside the dashboard
 
----
+## Requirements
 
-## First Dashboard Configuration
+- Node.js 22+ recommended
+- pnpm
+- A Discord Developer Portal application
+- A Discord bot token
+- Discord privileged intents enabled where needed
+- SQLite locally or PostgreSQL on Railway
 
-Follow these steps to get from a fresh install to a working server. For detailed explanations of every field, see [docs/DASHBOARD-GUIDE.md](docs/DASHBOARD-GUIDE.md).
+## No Local `.env` Required For Normal Setup
 
-### Step 1: Configure Server Settings
+CorePanel can start without a bot token. If the token is missing, the dashboard opens in setup mode instead of crashing.
 
-1. Open the dashboard and go to **Server Settings**.
-2. Select:
-   - **Mod log channel** — where moderation actions are logged.
-   - **Announcement channel** — default channel for announcements.
-   - **Default ticket category** — where ticket channels are created.
-   - **Default ticket log channel** — where ticket events are logged.
-   - **Staff roles** — who can manage tickets and use staff commands.
-   - **Bot admin roles** — who can run `/ticket-panel`, `/reaction-roles`, and `/announce`.
-3. Click **Save server settings**.
+For normal hosted setup:
 
-### Step 2: Set Appearance
+1. Deploy the app.
+2. Open `/setup`.
+3. Paste the Discord bot token and client ID.
+4. Create the dashboard password.
+5. Save setup.
+6. Restart the Railway service if the bot started before setup was completed.
 
-1. Go to **Appearance**.
-2. Enter your **Server / bot name**.
-3. Choose a **Default announcement color**.
-4. Optionally upload a logo for the **Embed icon**.
-5. Click **Save appearance**.
+The token is encrypted at rest, stored server-side only, and never returned to the browser after saving.
 
-### Step 3: Create a Ticket Type
+## Important Environment Variables
 
-1. Go to **Ticket Studio > Ticket types**.
-2. Fill in:
-   - **Label** — what members see (e.g., `General support`).
-   - **Category** — where the private channel is created.
-   - **Staff roles** — who can view and close the ticket.
-   - **Welcome message** — the first message inside the ticket.
-3. Click **Save ticket type**.
+Most Discord values can be entered in `/setup`. Railway still needs a few infrastructure variables:
 
-### Step 4: Create a Ticket Panel
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `COREPANEL_SECRET_KEY` | Production | Encrypts stored bot tokens and OAuth secrets. Generate with `openssl rand -base64 32`. |
+| `DATABASE_URL` | Railway | Railway Postgres connection string. SQLite default works locally. |
+| `DATABASE_SSL` | Railway | Set `true` for Railway Postgres if needed. |
+| `TRUST_PROXY` | Railway/proxy | Set `true` behind Railway or Cloudflare proxy. |
+| `UPLOADS_DIR` | Optional | Use a Railway volume path if uploads/transcripts should survive deploys. |
+| `PORT` | Railway | Supplied automatically by Railway. |
 
-1. Go to **Ticket Studio > Panels**.
-2. Enter an **Internal name** (e.g., `Main support`).
-3. Choose **Dropdown menu** or **Buttons**.
-4. Select the ticket type you just created.
-5. Design the title, description, and color.
-6. Keep **Active** enabled.
-7. Click **Save ticket panel**.
+Optional compatibility variables still work: `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DASHBOARD_PASSWORD`, `PUBLIC_BASE_URL`, `VERIFY_PUBLIC_BASE_URL`, and `DISCORD_OAUTH_REDIRECT_URI`.
 
-### Step 5: Post the Panel in Discord
+## Local Development
 
-1. In Discord, run:
-   ```
-   /ticket-panel
-   ```
-2. Choose your saved panel.
-3. Select the channel where members should see it.
-4. The panel appears with a dropdown or buttons.
+```bash
+pnpm install
+pnpm db:setup
+pnpm dev
+```
 
-### Step 6: Create a Custom Command
+Useful scripts:
 
-1. Go to **Command Studio**.
-2. Click **New command**.
-3. Enter `rules` as the name.
-4. Choose **Reply with a plain message**.
-5. Type your server rules.
-6. Set **Who can use it?** to **Everyone**.
-7. Click **Save command**.
-8. In Discord, test with `/custom name:rules`.
+```bash
+pnpm bot
+pnpm dashboard
+pnpm dashboard:no-open
+pnpm deploy:commands
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm start
+```
 
-### Step 7: Create an Announcement
+`pnpm dev` runs the bot and dashboard together. `pnpm start` is the production command used by Railway.
 
-1. Go to **Announcements**.
-2. Choose **Embed** or **Plain text / no embed**.
-3. Enter a **Template name** and **Body**. Embed templates also require a title.
-4. Select a **Target channel**.
-5. Click **Save announcement**.
-6. In Discord, run:
-   ```
-   /announce
-   ```
-7. Select your template, review the preview, and click **Post announcement**.
+## Railway Hosting
 
----
+Recommended production setup:
 
-## Package Scripts
+- Railway service runs CorePanel as a long-running Node process.
+- Railway Postgres stores shared settings.
+- Railway variables store `COREPANEL_SECRET_KEY`, database settings, and optional compatibility secrets.
+- Staff open the hosted dashboard URL and log in with the dashboard password.
 
-| Command | Purpose |
-|---------|---------|
-| `pnpm setup` | Install dependencies and initialize the database |
-| `pnpm db:setup` | Apply pending SQLite or PostgreSQL migrations |
-| `pnpm deploy:commands` | Register guild commands in every server where the bot is installed |
-| `pnpm bot` | Run the bot from TypeScript |
-| `pnpm dashboard` | Run the dashboard and open a browser |
-| `pnpm dashboard:no-open` | Run the dashboard without opening a browser |
-| `pnpm dev` | Run the bot and dashboard together |
-| `pnpm typecheck` | Check TypeScript without producing output |
-| `pnpm build` | Compile TypeScript into `dist/` |
-| `pnpm start` | Apply migrations and run bot plus dashboard in production |
-| `pnpm start:bot` | Run only the compiled bot |
-| `pnpm start:dashboard` | Run only the compiled dashboard |
+Railway build/start commands are already configured:
 
-Run `pnpm deploy:commands` after changing static definitions in `src/bot/commands.ts`. Editing dashboard content does not require redeployment because `/custom`, `/announce`, `/ticket-panel`, and `/reaction-roles` load saved data at runtime.
+```bash
+pnpm install --frozen-lockfile && pnpm build
+pnpm start
+```
 
----
-
-## Railway Production
-
-The repository includes `railway.json` and a production `pnpm start` script. The recommended production layout is:
-
-- One long-running Railway service running the bot and dashboard
-- One Railway PostgreSQL service
-- A Railway public HTTPS domain for staff dashboard access
-- One Railway volume mounted at `/app/uploads` if local uploads must persist
-
-Railway supplies `PORT`; the dashboard listens on it and binds to `0.0.0.0`. The `/health` endpoint is used by Railway during deployment.
-
-See the full deployment walkthrough in [docs/SETUP.md#deploy-to-railway](docs/SETUP.md#deploy-to-railway).
-
-Vercel can host a separate frontend-only dashboard later, but it is not recommended for this bot process. The Discord gateway connection needs a long-running Node service rather than a serverless function.
-
----
-
-## Documentation
-
-- **[Setup and Railway deployment](docs/SETUP.md)** — Complete first-time setup with step-by-step instructions.
-- **[Dashboard and feature guide](docs/DASHBOARD-GUIDE.md)** — Detailed walkthroughs for every feature.
-- **[Staff dashboard access](docs/STAFF-ACCESS.md)** — How to give staff access safely.
-- **[Troubleshooting](docs/TROUBLESHOOTING.md)** — Fix common problems with step-by-step solutions.
-
----
-
-## Project Structure
+Health check:
 
 ```text
-src/
-  bot/                 Discord commands and interaction handlers
-  dashboard/
-    public/            Browser dashboard HTML, CSS, and JavaScript
-    api.ts             Authenticated dashboard API
-    server.ts          Express server and login session
-  database/
-    adapter.ts         SQLite/PostgreSQL adapter
-    index.ts           Shared queries and repositories
-    schema.ts          SQLite migrations
-    schema-postgres.ts PostgreSQL migrations
-  shared/              Config, types, placeholders, and validation
-  production.ts        Combined production entrypoint
-docs/                  Beginner documentation
-scripts/rapidbot.mjs   Optional local CLI wrapper
-railway.json           Railway build and deployment configuration
+/health
 ```
 
----
+Full Railway guide: [RAILWAY_DEPLOYMENT.md](./RAILWAY_DEPLOYMENT.md)
 
-## Security Basics
+## Discord Setup
 
-- `.env`, `data/`, `uploads/`, and build output are ignored by Git.
-- Never give staff the bot token or the `.env` file.
-- Use the hosted dashboard URL and dashboard password for staff access.
-- Keep the local dashboard on `127.0.0.1` unless you intentionally enable trusted local-network access.
-- Use a strong unique production password and Railway HTTPS.
-- Plan Discord OAuth, CSRF protection, a persistent session store, and per-user audit identity before treating the dashboard as a public SaaS app.
+In Discord Developer Portal:
+
+1. Create an application.
+2. Add a bot.
+3. Copy the bot token for `/setup`.
+4. Copy the Application ID for `/setup`.
+5. Enable privileged intents as needed:
+   - Server Members Intent
+   - Message Content Intent
+6. Invite the bot with permissions for the features you use.
+
+Common required permissions:
+
+- View Channels
+- Send Messages
+- Embed Links
+- Attach Files
+- Manage Messages
+- Manage Channels
+- Manage Roles
+- Moderate Members
+- Kick Members / Ban Members if using moderation
+- Read Message History
+
+Move the bot role above roles it needs to assign, remove, mute, verify, or moderate.
+
+## Security Notes
+
+- Never commit `.env`, database files, upload folders, logs, or `node_modules`.
+- Never share the Discord bot token with staff.
+- Staff should get dashboard access, not Railway secret access, unless they are trusted operators.
+- `COREPANEL_SECRET_KEY` must stay stable. Changing it prevents decrypting previously saved bot tokens.
+- Use the token replacement flow if you rotate the Discord bot token.
+
+## Troubleshooting
+
+**Dashboard opens setup every time**
+
+Make sure the database persists and `COREPANEL_SECRET_KEY` is stable across restarts.
+
+**Bot is offline after setup**
+
+Restart the Railway service or local process, then run:
+
+```bash
+pnpm deploy:commands
+```
+
+**Slash commands do not show**
+
+Run:
+
+```bash
+pnpm deploy:commands
+```
+
+Then wait a moment and refresh Discord.
+
+**Verification OAuth fails**
+
+Make sure the redirect URI in Discord Developer Portal exactly matches:
+
+```text
+https://your-domain.example/api/verify/callback
+```
+
+**Role actions fail**
+
+Move the bot role above the target role and check Manage Roles.
+
+## Updating
+
+```bash
+git pull
+pnpm install
+pnpm db:setup
+pnpm build
+pnpm start
+```
+
+On Railway, pushing to the connected GitHub branch should trigger a rebuild.

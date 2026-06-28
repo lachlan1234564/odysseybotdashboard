@@ -14,31 +14,62 @@ import {
   addGiveawayEntry,
   createGiveaway,
   getGiveaway,
+  getGuildSettings,
   listDueGiveaways,
+  listGiveaways,
   listGiveawayEntries,
   removeGiveawayEntry,
   updateGiveaway
 } from "../database/index.js";
 import type { Giveaway } from "../shared/types.js";
-import { asColor, requireBotAdmin } from "./utils.js";
+import { asColor, requireBotAdmin, sendGuildLog } from "./utils.js";
 import { deferCommandReply, replyEphemeral, replyToCommand } from "./interactions.js";
 import { logError } from "../shared/logging.js";
+import { sendGiveawayWinnerDm } from "./dms.js";
+
+function isHttpUrl(value: string): boolean {
+  return /^https?:\/\/\S+$/i.test(value);
+}
+
+function statusLabel(giveaway: Giveaway): string {
+  if (giveaway.status === "active") return "Open";
+  if (giveaway.status === "scheduled") return "Scheduled";
+  if (giveaway.status === "ended") return "Ended";
+  if (giveaway.status === "cancelled") return "Cancelled";
+  return "Draft";
+}
 
 function giveawayEmbed(giveaway: Giveaway, entriesCount = 0, ended = false): EmbedBuilder {
   const endsAt = Math.floor(new Date(giveaway.endsAt).getTime() / 1000);
-  return new EmbedBuilder()
+  const startsAt = giveaway.startsAt ? Math.floor(new Date(giveaway.startsAt).getTime() / 1000) : null;
+  const embed = new EmbedBuilder()
     .setColor(ended ? 0x879C68 : asColor("#C58B4B"))
     .setTitle(ended ? `Giveaway ended: ${giveaway.prize}` : `Giveaway: ${giveaway.prize}`)
     .setDescription([
       giveaway.description || "Click Enter Giveaway below to join.",
       "",
+      `**Prize:** ${giveaway.prize}`,
       `**Winners:** ${giveaway.winnersCount}`,
+      startsAt && giveaway.status === "scheduled" ? `**Starts:** <t:${startsAt}:R>` : "",
       ended ? `**Ended:** <t:${endsAt}:R>` : `**Ends:** <t:${endsAt}:R>`,
+      giveaway.hostUserId ? `**Host:** <@${giveaway.hostUserId}>` : "",
       giveaway.requiredRoleId ? `**Required role:** <@&${giveaway.requiredRoleId}>` : "",
-      entriesCount ? `**Entries:** ${entriesCount}` : ""
+      giveaway.boosterBonusEntries ? `**Booster bonus:** +${giveaway.boosterBonusEntries} entries` : "",
+      giveaway.bonusRoleId && giveaway.bonusRoleEntries ? `**Bonus role:** <@&${giveaway.bonusRoleId}> (+${giveaway.bonusRoleEntries})` : "",
+      giveaway.winnerRoleId ? `**Winner role:** <@&${giveaway.winnerRoleId}>` : "",
+      entriesCount ? `**Entries:** ${entriesCount}` : "",
+      giveaway.winnerUserIds.length ? `**Winner(s):** ${giveaway.winnerUserIds.map((id) => `<@${id}>`).join(", ")}` : ""
     ].filter(Boolean).join("\n"))
+    .addFields(
+      { name: "Status", value: statusLabel(giveaway), inline: true },
+      { name: "Access", value: giveaway.requiredRoleId ? `<@&${giveaway.requiredRoleId}>` : "Everyone", inline: true },
+      { name: "Entries", value: String(entriesCount), inline: true }
+    )
     .setFooter({ text: `Giveaway #${giveaway.id}` })
     .setTimestamp(new Date(giveaway.endsAt));
+  if (isHttpUrl(giveaway.thumbnailUrl)) embed.setThumbnail(giveaway.thumbnailUrl);
+  if (isHttpUrl(giveaway.imageUrl)) embed.setImage(giveaway.imageUrl);
+  return embed;
 }
 
 function giveawayComponents(giveaway: Giveaway, disabled = false) {
@@ -46,24 +77,50 @@ function giveawayComponents(giveaway: Giveaway, disabled = false) {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`giveaway:enter:${giveaway.id}`)
-        .setLabel(disabled ? "Giveaway Ended" : "Enter Giveaway")
+        .setLabel(disabled ? "Giveaway Ended" : (giveaway.buttonText || "Enter Giveaway").slice(0, 80))
         .setStyle(disabled ? ButtonStyle.Secondary : ButtonStyle.Success)
         .setDisabled(disabled)
     )
   ];
 }
 
-async function sendGiveawayMessage(
+async function sendGiveawayLog(guild: Guild, giveaway: Giveaway, title: string, description: string): Promise<void> {
+  const settings = await getGuildSettings(guild.id);
+  await sendGuildLog(
+    guild.id,
+    settings.modLogChannelId,
+    (id) => guild.channels.fetch(id),
+    new EmbedBuilder()
+      .setColor(asColor("#C58B4B"))
+      .setTitle(title)
+      .setDescription(description)
+      .addFields(
+        { name: "Giveaway", value: `#${giveaway.id} · ${giveaway.prize.slice(0, 100)}` },
+        { name: "Channel", value: `<#${giveaway.channelId}>`, inline: true },
+        { name: "Status", value: statusLabel(giveaway), inline: true }
+      )
+      .setTimestamp()
+  );
+}
+
+export async function sendGiveawayMessage(
   guild: Guild,
   giveaway: Giveaway,
   channel: { id: string; send: (payload: unknown) => Promise<{ id: string }> }
 ): Promise<Giveaway> {
   const message = await channel.send({
+    content: giveaway.createMessage || undefined,
     embeds: [giveawayEmbed(giveaway)],
     components: giveawayComponents(giveaway),
     allowedMentions: { parse: [] }
   });
-  return (await updateGiveaway(giveaway.id, guild.id, { messageId: message.id, status: "active" }))!;
+  const updated = (await updateGiveaway(giveaway.id, guild.id, {
+    messageId: message.id,
+    status: "active",
+    startsAt: giveaway.startsAt ?? new Date().toISOString()
+  }))!;
+  await sendGiveawayLog(guild, updated, "Giveaway Started", "A giveaway was published from CorePanel.").catch(() => undefined);
+  return updated;
 }
 
 function drawWinners(entries: Array<{ userId: string; entries: number }>, count: number): string[] {
@@ -87,6 +144,20 @@ export async function endGiveaway(guild: Guild, giveaway: Giveaway, reroll = fal
     winnerUserIds: winners
   }))!;
   const channel = await guild.channels.fetch(giveaway.channelId).catch(() => null);
+  for (const winnerId of winners) {
+    const member = await guild.members.fetch(winnerId).catch(() => null);
+    if (member && giveaway.winnerRoleId) {
+      await member.roles.add(giveaway.winnerRoleId, `Won giveaway #${giveaway.id}`).catch((error) => {
+        logError(`Could not give giveaway winner role for #${giveaway.id}`, error);
+      });
+    }
+    const winnerUser = member?.user ?? await guild.client.users.fetch(winnerId).catch(() => null);
+    if (winnerUser) {
+      await sendGiveawayWinnerDm({ guild, giveaway, user: winnerUser }).catch((error) => {
+        logError(`Could not process giveaway winner DM for #${giveaway.id}`, error);
+      });
+    }
+  }
   if (channel?.isTextBased() && !channel.isDMBased()) {
     const winnerText = winners.length ? winners.map((id) => `<@${id}>`).join(", ") : "No eligible entries.";
     if (giveaway.messageId) {
@@ -103,6 +174,9 @@ export async function endGiveaway(guild: Guild, giveaway: Giveaway, reroll = fal
       allowedMentions: { users: winners }
     }).catch(() => undefined);
   }
+  await sendGiveawayLog(guild, ended, reroll ? "Giveaway Rerolled" : "Giveaway Ended", winners.length
+    ? `Winner(s): ${winners.map((id) => `<@${id}>`).join(", ")}`
+    : "No eligible entries were found.").catch(() => undefined);
   return ended;
 }
 
@@ -111,6 +185,17 @@ export async function processDueGiveaways(client: Client<true>): Promise<void> {
   for (const giveaway of due) {
     const guild = await client.guilds.fetch(giveaway.guildId).catch(() => null);
     if (!guild) continue;
+    if (giveaway.status === "scheduled") {
+      const channel = await guild.channels.fetch(giveaway.channelId).catch(() => null);
+      if (channel?.isTextBased() && !channel.isDMBased() && "send" in channel && typeof channel.send === "function") {
+        await sendGiveawayMessage(guild, giveaway, channel as { id: string; send: (payload: unknown) => Promise<{ id: string }> }).catch((error) => {
+          logError(`Giveaway #${giveaway.id} could not be started`, error);
+        });
+      } else {
+        logError(`Giveaway #${giveaway.id} could not be started`, new Error("Target channel is missing or is not sendable."));
+      }
+      continue;
+    }
     await endGiveaway(guild, giveaway).catch((error) => {
       logError(`Giveaway #${giveaway.id} could not be ended`, error);
     });
@@ -136,6 +221,11 @@ export async function handleGiveawayButton(interaction: ButtonInteraction): Prom
   }
   if (giveaway.requiredRoleId && !member.roles.cache.has(giveaway.requiredRoleId)) {
     await interaction.reply({ content: `You need <@&${giveaway.requiredRoleId}> to enter this giveaway.`, flags: MessageFlags.Ephemeral });
+    return;
+  }
+  const currentEntries = await listGiveawayEntries(giveaway.id, giveaway.guildId);
+  if (currentEntries.some((entry) => entry.userId === interaction.user.id)) {
+    await interaction.reply({ content: `You are already entered for **${giveaway.prize}**.`, flags: MessageFlags.Ephemeral });
     return;
   }
   let entries = 1;
@@ -170,7 +260,14 @@ export async function handleGiveawayCommand(interaction: ChatInputCommandInterac
     const winnersCount = interaction.options.getInteger("winners") ?? 1;
     const description = interaction.options.getString("description") ?? "";
     const requiredRole = interaction.options.getRole("required_role");
+    const bonusRole = interaction.options.getRole("bonus_role");
+    const bonusRoleEntries = interaction.options.getInteger("bonus_role_entries") ?? 0;
     const channel = interaction.options.getChannel("channel") ?? interaction.channel;
+    const host = interaction.options.getUser("host") ?? interaction.user;
+    if (bonusRoleEntries > 0 && !bonusRole) {
+      await replyToCommand(interaction, "Choose a bonus role when bonus role entries are greater than 0.");
+      return;
+    }
     if (!channel || !("send" in channel) || typeof channel.send !== "function") {
       await replyToCommand(interaction, "Choose a server text channel for the giveaway.");
       return;
@@ -181,16 +278,32 @@ export async function handleGiveawayCommand(interaction: ChatInputCommandInterac
       prize,
       description,
       winnersCount,
+      startsAt: null,
       endsAt: new Date(Date.now() + minutes * 60_000).toISOString(),
+      hostUserId: host.id,
       requiredRoleId: requiredRole?.id ?? null,
-      boosterBonusEntries: 0,
-      bonusRoleId: null,
-      bonusRoleEntries: 0,
+      boosterBonusEntries: interaction.options.getInteger("booster_bonus_entries") ?? 0,
+      bonusRoleId: bonusRole?.id ?? null,
+      bonusRoleEntries,
+      winnerRoleId: null,
+      winnerDmMessage: "",
+      createMessage: "",
+      imageUrl: "",
+      thumbnailUrl: "",
+      buttonText: "Enter Giveaway",
       status: "draft",
       createdBy: interaction.user.id
     });
     const posted = await sendGiveawayMessage(interaction.guild, giveaway, channel as { id: string; send: (payload: unknown) => Promise<{ id: string }> });
     await replyToCommand(interaction, `Started giveaway #${posted.id} for **${posted.prize}** in ${channel}.`);
+    return;
+  }
+
+  if (subcommand === "list") {
+    const giveaways = await listGiveaways(interaction.guildId, 10);
+    await replyToCommand(interaction, giveaways.length
+      ? giveaways.map((giveaway) => `#${giveaway.id} · **${giveaway.status}** · ${giveaway.prize} · ends ${new Date(giveaway.endsAt).toLocaleString()}`).join("\n")
+      : "No giveaways have been created for this server yet.");
     return;
   }
 
@@ -220,9 +333,10 @@ export async function handleGiveawayCommand(interaction: ChatInputCommandInterac
       const channel = await interaction.guild.channels.fetch(giveaway.channelId).catch(() => null);
       if (channel?.isTextBased() && !channel.isDMBased()) {
         const message = await channel.messages.fetch(giveaway.messageId).catch(() => null);
-        await message?.edit({ components: giveawayComponents(giveaway, true) }).catch(() => undefined);
+        await message?.edit({ embeds: [giveawayEmbed({ ...giveaway, status: "cancelled" }, 0, true)], components: giveawayComponents(giveaway, true) }).catch(() => undefined);
       }
     }
+    await sendGiveawayLog(interaction.guild, { ...giveaway, status: "cancelled" }, "Giveaway Cancelled", "A giveaway was cancelled.").catch(() => undefined);
     await replyToCommand(interaction, `Cancelled giveaway #${id}.`);
   }
 }

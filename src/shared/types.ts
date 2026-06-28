@@ -25,6 +25,24 @@ export interface LoggingSettings {
   dashboard: boolean;
 }
 
+export interface DmSettings {
+  guildId: string;
+  dmCommandEnabled: boolean;
+  dmCommandLogContent: boolean;
+  dmCommandRateLimitSeconds: number;
+  moderationDmEnabled: boolean;
+  dmOnWarn: boolean;
+  dmOnTimeout: boolean;
+  dmOnKick: boolean;
+  dmOnBan: boolean;
+  dmOnUnban: boolean;
+  dmOnManualCase: boolean;
+  moderationDmTemplate: string;
+  moderationAppealMessage: string;
+  giveawayWinnerDmEnabled: boolean;
+  giveawayDefaultWinnerDmMessage: string;
+}
+
 export interface Branding {
   guildId: string;
   serverName: string;
@@ -402,6 +420,8 @@ export interface VerificationSettings {
   minServerDays: number;
   vpnCheckEnabled: boolean;
   vpnFailClosed: boolean;
+  autoKickUnverified: boolean;
+  autoKickAfterHours: number;
   recordRetentionHours: number;
   publicChannelIds: string[];
   publicCategoryIds: string[];
@@ -449,7 +469,7 @@ export interface VerificationRecord {
   id: number;
   guildId: string;
   userId: string;
-  status: "pending" | "passed" | "flagged" | "denied";
+  status: "pending" | "passed" | "flagged" | "denied" | "failed";
   reasonCodes: string[];
   riskScore: number;
   accountCreatedAt: string;
@@ -462,6 +482,15 @@ export interface VerificationRecord {
   staffNote: string;
 }
 
+export interface VerificationPendingUser {
+  userId: string;
+  username: string;
+  displayName: string;
+  joinedAt: string | null;
+  pendingHours: number;
+  status: "pending";
+}
+
 export interface RolePanelOption {
   roleId: string;
   label: string;
@@ -469,6 +498,15 @@ export interface RolePanelOption {
   emoji: string;
   category: string;
   requiredRoleId: string | null;
+  buttonStyle: "primary" | "secondary" | "success" | "danger" | "";
+}
+
+export interface RolePanelCategoryRule {
+  name: string;
+  title: string;
+  description: string;
+  maxSelected: number;
+  removeRoleOnSelect: boolean;
 }
 
 export interface RolePanel {
@@ -480,12 +518,17 @@ export interface RolePanel {
   title: string;
   description: string;
   color: string;
+  imageUrl: string;
+  thumbnailUrl: string;
   active: boolean;
+  buttonStyle: "primary" | "secondary" | "success" | "danger";
+  toggleMode: "toggle" | "add_only";
   maxSelectedPerCategory: number;
   removeRoleOnSelect: boolean;
   requiredRoleId: string | null;
   messageId: string | null;
   logChannelId: string | null;
+  categoryRules: RolePanelCategoryRule[];
   options: RolePanelOption[];
   roleIds: string[];
   createdAt: string;
@@ -497,13 +540,18 @@ export interface ModerationCase {
   guildId: string;
   caseNumber: number;
   targetUserId: string;
+  targetTag: string;
   moderatorId: string;
+  moderatorTag: string;
   actionType: "warn" | "timeout" | "untimeout" | "kick" | "ban" | "unban" | "clear" | "role_punishment" | "message_delete" | "manual" | string;
   reason: string;
   durationSeconds: number | null;
+  expiresAt: string | null;
   evidenceUrl: string;
   status: "active" | "expired" | "reversed" | "deleted" | "resolved";
   notes: string;
+  auditLogExecutorId: string | null;
+  auditLogExecutorTag: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -516,12 +564,20 @@ export interface Giveaway {
   prize: string;
   description: string;
   winnersCount: number;
+  startsAt: string | null;
   endsAt: string;
+  hostUserId: string | null;
   requiredRoleId: string | null;
   boosterBonusEntries: number;
   bonusRoleId: string | null;
   bonusRoleEntries: number;
-  status: "draft" | "active" | "ended" | "cancelled";
+  winnerRoleId: string | null;
+  winnerDmMessage: string;
+  createMessage: string;
+  imageUrl: string;
+  thumbnailUrl: string;
+  buttonText: string;
+  status: "draft" | "scheduled" | "active" | "ended" | "cancelled";
   winnerUserIds: string[];
   createdBy: string;
   createdAt: string;
@@ -536,14 +592,63 @@ export interface GiveawayEntry {
   createdAt: string;
 }
 
+export interface PollOption {
+  id: string;
+  label: string;
+  text: string;
+  description: string;
+  emoji: string;
+}
+
+export interface Poll {
+  id: number;
+  guildId: string;
+  channelId: string;
+  messageId: string | null;
+  title: string;
+  question: string;
+  options: PollOption[];
+  startsAt: string | null;
+  endsAt: string | null;
+  anonymous: boolean;
+  multipleChoice: boolean;
+  requiredRoleId: string | null;
+  showLiveResults: boolean;
+  resultsVisibility: "public" | "after_close" | "hidden";
+  status: "draft" | "scheduled" | "active" | "ended" | "cancelled";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PollVote {
+  pollId: number;
+  guildId: string;
+  userId: string;
+  optionIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface TicketTranscriptMessage {
   id: string;
   authorId: string;
   authorTag: string;
   createdAt: string;
   content: string;
-  attachments: string[];
+  attachments: Array<{
+    name: string;
+    url: string;
+    contentType: string | null;
+    size: number | null;
+  }>;
   embeds: number;
+  embedSummaries: Array<{
+    title: string;
+    description: string;
+    url: string;
+    fields: EmbedFieldConfig[];
+  }>;
 }
 
 export interface TicketTranscript {
@@ -555,6 +660,11 @@ export interface TicketTranscript {
   openerId: string;
   closedBy: string;
   closeReason: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  categoryLabel: string;
+  claimedBy: string | null;
+  priority: string;
   messageCount: number;
   transcriptJson: TicketTranscriptMessage[];
   transcriptText: string;

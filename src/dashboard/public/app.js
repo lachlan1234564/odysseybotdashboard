@@ -14,6 +14,7 @@ const state = {
   ticketTypes: [],
   ticketPanels: [],
   ticketTypesError: null,
+  ticketHistory: [],
   announcements: [],
   closeRequests: [],
   ticketTranscripts: [],
@@ -34,12 +35,19 @@ const state = {
   rolePanels: [],
   giveaways: [],
   giveawayEntries: [],
+  polls: [],
+  pollResults: [],
+  moderationCases: [],
+  selectedModerationCase: null,
   stickyMessages: [],
   scheduledAnnouncements: [],
   socials: null,
   verification: null,
   branding: null,
   logging: null,
+  dmSettings: null,
+  dashboardName: "CorePanel",
+  botDisplayName: "CorePanel Bot",
   activePage: "overview",
   selectedGuildId: null,
   searchActiveIndex: -1,
@@ -59,9 +67,11 @@ const pageMeta = {
   announcements: ["Announcements", "Reusable broadcasts with a Discord confirmation flow."],
   socials: ["Social Promotion", "Create and publish a safe, reusable directory of community links."],
   giveaways: ["Giveaways", "Create and manage restart-safe community giveaways."],
+  polls: ["Polls", "Create and manage restart-safe community votes."],
   moderation: ["Moderation", "Warnings and actions recorded by the bot."],
   settings: ["Server Settings", "Shared Discord roles, channels, and access defaults."],
   logging: ["Server Logs", "A configurable audit feed for server events, excluding normal message sends."],
+  dms: ["Direct Messages", "Safe staff DMs, moderation notices, and giveaway winner messages."],
   branding: ["Appearance", "Visual defaults used across bot messages."],
   welcome: ["Welcome & Goodbye", "Shape a clear member experience when people join or leave."],
   security: ["Security", "Anti-raid, anti-nuke, and role protection."],
@@ -194,6 +204,10 @@ async function api(path, options = {}) {
     window.location.replace("/servers");
     throw new ApiError(data.error);
   }
+  if (response.status === 428 && data?.setupRequired) {
+    window.location.replace("/setup");
+    throw new ApiError(data.error);
+  }
   if (!response.ok) throw new ApiError(data?.error || "Request failed.", data?.fields || {});
   return data;
 }
@@ -307,6 +321,16 @@ function escapeHtml(value = "") {
   return String(value).replace(/[&<>"']/g, (character) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;"
   })[character]);
+}
+
+function applyRuntimeBranding(session = {}) {
+  state.dashboardName = session.dashboardName || state.dashboardName || "CorePanel";
+  state.botDisplayName = session.botDisplayName || state.botDisplayName || `${state.dashboardName} Bot`;
+  const brandText = document.querySelector(".sidebar-brand strong");
+  if (brandText) brandText.textContent = state.dashboardName;
+  const mark = document.querySelector(".sidebar-brand .brand-mark");
+  if (mark) mark.textContent = state.dashboardName.slice(0, 1).toUpperCase();
+  document.title = `${state.dashboardName} Control`;
 }
 
 function normalizeCommandName(value) {
@@ -588,6 +612,18 @@ function table(headers, rows) {
   return `<table><thead><tr>${headers.map((header) => `<th>${header}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table>`;
 }
 
+function formatDashboardDate(value) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+}
+
+function compactUserId(value) {
+  if (!value) return "-";
+  const text = String(value);
+  return text.length > 10 ? `${text.slice(0, 6)}…${text.slice(-4)}` : text;
+}
+
 function clearErrors(form) {
   form.querySelectorAll(".field-error").forEach((element) => { element.textContent = ""; });
   form.querySelectorAll(".invalid").forEach((element) => element.classList.remove("invalid"));
@@ -709,7 +745,9 @@ function renderDiscordPreview(container, { content = "", embed = null, component
     ? `<div class="preview-select">${escapeHtml(components.placeholder || "Choose an option")}⌄</div>`
     : `<div class="preview-buttons">${components.labels.slice(0, 10).map((label) => `<span class="preview-button ${escapeHtml(components.buttonStyle || "secondary")}">${escapeHtml(label)}</span>`).join("")}</div>`
   }</div>` : "";
-  container.innerHTML = `<div class="discord-message"><div class="discord-avatar">O</div><div><div class="discord-head"><strong>Odyssey Bot</strong><span class="bot-tag">APP</span><time>Today at 12:00</time></div>${safeContent ? `<div class="discord-content">${escapeHtml(safeContent)}</div>` : ""}${embedHtml}${componentHtml}${!safeContent && !embedHtml ? '<div class="discord-content">Configure the action to see a preview.</div>' : ""}</div></div>`;
+  const botName = escapeHtml(state.botDisplayName || "CorePanel Bot");
+  const botInitial = escapeHtml((state.botDisplayName || "CorePanel").slice(0, 1).toUpperCase());
+  container.innerHTML = `<div class="discord-message"><div class="discord-avatar">${botInitial}</div><div><div class="discord-head"><strong>${botName}</strong><span class="bot-tag">APP</span><time>Today at 12:00</time></div>${safeContent ? `<div class="discord-content">${escapeHtml(safeContent)}</div>` : ""}${embedHtml}${componentHtml}${!safeContent && !embedHtml ? '<div class="discord-content">Configure the action to see a preview.</div>' : ""}</div></div>`;
 }
 
 function embedFieldsFromDom() {
@@ -1005,7 +1043,9 @@ function verificationDraft() {
     updateEmbedOnSetup: form.elements.updateEmbedOnSetup.checked,
     applyPermissionsImmediately: form.elements.applyPermissionsImmediately.checked,
     vpnCheckEnabled: form.elements.vpnCheckEnabled.checked,
-    vpnFailClosed: form.elements.vpnFailClosed.checked
+    vpnFailClosed: form.elements.vpnFailClosed.checked,
+    autoKickUnverified: form.elements.autoKickUnverified.checked,
+    autoKickAfterHours: Number(values.autoKickAfterHours || 24)
   };
 }
 
@@ -1016,7 +1056,7 @@ function updateVerificationPreview() {
       title: draft.embedTitle,
       description: draft.embedDescription,
       color: draft.embedColor || "#C58B4B",
-      footerText: "Discord OAuth verification • Odyssey Bot",
+      footerText: "Discord OAuth verification • CorePanel",
       timestamp: true,
       fields: []
     },
@@ -1054,6 +1094,7 @@ function renderVerificationReadiness(verification) {
   const environmentChecks = [
     { label: "Discord OAuth secret", ok: verification.oauthConfigured },
     { label: "OAuth redirect URI", ok: verification.oauthRedirectConfigured },
+    { label: "Redirect matches verify host", ok: verification.oauthRedirectMatchesPublicUrl },
     { label: "Public verify hostname", ok: verification.verifyPublicUrlConfigured },
     { label: "Verified role hierarchy", ok: readiness.roleManageable },
     ...(readiness.permissionChecks || []).map((check) => ({
@@ -1062,9 +1103,10 @@ function renderVerificationReadiness(verification) {
     }))
   ];
   const warnings = [
-    ...(!verification.oauthConfigured ? ["DISCORD_CLIENT_SECRET is missing, so verification cannot be enabled."] : []),
-    ...(!verification.oauthRedirectConfigured ? ["Set the exact DISCORD_OAUTH_REDIRECT_URI registered in Discord."] : []),
-    ...(!verification.verifyPublicUrlConfigured ? ["Set VERIFY_PUBLIC_BASE_URL to the public verify hostname."] : []),
+    ...(!verification.oauthConfigured ? ["Discord client secret is missing, so verification cannot be enabled."] : []),
+    ...(!verification.oauthRedirectConfigured ? ["Set the exact Discord OAuth redirect URI registered in Discord."] : []),
+    ...(verification.oauthRedirectConfigured && !verification.oauthRedirectMatchesPublicUrl ? [`Discord OAuth redirect URI should match ${verification.oauthRedirectExpected || "the public verify callback URL"}.`] : []),
+    ...(!verification.verifyPublicUrlConfigured ? ["Set the public verification URL to the public verify hostname."] : []),
     ...(readiness.warnings || [])
   ];
   panel.classList.toggle("has-warnings", warnings.length > 0);
@@ -1098,6 +1140,61 @@ function renderVerificationSetupResult(result, dryRun = false) {
     <small>${dryRun ? "No Discord channels or permissions were changed." : "Existing unrelated role and member overwrites were preserved."}</small>`;
 }
 
+function verificationStatusCounts(records = []) {
+  return records.reduce((counts, record) => {
+    counts[record.status] = (counts[record.status] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function verificationUserLabel(user) {
+  return escapeHtml(user.displayName || user.username || user.userId);
+}
+
+function renderVerificationPendingUsers(verification) {
+  const container = document.querySelector("#verification-pending-users");
+  if (verification.pendingUsersError) {
+    container.innerHTML = `<div class="inline-alert warning"><strong>Pending users could not be loaded</strong><p>${escapeHtml(verification.pendingUsersError)}</p></div>`;
+    return;
+  }
+  container.innerHTML = table(
+    ["User", "User ID", "Joined", "Pending", "Actions"],
+    (verification.pendingUsers || []).map((user) => `<tr>
+      <td><strong>${verificationUserLabel(user)}</strong></td>
+      <td><code>${escapeHtml(user.userId)}</code></td>
+      <td>${escapeHtml(user.joinedAt ? formatDashboardDate(user.joinedAt) : "Unknown")}</td>
+      <td>${Math.round(user.pendingHours || 0)}h</td>
+      <td><div class="table-actions">
+        <button class="secondary-button compact" data-verification-manual="approve" data-user-id="${escapeHtml(user.userId)}">Approve</button>
+        <button class="secondary-button compact danger" data-verification-manual="deny" data-user-id="${escapeHtml(user.userId)}">Deny</button>
+        <button class="secondary-button compact" data-verification-copy-link data-user-id="${escapeHtml(user.userId)}">Copy link</button>
+      </div></td>
+    </tr>`)
+  );
+}
+
+function renderVerificationRecords(verification) {
+  const counts = verificationStatusCounts(verification.records || []);
+  document.querySelector("#verification-record-summary").innerHTML = ["pending", "passed", "flagged", "failed", "denied"]
+    .map((status) => `<span class="pill status-${status}">${status}: ${counts[status] || 0}</span>`)
+    .join("");
+  document.querySelector("#verification-records").innerHTML = table(
+    ["User", "Result", "Reasons", "Risk", "VPN", "Verified", "Review"],
+    (verification.records || []).map((record) => `<tr>
+      <td>${escapeHtml(record.userId)}</td>
+      <td><span class="pill status-${escapeHtml(record.status)}">${escapeHtml(record.status)}</span></td>
+      <td class="wrap-cell">${escapeHtml((record.reasonCodes || []).join(", ") || "None")}</td>
+      <td>${record.riskScore}</td>
+      <td>${record.vpnDetected === null ? "N/A" : record.vpnDetected ? "Yes" : "No"}</td>
+      <td>${escapeHtml(formatDashboardDate(record.verifiedAt))}</td>
+      <td><div class="table-actions">
+        <button class="secondary-button compact" data-verification-review="approve" data-id="${record.id}">Approve</button>
+        <button class="secondary-button compact danger" data-verification-review="deny" data-id="${record.id}">Deny</button>
+      </div></td>
+    </tr>`)
+  );
+}
+
 async function loadOverview() {
   const data = await api("/overview");
   const labels = {
@@ -1117,6 +1214,148 @@ async function loadOverview() {
 function itemList(items, type, subtitle) {
   if (!items.length) return emptyState(`No ${type === "custom" ? "commands" : type === "panel" ? "panels" : type === "ticket" ? "ticket types" : "templates"} yet`, "Create the first one in the editor beside this list.");
   return items.map((item) => `<div class="list-item"><div class="list-copy"><strong>${escapeHtml(item.name || item.label)}</strong><span>${escapeHtml(subtitle(item))}</span></div><div class="item-actions"><button data-action="edit" data-type="${type}" data-id="${item.id}">Edit</button><button class="delete" data-action="delete" data-type="${type}" data-id="${item.id}">Delete</button></div></div>`).join("");
+}
+
+function ticketMatchesSearch(ticket, query) {
+  if (!query) return true;
+  const haystack = [
+    ticket.id,
+    ticket.channelId,
+    ticket.userId,
+    ticket.status,
+    ticket.priority,
+    ticket.claimedBy,
+    ticket.closedBy,
+    ticket.closeReason,
+    ticket.typeLabel
+  ].filter(Boolean).join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function transcriptMatchesSearch(transcript, query) {
+  if (!query) return true;
+  const haystack = [
+    transcript.id,
+    transcript.ticketId,
+    transcript.channelId,
+    transcript.channelName,
+    transcript.openerId,
+    transcript.closedBy,
+    transcript.closeReason,
+    transcript.categoryLabel,
+    transcript.priority,
+    transcript.messageCount
+  ].filter(Boolean).join(" ").toLowerCase();
+  return haystack.includes(query);
+}
+
+function renderTicketTables(options = {}) {
+  const historySearch = document.querySelector("#ticket-history-search")?.value.trim().toLowerCase() || "";
+  const historyStatus = document.querySelector("#ticket-history-status")?.value || "";
+  const transcriptSearch = document.querySelector("#ticket-transcript-search")?.value.trim().toLowerCase() || "";
+  const transcriptByTicketId = new Map((state.ticketTranscripts || []).map((transcript) => [Number(transcript.ticketId), transcript]));
+  const history = (state.ticketHistory || [])
+    .filter((ticket) => (!historyStatus || ticket.status === historyStatus) && ticketMatchesSearch(ticket, historySearch));
+  const transcripts = (state.ticketTranscripts || []).filter((transcript) => transcriptMatchesSearch(transcript, transcriptSearch));
+
+  document.querySelector("#ticket-history").innerHTML = options.historyError
+    ? emptyState("Ticket history unavailable", "The dashboard could not load recent ticket records. Try refreshing this page.")
+    : table(
+      ["Ticket", "Member", "Status", "Priority", "Opened / closed", "Staff", "Transcript"],
+      history.map((ticket) => {
+        const transcript = transcriptByTicketId.get(Number(ticket.id));
+        const statusClass = ticket.status === "closed" ? "status-closed" : "status-open";
+        return `<tr>
+          <td><strong>#${escapeHtml(String(ticket.id))}</strong><br><span class="table-secondary">${escapeHtml(ticket.typeLabel || "Deleted category")} · ${escapeHtml(ticket.channelId || "no channel")}</span></td>
+          <td><code>${escapeHtml(compactUserId(ticket.userId))}</code></td>
+          <td><span class="pill ${statusClass}">${escapeHtml(ticket.status || "unknown")}</span></td>
+          <td>${escapeHtml(ticket.priority || "normal")}</td>
+          <td>${escapeHtml(formatDashboardDate(ticket.openedAt))}<br><span class="table-secondary">${escapeHtml(ticket.closedAt ? formatDashboardDate(ticket.closedAt) : "Still open")}</span></td>
+          <td>${escapeHtml(ticket.claimedBy ? compactUserId(ticket.claimedBy) : "Unclaimed")}<br><span class="table-secondary">${escapeHtml(ticket.closedBy ? `Closed by ${compactUserId(ticket.closedBy)}` : "")}</span></td>
+          <td>${transcript
+            ? `<button type="button" class="secondary-button compact" data-ticket-transcript-id="${transcript.id}">View transcript</button>`
+            : `<span class="table-secondary">${ticket.status === "closed" ? "Not generated" : "After close"}</span>`}</td>
+        </tr>`;
+      })
+    );
+
+  document.querySelector("#ticket-transcripts").innerHTML = options.transcriptsError
+    ? emptyState("Transcripts unavailable", "Closed-ticket transcripts could not be loaded. Other ticket tools are still available.")
+    : table(
+      ["Transcript", "Opened by", "Closed by", "Category", "Messages", "Created", "Actions"],
+      transcripts.map((transcript) => `<tr>
+        <td><strong>${escapeHtml(transcript.channelName || "Ticket")}</strong><br><span class="table-secondary">Ticket #${escapeHtml(String(transcript.ticketId))} · ${escapeHtml(transcript.channelId)}</span></td>
+        <td><code>${escapeHtml(compactUserId(transcript.openerId))}</code></td>
+        <td><code>${escapeHtml(compactUserId(transcript.closedBy))}</code></td>
+        <td>${escapeHtml(transcript.categoryLabel || "General")}<br><span class="table-secondary">${escapeHtml(transcript.priority || "normal")}</span></td>
+        <td>${escapeHtml(String(transcript.messageCount))}</td>
+        <td>${escapeHtml(formatDashboardDate(transcript.createdAt))}</td>
+        <td><div class="table-actions"><button type="button" class="secondary-button compact" data-ticket-transcript-id="${transcript.id}">View</button><a class="secondary-button compact" href="/api/ticket-transcripts/${transcript.id}/download" target="_blank" rel="noopener">Download</a></div></td>
+      </tr>`)
+    );
+}
+
+function renderTranscriptViewer(transcript) {
+  const viewer = document.querySelector("#ticket-transcript-viewer");
+  const messages = transcript.transcriptJson || [];
+  viewer.classList.remove("hidden");
+  viewer.innerHTML = `
+    <div class="transcript-header">
+      <div>
+        <p class="eyebrow">Transcript archive</p>
+        <h3>${escapeHtml(transcript.channelName || "Ticket transcript")}</h3>
+        <p>Ticket #${escapeHtml(String(transcript.ticketId))} · ${escapeHtml(transcript.categoryLabel || "General")} · ${escapeHtml(transcript.messageCount)} saved message${Number(transcript.messageCount) === 1 ? "" : "s"}</p>
+      </div>
+      <div class="table-actions">
+        <a class="secondary-button compact" href="/api/ticket-transcripts/${transcript.id}/download" target="_blank" rel="noopener">Download transcript</a>
+        <button type="button" class="secondary-button compact" data-close-transcript-viewer>Close</button>
+      </div>
+    </div>
+    <dl class="transcript-meta">
+      <div><dt>Opened by</dt><dd><code>${escapeHtml(transcript.openerId)}</code></dd></div>
+      <div><dt>Closed by</dt><dd><code>${escapeHtml(transcript.closedBy)}</code></dd></div>
+      <div><dt>Assigned staff</dt><dd>${transcript.claimedBy ? `<code>${escapeHtml(transcript.claimedBy)}</code>` : "Unclaimed"}</dd></div>
+      <div><dt>Priority</dt><dd>${escapeHtml(transcript.priority || "normal")}</dd></div>
+      <div><dt>Opened</dt><dd>${escapeHtml(formatDashboardDate(transcript.openedAt))}</dd></div>
+      <div><dt>Closed</dt><dd>${escapeHtml(formatDashboardDate(transcript.closedAt))}</dd></div>
+      <div class="span-2"><dt>Close reason</dt><dd>${escapeHtml(transcript.closeReason || "No reason provided")}</dd></div>
+    </dl>
+    <div class="transcript-messages">
+      ${messages.length
+        ? messages.map((message) => {
+          const attachments = (message.attachments || []).map((attachment) => {
+            const item = typeof attachment === "string" ? { name: "Attachment", url: attachment } : attachment;
+            return `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener">${escapeHtml(item.name || "Attachment")}</a>`;
+          }).join("");
+          const embeds = (message.embedSummaries || []).map((embed) => `
+            <div class="transcript-embed">
+              ${embed.title ? `<strong>${escapeHtml(embed.title)}</strong>` : ""}
+              ${embed.description ? `<p>${escapeHtml(embed.description)}</p>` : ""}
+              ${embed.fields?.length ? `<ul>${embed.fields.map((field) => `<li><b>${escapeHtml(field.name)}</b>: ${escapeHtml(field.value)}</li>`).join("")}</ul>` : ""}
+            </div>
+          `).join("");
+          return `<article class="transcript-message">
+            <div class="transcript-message-head"><strong>${escapeHtml(message.authorTag || "Unknown user")}</strong><span>${escapeHtml(formatDashboardDate(message.createdAt))}</span><code>${escapeHtml(message.authorId || "")}</code></div>
+            <p>${escapeHtml(message.content || "(no text content)")}</p>
+            ${attachments ? `<div class="transcript-attachments">${attachments}</div>` : ""}
+            ${embeds || ""}
+          </article>`;
+        }).join("")
+        : emptyState("No messages were captured", "Discord may have denied history access, or the ticket was empty when it closed.")}
+    </div>`;
+  viewer.scrollIntoView({ block: "start", behavior: "smooth" });
+}
+
+async function openTicketTranscript(id) {
+  const viewer = document.querySelector("#ticket-transcript-viewer");
+  viewer.classList.remove("hidden");
+  viewer.innerHTML = `<div class="transcript-loading">Loading transcript #${escapeHtml(String(id))}...</div>`;
+  try {
+    const transcript = await api(`/ticket-transcripts/${id}`);
+    renderTranscriptViewer(transcript);
+  } catch (error) {
+    viewer.innerHTML = `<div class="form-save-status error">Could not load transcript: ${escapeHtml(error.message)}</div>`;
+  }
 }
 
 async function loadCustomCommands() {
@@ -1144,7 +1383,7 @@ async function loadTickets() {
   state.ticketTypesError = typesResult.status === "rejected"
     ? typesResult.reason?.message || "Ticket types could not be loaded."
     : typesPayload?.ok === false ? typesPayload.error || "Ticket types could not be loaded." : null;
-  const history = historyResult.status === "fulfilled" && Array.isArray(historyResult.value) ? historyResult.value : [];
+  state.ticketHistory = historyResult.status === "fulfilled" && Array.isArray(historyResult.value) ? historyResult.value : [];
   const failedAreas = [
     state.ticketTypesError ? "ticket types" : "",
     panelsResult.status === "rejected" ? "ticket panels" : "",
@@ -1180,21 +1419,10 @@ async function loadTickets() {
     : itemList(state.ticketPanels, "panel", (item) =>
     `${item.active ? "Active" : "Disabled"} · ${item.panelKind === "multi" ? "Multi-panel" : item.displayMode} · ${item.panelKind === "multi" ? item.childPanelIds.length : item.ticketTypeIds.length} option(s)`
   );
-  document.querySelector("#ticket-history").innerHTML = table(
-    ["Type", "User", "Status", "Opened", "Claimed by"],
-    history.map((ticket) => `<tr><td>${escapeHtml(ticket.typeLabel || "Deleted type")}</td><td>${escapeHtml(ticket.userId)}</td><td><span class="pill">${escapeHtml(ticket.status)}</span></td><td>${escapeHtml(ticket.openedAt)}</td><td>${escapeHtml(ticket.claimedBy || "-")}</td></tr>`)
-  );
-  document.querySelector("#ticket-transcripts").innerHTML = table(
-    ["Ticket", "Opened by", "Closed by", "Messages", "Created", "Download"],
-    state.ticketTranscripts.map((transcript) => `<tr>
-      <td>${escapeHtml(transcript.channelName)}<br><span class="table-secondary">#${transcript.ticketId}</span></td>
-      <td>${escapeHtml(transcript.openerId)}</td>
-      <td>${escapeHtml(transcript.closedBy)}</td>
-      <td>${escapeHtml(String(transcript.messageCount))}</td>
-      <td>${escapeHtml(transcript.createdAt)}</td>
-      <td><a class="secondary-button compact" href="/api/ticket-transcripts/${transcript.id}/download" target="_blank" rel="noopener">Download</a></td>
-    </tr>`)
-  );
+  renderTicketTables({
+    historyError: historyResult.status === "rejected",
+    transcriptsError: transcriptsResult.status === "rejected"
+  });
   document.querySelector("#ticket-close-requests").innerHTML = table(
     ["Request", "Source", "Ticket", "Requester", "Reason", "Status", "Resolved by", "Created"],
     state.closeRequests.map((request) => `<tr>
@@ -1245,21 +1473,72 @@ function updateGiveawayPreview() {
   const form = document.querySelector("#giveaway-form");
   const values = formObject(form);
   const timestamp = values.endsAt ? Math.floor(new Date(values.endsAt).getTime() / 1000) : null;
+  const startsAt = values.startsAt ? Math.floor(new Date(values.startsAt).getTime() / 1000) : null;
+  const buttonLabel = values.buttonText || "Enter Giveaway";
   renderDiscordPreview(document.querySelector("#giveaway-preview"), {
+    content: values.createMessage || "",
     embed: {
       title: values.prize ? `Giveaway: ${values.prize}` : "Giveaway: Prize name",
       description: [
-        values.description || "Click Enter Giveaway below to join.",
+        values.description || "Click the button below to enter.",
         "",
+        `**Prize:** ${values.prize || "Prize name"}`,
         `**Winners:** ${values.winnersCount || 1}`,
+        values.status === "scheduled" && startsAt ? `**Starts:** <t:${startsAt}:R>` : "",
         timestamp ? `**Ends:** <t:${timestamp}:R>` : "**Ends:** choose an end time",
+        values.hostUserId ? `**Host:** <@${values.hostUserId}>` : "",
         values.requiredRoleId ? `**Required role:** @${roleName(values.requiredRoleId)}` : ""
       ].filter(Boolean).join("\n"),
       color: "#C58B4B",
-      fields: []
+      thumbnailUrl: values.thumbnailUrl || "",
+      imageUrl: values.imageUrl || "",
+      fields: [
+        { name: "Status", value: values.status === "scheduled" ? "Scheduled" : "Draft", inline: true },
+        { name: "Access", value: values.requiredRoleId ? `@${roleName(values.requiredRoleId)}` : "Everyone", inline: true },
+        { name: "Entries", value: "0", inline: true }
+      ]
     },
-    components: { mode: "buttons", labels: ["Enter Giveaway"] }
+    components: { mode: "buttons", labels: [buttonLabel] }
   });
+}
+
+function giveawayEntriesFor(id) {
+  return state.giveawayEntries.find((entry) => entry.giveawayId === id) || { count: 0, entries: [] };
+}
+
+function giveawayStatusMeta(item) {
+  if (item.status === "active") return { label: "Open", className: "status-active" };
+  if (item.status === "scheduled") return { label: "Scheduled", className: "status-scheduled" };
+  if (item.status === "ended") return { label: "Ended", className: "status-ended" };
+  if (item.status === "cancelled") return { label: "Cancelled", className: "status-cancelled" };
+  return { label: "Draft", className: "status-draft" };
+}
+
+function renderGiveawayItem(item) {
+  const entries = giveawayEntriesFor(item.id);
+  const status = giveawayStatusMeta(item);
+  const actions = [];
+  if (["draft", "scheduled"].includes(item.status)) {
+    actions.push(`<button data-giveaway-action="start" data-id="${item.id}">Publish now</button>`);
+    actions.push(`<button class="delete" data-giveaway-action="cancel" data-id="${item.id}">Cancel</button>`);
+  } else if (item.status === "active") {
+    actions.push(`<button data-giveaway-action="end" data-id="${item.id}">End</button>`);
+    actions.push(`<button class="delete" data-giveaway-action="cancel" data-id="${item.id}">Cancel</button>`);
+  } else if (item.status === "ended") {
+    actions.push(`<button class="secondary-button" data-giveaway-action="reroll" data-id="${item.id}">Reroll</button>`);
+  }
+  const timing = item.status === "scheduled" && item.startsAt
+    ? `starts ${formatDashboardDate(item.startsAt)}`
+    : `ends ${formatDashboardDate(item.endsAt)}`;
+  return `<div class="saved-item rich-saved-item">
+    <div class="list-copy">
+      <strong>${escapeHtml(item.prize)}</strong>
+      <span><b class="status-chip ${status.className}">${status.label}</b> ${entries.count} entrant${entries.count === 1 ? "" : "s"} · ${escapeHtml(timing)}</span>
+      <small>${escapeHtml(item.description || "No description yet.")}</small>
+      ${item.winnerUserIds?.length ? `<em>Winner(s): ${item.winnerUserIds.map((id) => `@${compactUserId(id)}`).join(", ")}</em>` : ""}
+    </div>
+    ${actions.length ? `<div class="item-actions">${actions.join("")}</div>` : ""}
+  </div>`;
 }
 
 async function loadGiveaways() {
@@ -1268,19 +1547,8 @@ async function loadGiveaways() {
   state.giveawayEntries = data.entries || [];
   document.querySelector("#giveaway-count").textContent = state.giveaways.length;
   document.querySelector("#giveaway-list").innerHTML = state.giveaways.length
-    ? state.giveaways.map((item) => {
-      const entries = state.giveawayEntries.find((entry) => entry.giveawayId === item.id)?.count ?? 0;
-      const primaryAction = item.status === "draft" ? "start" : item.status === "active" ? "end" : "reroll";
-      return `<div class="saved-item">
-        <div class="list-copy"><strong>${escapeHtml(item.prize)}</strong><span>${escapeHtml(item.status)} · ${entries} entr${entries === 1 ? "y" : "ies"} · ends ${new Date(item.endsAt).toLocaleString()}</span></div>
-        <div class="item-actions">
-          <button data-giveaway-action="${primaryAction}" data-id="${item.id}">${primaryAction === "start" ? "Start" : primaryAction === "end" ? "End" : "Reroll"}</button>
-          <button class="secondary-button" data-giveaway-action="reroll" data-id="${item.id}">Reroll</button>
-          <button class="delete" data-giveaway-action="cancel" data-id="${item.id}">Cancel</button>
-        </div>
-      </div>`;
-    }).join("")
-    : emptyState("No giveaways yet", "Create a giveaway draft, then start it when you are ready.");
+    ? state.giveaways.map(renderGiveawayItem).join("")
+    : emptyState("No giveaways yet", "Create a draft, schedule one, or publish when the preview looks right.");
   const form = document.querySelector("#giveaway-form");
   if (!form.elements.endsAt.value) {
     const soon = new Date(Date.now() + 60 * 60_000);
@@ -1289,6 +1557,154 @@ async function loadGiveaways() {
   }
   updateGiveawayPreview();
   markFormClean(form);
+}
+
+function pollOptionRows() {
+  return [...document.querySelectorAll("#poll-options .poll-option-row")];
+}
+
+function addPollOption(value = {}) {
+  const container = document.querySelector("#poll-options");
+  if (pollOptionRows().length >= 10) {
+    toast("Polls support up to 10 options.", true);
+    return;
+  }
+  const option = typeof value === "string" ? { label: value, description: "", emoji: "" } : value;
+  const row = document.createElement("div");
+  row.className = "poll-option-row";
+  row.innerHTML = `
+    <span class="option-index">${pollOptionRows().length + 1}</span>
+    <input data-poll-emoji maxlength="80" placeholder="Emoji" value="${escapeHtml(option.emoji || "")}" aria-label="Option emoji">
+    <input data-poll-option maxlength="100" placeholder="Option label" value="${escapeHtml(option.label || "")}">
+    <input data-poll-description maxlength="100" placeholder="Short description (optional)" value="${escapeHtml(option.description || "")}">
+    <div class="row-actions">
+      <button type="button" class="secondary-button compact" data-move-poll-option="up">Up</button>
+      <button type="button" class="secondary-button compact" data-move-poll-option="down">Down</button>
+      <button type="button" class="secondary-button compact" data-remove-poll-option>Remove</button>
+    </div>
+  `;
+  row.querySelectorAll("input").forEach((input) => input.addEventListener("input", () => {
+    updatePollPreview();
+    updateFormDirtyState(document.querySelector("#poll-form"));
+  }));
+  row.querySelector("[data-remove-poll-option]").addEventListener("click", () => {
+    if (pollOptionRows().length <= 2) {
+      toast("Polls need at least two options.", true);
+      return;
+    }
+    row.remove();
+    renumberPollOptions();
+    updatePollPreview();
+    updateFormDirtyState(document.querySelector("#poll-form"));
+  });
+  row.querySelectorAll("[data-move-poll-option]").forEach((button) => button.addEventListener("click", () => {
+    const direction = button.dataset.movePollOption;
+    const sibling = direction === "up" ? row.previousElementSibling : row.nextElementSibling;
+    if (!sibling) return;
+    if (direction === "up") container.insertBefore(row, sibling);
+    else container.insertBefore(sibling, row);
+    renumberPollOptions();
+    updatePollPreview();
+    updateFormDirtyState(document.querySelector("#poll-form"));
+  }));
+  container.append(row);
+  renumberPollOptions();
+  updatePollPreview();
+}
+
+function renumberPollOptions() {
+  pollOptionRows().forEach((row, index) => {
+    row.querySelector(".option-index").textContent = String(index + 1);
+  });
+}
+
+function pollOptionsPayload() {
+  return pollOptionRows()
+    .map((row) => ({
+      label: row.querySelector("[data-poll-option]").value.trim(),
+      description: row.querySelector("[data-poll-description]").value.trim(),
+      emoji: row.querySelector("[data-poll-emoji]").value.trim()
+    }))
+    .filter((option) => option.label);
+}
+
+function pollResultFor(id) {
+  return state.pollResults.find((result) => result.pollId === id) || { totalVotes: 0, options: [] };
+}
+
+function updatePollPreview() {
+  const form = document.querySelector("#poll-form");
+  const values = formObject(form);
+  const options = pollOptionsPayload();
+  const optionLines = options.length
+    ? options.map((option, index) => {
+      const prefix = option.emoji ? `${option.emoji} ` : `**${index + 1}.** `;
+      return `${prefix}**${option.label}**${option.description ? `\n${option.description}` : ""}`;
+    }).join("\n\n")
+    : "**1.** First option\n\n**2.** Second option";
+  const buttonLabels = options.length
+    ? options.slice(0, 10).map((option, index) => option.emoji ? `${option.emoji} ${index + 1}` : String(index + 1))
+    : ["1", "2"];
+  renderDiscordPreview(document.querySelector("#poll-preview"), {
+    embed: {
+      title: values.title || "Poll #1",
+      description: [`**${values.question || "Your question"}**`, "", optionLines].join("\n"),
+      color: "#C58B4B",
+      footerText: "Poll #1",
+      timestamp: true
+    },
+    components: { mode: "buttons", labels: buttonLabels }
+  });
+}
+
+function renderPollItem(item) {
+  const result = pollResultFor(item.id);
+  const actions = item.status === "draft"
+    ? `<button data-poll-action="start" data-id="${item.id}">Publish</button><button class="delete" data-poll-action="cancel" data-id="${item.id}">Cancel</button>`
+    : item.status === "scheduled"
+      ? `<button data-poll-action="start" data-id="${item.id}">Publish now</button><button class="delete" data-poll-action="cancel" data-id="${item.id}">Cancel</button>`
+      : item.status === "active"
+      ? `<button data-poll-action="end" data-id="${item.id}">End</button><button class="delete" data-poll-action="cancel" data-id="${item.id}">Cancel</button>`
+      : "";
+  const bars = result.options?.length
+    ? `<div class="result-bars">${result.options.map((option) => `
+        <div class="result-row">
+          <span>${escapeHtml(option.text)}</span>
+          <b>${option.votes} vote${option.votes === 1 ? "" : "s"}</b>
+          <i style="--value:${option.percent}%"></i>
+        </div>
+      `).join("")}</div>`
+    : "";
+  return `<div class="saved-item poll-saved-item">
+    <div class="list-copy">
+      <strong>${escapeHtml(item.question)}</strong>
+      <span><b class="status-chip status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</b> ${result.totalVotes || 0} vote${result.totalVotes === 1 ? "" : "s"} · ${item.status === "scheduled" && item.startsAt ? `starts ${formatDashboardDate(item.startsAt)}` : item.endsAt ? `ends ${formatDashboardDate(item.endsAt)}` : "manual close"}</span>
+      ${bars}
+    </div>
+    ${actions ? `<div class="item-actions">${actions}</div>` : ""}
+  </div>`;
+}
+
+async function loadPolls() {
+  const data = await api("/polls");
+  state.polls = data.polls || [];
+  state.pollResults = data.results || [];
+  const active = state.polls.filter((poll) => ["draft", "scheduled", "active"].includes(poll.status));
+  const ended = state.polls.filter((poll) => !["draft", "scheduled", "active"].includes(poll.status));
+  document.querySelector("#poll-active-count").textContent = active.length;
+  document.querySelector("#poll-ended-count").textContent = ended.length;
+  document.querySelector("#poll-active-list").innerHTML = active.length
+    ? active.map(renderPollItem).join("")
+    : emptyState("No active polls", "Create a poll draft, preview it, then publish when ready.");
+  document.querySelector("#poll-ended-list").innerHTML = ended.length
+    ? ended.map(renderPollItem).join("")
+    : emptyState("No completed polls yet", "Ended and cancelled polls will appear here with their result summary.");
+  if (!pollOptionRows().length) {
+    addPollOption("Yes");
+    addPollOption("No");
+  }
+  updatePollPreview();
+  markFormClean(document.querySelector("#poll-form"));
 }
 
 async function loadGuilds() {
@@ -1303,19 +1719,13 @@ async function loadGuilds() {
 }
 
 async function loadModeration() {
-  const data = await api("/moderation");
-  document.querySelector("#cases-table").innerHTML = table(
-    ["Case", "Action", "Target", "Moderator", "Status", "Reason", "Updated"],
-    (data.cases || []).map((item) => `<tr>
-      <td>#${item.caseNumber}</td>
-      <td><span class="pill">${escapeHtml(item.actionType)}</span></td>
-      <td>${escapeHtml(item.targetUserId)}</td>
-      <td>${escapeHtml(item.moderatorId)}</td>
-      <td><span class="pill status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
-      <td class="wrap-cell">${escapeHtml(item.reason || "No reason")}</td>
-      <td>${escapeHtml(item.updatedAt)}</td>
-    </tr>`)
-  );
+  const filters = caseFilterParams();
+  const [data, cases] = await Promise.all([
+    api("/moderation"),
+    api(`/moderation/cases${filters.toString() ? `?${filters}` : ""}`)
+  ]);
+  state.moderationCases = cases || [];
+  renderModerationCases();
   document.querySelector("#warnings-table").innerHTML = table(
     ["ID", "User", "Moderator", "Reason", "Date"],
     data.warnings.map((warning) => `<tr><td>${warning.id}</td><td>${escapeHtml(warning.userId)}</td><td>${escapeHtml(warning.moderatorId)}</td><td>${escapeHtml(warning.reason)}</td><td>${escapeHtml(warning.createdAt)}</td></tr>`)
@@ -1324,6 +1734,107 @@ async function loadModeration() {
     ["Action", "Target", "Moderator", "Reason", "Date"],
     data.actions.map((action) => `<tr><td><span class="pill">${escapeHtml(action.action)}</span></td><td>${escapeHtml(action.targetUserId || "-")}</td><td>${escapeHtml(action.moderatorId)}</td><td>${escapeHtml(action.reason || "-")}</td><td>${escapeHtml(action.createdAt)}</td></tr>`)
   );
+}
+
+function caseFilterParams() {
+  const form = document.querySelector("#case-filter-form");
+  const values = formObject(form);
+  const params = new URLSearchParams();
+  ["query", "caseNumber", "actionType", "status", "moderatorId"].forEach((key) => {
+    const value = String(values[key] || "").trim();
+    if (value) params.set(key, value);
+  });
+  return params;
+}
+
+function caseTargetLabel(item) {
+  if (item.targetTag && item.targetUserId) return `${item.targetTag} (${item.targetUserId})`;
+  return item.targetTag || item.targetUserId || "No user target";
+}
+
+function caseModeratorLabel(item) {
+  if (item.moderatorTag && item.moderatorId) return `${item.moderatorTag} (${item.moderatorId})`;
+  return item.moderatorTag || item.moderatorId || "Unknown";
+}
+
+function caseSummaryText(item) {
+  return [
+    `Case #${item.caseNumber}`,
+    `Action: ${item.actionType}`,
+    `Status: ${item.status}`,
+    `Target: ${caseTargetLabel(item)}`,
+    `Moderator: ${caseModeratorLabel(item)}`,
+    `Reason: ${item.reason || "No reason provided"}`,
+    item.durationSeconds ? `Duration: ${Math.round(item.durationSeconds / 60)} minute(s)` : "",
+    item.expiresAt ? `Expires: ${item.expiresAt}` : "",
+    item.evidenceUrl ? `Evidence: ${item.evidenceUrl}` : "",
+    item.notes ? `Notes: ${item.notes}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+async function copyCaseSummary(item) {
+  if (!navigator.clipboard) {
+    toast("Clipboard access is not available in this browser.", true);
+    return;
+  }
+  await navigator.clipboard.writeText(caseSummaryText(item)).then(
+    () => success(`Copied case #${item.caseNumber} summary.`),
+    () => toast("Could not copy case summary.", true)
+  );
+}
+
+function renderModerationCases() {
+  document.querySelector("#case-count").textContent = String(state.moderationCases.length);
+  document.querySelector("#cases-table").innerHTML = table(
+    ["Case", "Action", "Target", "Moderator", "Status", "Reason", "Updated", "Actions"],
+    state.moderationCases.map((item) => `<tr>
+      <td><strong>#${item.caseNumber}</strong></td>
+      <td><span class="pill">${escapeHtml(item.actionType)}</span></td>
+      <td class="wrap-cell">${escapeHtml(caseTargetLabel(item))}</td>
+      <td class="wrap-cell">${escapeHtml(caseModeratorLabel(item))}</td>
+      <td><span class="pill status-${escapeHtml(item.status)}">${escapeHtml(item.status)}</span></td>
+      <td class="wrap-cell">${escapeHtml(item.reason || "No reason")}</td>
+      <td>${escapeHtml(formatDashboardDate(item.updatedAt))}</td>
+      <td><div class="table-actions"><button type="button" class="secondary-button compact" data-case-view="${item.caseNumber}">View</button><button type="button" class="secondary-button compact" data-case-copy="${item.caseNumber}">Copy</button></div></td>
+    </tr>`)
+  );
+}
+
+function selectModerationCase(caseNumber) {
+  const item = state.moderationCases.find((entry) => Number(entry.caseNumber) === Number(caseNumber));
+  if (!item) return;
+  state.selectedModerationCase = item;
+  const form = document.querySelector("#case-edit-form");
+  document.querySelector("#case-detail-empty").classList.add("hidden");
+  form.classList.remove("hidden");
+  form.elements.caseNumber.value = item.caseNumber;
+  form.elements.reason.value = item.reason || "";
+  form.elements.status.value = item.status || "active";
+  form.elements.notes.value = item.notes || "";
+  document.querySelector("#case-detail-summary").innerHTML = `
+    <div><span>Case</span><strong>#${item.caseNumber}</strong></div>
+    <div><span>Action</span><strong>${escapeHtml(item.actionType)}</strong></div>
+    <div><span>Target</span><strong>${escapeHtml(caseTargetLabel(item))}</strong></div>
+    <div><span>Moderator</span><strong>${escapeHtml(caseModeratorLabel(item))}</strong></div>
+    <div><span>Created</span><strong>${escapeHtml(formatDashboardDate(item.createdAt))}</strong></div>
+    <div><span>Expires</span><strong>${escapeHtml(item.expiresAt ? formatDashboardDate(item.expiresAt) : "No expiry")}</strong></div>
+  `;
+  markFormClean(form);
+}
+
+function exportModerationCases() {
+  const headers = ["caseNumber", "actionType", "targetUserId", "targetTag", "moderatorId", "moderatorTag", "status", "reason", "durationSeconds", "expiresAt", "evidenceUrl", "notes", "createdAt", "updatedAt"];
+  const escapeCsv = (value) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = [
+    headers.join(","),
+    ...state.moderationCases.map((item) => headers.map((header) => escapeCsv(item[header])).join(","))
+  ].join("\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `moderation-cases-${state.selectedGuildId || "server"}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 async function loadSettings() {
@@ -1347,6 +1858,20 @@ async function loadLogging() {
     if (!field) return;
     if (field.type === "checkbox") field.checked = Boolean(value);
     else field.value = value || "";
+  });
+  syncFeatureToggles(form);
+  markFormClean(form);
+}
+
+async function loadDmSettings() {
+  const settings = await api("/dm-settings");
+  state.dmSettings = settings;
+  const form = document.querySelector("#dm-settings-form");
+  Object.entries(settings).forEach(([key, value]) => {
+    const field = form.elements[key];
+    if (!field) return;
+    if (field.type === "checkbox") field.checked = Boolean(value);
+    else field.value = value ?? "";
   });
   syncFeatureToggles(form);
   markFormClean(form);
@@ -1377,7 +1902,7 @@ function applyDashboardAccent(value) {
   document.documentElement.style.setProperty("--brand-bright", isLight ? shadeHex(value, 0.36) : blendHex(value));
 }
 
-window.addEventListener("odyssey:themechange", () => {
+window.addEventListener("corepanel:themechange", () => {
   const accent = state.branding?.accentColor;
   if (accent) applyDashboardAccent(accent);
 });
@@ -1497,14 +2022,21 @@ async function loadSecurity() {
       label: "Discord OAuth",
       ok: verification.oauthConfigured,
       detail: verification.oauthConfigured
-        ? (verification.oauthRedirectConfigured ? "Client secret and redirect URI configured" : "Client secret set; add the exact DISCORD_OAUTH_REDIRECT_URI")
-        : "Not configured — add DISCORD_CLIENT_SECRET to .env"
+        ? (verification.oauthRedirectConfigured ? "Client secret and redirect URI configured" : "Client secret set; add the exact Discord OAuth redirect URI")
+        : "Not configured — add the client secret in setup or Railway variables"
+    },
+    {
+      label: "OAuth redirect match",
+      ok: verification.oauthRedirectMatchesPublicUrl,
+      detail: verification.oauthRedirectMatchesPublicUrl
+        ? "Redirect URI matches the public verify callback"
+        : `Expected ${verification.oauthRedirectExpected || "a public verification URL callback"}`
     },
     {
       label: "Public verification URL",
       ok: verification.verifyPublicUrlConfigured,
       detail: verification.verifyPublicUrlConfigured
-        ? "VERIFY_PUBLIC_BASE_URL set"
+        ? "public verification URL set"
         : "Not set — verification setup will not generate a fallback admin-host link"
     },
     {
@@ -1520,6 +2052,13 @@ async function loadSecurity() {
       detail: verification.trustProxyEnabled
         ? "TRUST_PROXY=true — X-Forwarded-For headers trusted"
         : "TRUST_PROXY not set — set to true when running behind Cloudflare Tunnel or a reverse proxy"
+    },
+    {
+      label: "Auto-kick",
+      ok: !verification.settings.autoKickUnverified || verification.readiness?.permissionChecks?.some((check) => check.label === "Kick Members" && check.ok),
+      detail: verification.settings.autoKickUnverified
+        ? `Enabled after ${verification.settings.autoKickAfterHours} hour(s)`
+        : "Disabled by default"
     }
   ];
 
@@ -1540,24 +2079,12 @@ async function loadSecurity() {
     <div><span>Mode</span><strong>${verification.settings.enabled ? "Enabled" : "Disabled"}</strong></div>
     <div><span>Permissions</span><strong>${verification.settings.permissionsApplied ? "Applied" : "Not applied"}</strong></div>
     <div><span>Channel</span><strong>${verification.settings.verificationChannelId ? escapeHtml(channelName(verification.settings.verificationChannelId)) : `Will create #${escapeHtml(verification.settings.verificationChannelName)}`}</strong></div>
+    <div><span>Auto-kick</span><strong>${verification.settings.autoKickUnverified ? `${verification.settings.autoKickAfterHours}h` : "Off"}</strong></div>
     <div><span>Last setup</span><strong>${verification.settings.lastSetupAt ? escapeHtml(new Date(verification.settings.lastSetupAt).toLocaleString()) : "Never"}</strong></div>`;
   updateVerificationPreview();
 
-  document.querySelector("#verification-records").innerHTML = table(
-    ["User", "Result", "Reasons", "Risk", "VPN", "Verified", "Review"],
-    verification.records.map((record) => `<tr>
-      <td>${escapeHtml(record.userId)}</td>
-      <td><span class="pill status-${escapeHtml(record.status)}">${escapeHtml(record.status)}</span></td>
-      <td class="wrap-cell">${escapeHtml((record.reasonCodes || []).join(", ") || "None")}</td>
-      <td>${record.riskScore}</td>
-      <td>${record.vpnDetected === null ? "N/A" : record.vpnDetected ? "Yes" : "No"}</td>
-      <td>${escapeHtml(record.verifiedAt)}</td>
-      <td><div class="table-actions">
-        <button class="secondary-button compact" data-verification-review="approve" data-id="${record.id}">Approve</button>
-        <button class="secondary-button compact danger" data-verification-review="deny" data-id="${record.id}">Deny</button>
-      </div></td>
-    </tr>`)
-  );
+  renderVerificationPendingUsers(verification);
+  renderVerificationRecords(verification);
   syncFeatureToggles(verificationForm);
   [raidForm, nukeForm, roleForm, verificationForm].forEach(markFormClean);
 }
@@ -1583,58 +2110,63 @@ function roleName(roleId) {
   return state.resources.roles.find((item) => item.id === roleId)?.name || roleId;
 }
 
+function roleSelectOptions(selected = "", emptyLabel = "Choose a role") {
+  return `<option value="">${emptyLabel}</option>${state.resources.roles.map((role) =>
+    `<option value="${role.id}" ${String(selected) === String(role.id) ? "selected" : ""}>${escapeHtml(role.name)}</option>`
+  ).join("")}`;
+}
+
+function rolePanelStyleOptions(selected = "") {
+  const styles = [
+    ["", "Use panel default"],
+    ["secondary", "Neutral"],
+    ["primary", "Primary"],
+    ["success", "Success"],
+    ["danger", "Danger"]
+  ];
+  return styles.map(([value, label]) =>
+    `<option value="${value}" ${selected === value ? "selected" : ""}>${label}</option>`
+  ).join("");
+}
+
 function collectRolePanelOptions() {
-  const form = document.querySelector("#role-panel-form");
-  const selected = selectedValues(form.elements.roleIds);
   const rows = [...document.querySelectorAll("#role-panel-options [data-role-option]")];
-  const byRole = new Map(rows.map((row) => [row.dataset.roleId, {
-    roleId: row.dataset.roleId,
+  const seen = new Set();
+  return rows.map((row) => ({
+    roleId: row.querySelector("[data-role-id]").value,
     label: row.querySelector("[data-role-label]").value.trim(),
     description: row.querySelector("[data-role-description]").value.trim(),
     emoji: row.querySelector("[data-role-emoji]").value.trim(),
     category: row.querySelector("[data-role-category]").value.trim() || "General",
-    requiredRoleId: row.querySelector("[data-role-required]").value || null
-  }]));
-  return selected.map((roleId) => byRole.get(roleId) || {
-    roleId,
-    label: "",
-    description: "",
-    emoji: "",
-    category: "General",
-    requiredRoleId: null
+    requiredRoleId: row.querySelector("[data-role-required]").value || null,
+    buttonStyle: row.querySelector("[data-role-button-style]").value || ""
+  })).filter((option) => {
+    if (!option.roleId || seen.has(option.roleId)) return false;
+    seen.add(option.roleId);
+    return true;
   });
 }
 
-function renderRolePanelOptions(existing = []) {
+function collectRolePanelCategoryRules() {
   const form = document.querySelector("#role-panel-form");
-  const selected = selectedValues(form.elements.roleIds);
-  const current = collectRolePanelOptions();
-  const optionMap = new Map([...existing, ...current].map((option) => [option.roleId, option]));
-  const roleChoices = optionList(state.resources.roles, (role) => role.name, "No extra requirement");
-  const container = document.querySelector("#role-panel-options");
-  if (!selected.length) {
-    container.innerHTML = emptyState("Choose roles first", "Select one or more roles above, then customize how they appear.");
-    return;
-  }
-  container.innerHTML = selected.map((roleId) => {
-    const option = optionMap.get(roleId) || {};
-    return `<div class="role-option-card" data-role-option data-role-id="${escapeHtml(roleId)}">
-      <div class="role-option-title"><strong>${escapeHtml(roleName(roleId))}</strong><span>${escapeHtml(roleId)}</span></div>
-      <div class="form-grid compact-grid">
-        <label class="field">Button/dropdown label<input data-role-label maxlength="80" value="${escapeHtml(option.label || "")}" placeholder="${escapeHtml(roleName(roleId))}"></label>
-        <label class="field">Category<input data-role-category maxlength="80" value="${escapeHtml(option.category || "General")}" placeholder="General"></label>
-        <label class="field">Emoji<input data-role-emoji maxlength="100" value="${escapeHtml(option.emoji || "")}" placeholder="✨ or <:role:123>"></label>
-        <label class="field">Required role<select data-role-required>${roleChoices}</select></label>
-        <label class="field span-2">Description<input data-role-description maxlength="100" value="${escapeHtml(option.description || "")}" placeholder="Shown in dropdown menus"></label>
-      </div>
-    </div>`;
-  }).join("");
-  selected.forEach((roleId) => {
-    const option = optionMap.get(roleId) || {};
-    const row = container.querySelector(`[data-role-id="${CSS.escape(roleId)}"]`);
-    if (row) row.querySelector("[data-role-required]").value = option.requiredRoleId || "";
+  const rules = new Map();
+  document.querySelectorAll("#role-panel-options [data-role-option]").forEach((row) => {
+    const name = row.querySelector("[data-role-category]").value.trim() || "General";
+    if (rules.has(name)) return;
+    rules.set(name, {
+      name,
+      title: row.querySelector("[data-role-category-title]").value.trim(),
+      description: row.querySelector("[data-role-category-description]").value.trim(),
+      maxSelected: Number(form.elements.maxSelectedPerCategory.value || 0),
+      removeRoleOnSelect: form.elements.removeRoleOnSelect.checked
+    });
   });
-  container.querySelectorAll("input, select").forEach((field) => {
+  return [...rules.values()];
+}
+
+function wireRolePanelOption(row) {
+  const form = document.querySelector("#role-panel-form");
+  row.querySelectorAll("input, select").forEach((field) => {
     field.addEventListener("input", () => {
       updateRolePanelPreview();
       updateFormDirtyState(form);
@@ -1644,22 +2176,98 @@ function renderRolePanelOptions(existing = []) {
       updateFormDirtyState(form);
     });
   });
+  row.querySelector("[data-role-remove]").addEventListener("click", () => {
+    row.remove();
+    renderRolePanelEmptyState();
+    updateRolePanelPreview();
+    updateFormDirtyState(form);
+  });
+  row.querySelector("[data-role-up]").addEventListener("click", () => {
+    const previous = row.previousElementSibling;
+    if (previous?.matches("[data-role-option]")) previous.before(row);
+    updateRolePanelPreview();
+    updateFormDirtyState(form);
+  });
+  row.querySelector("[data-role-down]").addEventListener("click", () => {
+    const next = row.nextElementSibling;
+    if (next?.matches("[data-role-option]")) next.after(row);
+    updateRolePanelPreview();
+    updateFormDirtyState(form);
+  });
+}
+
+function renderRolePanelEmptyState() {
+  const container = document.querySelector("#role-panel-options");
+  if (!container.querySelector("[data-role-option]")) {
+    container.innerHTML = emptyState("No role options yet", "Add a role option to create the buttons or dropdown choices members will use.");
+  }
+}
+
+function addRolePanelOption(option = {}, categoryRule = {}) {
+  const container = document.querySelector("#role-panel-options");
+  if (container.querySelector(".empty-state")) container.innerHTML = "";
+  const row = document.createElement("div");
+  row.className = "role-option-card";
+  row.dataset.roleOption = "true";
+  const roleChoices = roleSelectOptions(option.requiredRoleId || "", "No extra requirement");
+  row.innerHTML = `
+      <div class="role-option-title">
+        <div><strong>${escapeHtml(option.label || roleName(option.roleId || "") || "New role option")}</strong><span>Role option</span></div>
+        <div class="inline-actions">
+          <button type="button" class="secondary-button compact" data-role-up>Up</button>
+          <button type="button" class="secondary-button compact" data-role-down>Down</button>
+          <button type="button" class="danger-button compact" data-role-remove>Remove</button>
+        </div>
+      </div>
+      <div class="form-grid compact-grid">
+        <label class="field">Discord role<select data-role-id>${roleSelectOptions(option.roleId || "")}</select></label>
+        <label class="field">Display label<input data-role-label maxlength="80" value="${escapeHtml(option.label || "")}" placeholder="Community"></label>
+        <label class="field">Emoji<input data-role-emoji maxlength="100" value="${escapeHtml(option.emoji || "")}" placeholder="✨ or <:role:123>"></label>
+        <label class="field">Category<input data-role-category maxlength="80" value="${escapeHtml(option.category || "General")}" placeholder="General"></label>
+        <label class="field">Required role<select data-role-required>${roleChoices}</select></label>
+        <label class="field">Button style<select data-role-button-style>${rolePanelStyleOptions(option.buttonStyle || "")}</select></label>
+        <label class="field span-2">Short description<input data-role-description maxlength="100" value="${escapeHtml(option.description || "")}" placeholder="Shown in dropdown menus"></label>
+        <label class="field">Category title<input data-role-category-title maxlength="100" value="${escapeHtml(categoryRule.title || "")}" placeholder="Optional heading"></label>
+        <label class="field">Category description<input data-role-category-description maxlength="200" value="${escapeHtml(categoryRule.description || "")}" placeholder="Optional category helper text"></label>
+      </div>
+    `;
+  row.querySelector("[data-role-required]").value = option.requiredRoleId || "";
+  row.querySelector("[data-role-button-style]").value = option.buttonStyle || "";
+  container.append(row);
+  wireRolePanelOption(row);
+  updateRolePanelPreview();
+}
+
+function renderRolePanelOptions(existing = [], categoryRules = []) {
+  const container = document.querySelector("#role-panel-options");
+  container.innerHTML = "";
+  const ruleMap = new Map((categoryRules || []).map((rule) => [rule.name, rule]));
+  (existing || []).forEach((option) => addRolePanelOption(option, ruleMap.get(option.category || "General") || {}));
+  renderRolePanelEmptyState();
 }
 
 function updateRolePanelPreview() {
   const form = document.querySelector("#role-panel-form");
   const values = formObject(form);
   const options = collectRolePanelOptions();
+  const categoryRules = collectRolePanelCategoryRules().filter((rule) => rule.title || rule.description);
   renderDiscordPreview(document.querySelector("#role-panel-preview"), {
     embed: {
       title: values.title || "Choose your roles",
       description: values.description || "Click a button to add or remove a role.",
       color: values.color || "#5865F2",
-      fields: []
+      thumbnailUrl: values.thumbnailUrl || "",
+      imageUrl: values.imageUrl || "",
+      fields: categoryRules.map((rule) => ({
+        name: rule.title || rule.name,
+        value: rule.description || "Choose a role in this category.",
+        inline: false
+      }))
     },
     components: {
       mode: values.layout || "buttons",
-      labels: options.map((option) => option.label || roleName(option.roleId))
+      labels: options.map((option) => `${option.emoji ? `${option.emoji} ` : ""}${option.label || roleName(option.roleId)}`),
+      buttonStyle: values.buttonStyle || "secondary"
     }
   });
 }
@@ -2125,7 +2733,7 @@ async function showPage(name) {
   document.querySelectorAll(".page").forEach((page) => page.classList.toggle("active", page.id === `page-${name}`));
   document.querySelector("#page-title").textContent = pageMeta[name][0];
   document.querySelector("#page-subtitle").textContent = pageMeta[name][1];
-  const loaders = { overview: loadOverview, custom: loadCustomCommands, tickets: loadTickets, announcements: loadAnnouncements, socials: loadSocials, giveaways: loadGiveaways, moderation: loadModeration, settings: loadSettings, logging: loadLogging, branding: loadBranding, welcome: loadWelcome, security: loadSecurity, automation: loadAutomation };
+  const loaders = { overview: loadOverview, custom: loadCustomCommands, tickets: loadTickets, announcements: loadAnnouncements, socials: loadSocials, giveaways: loadGiveaways, polls: loadPolls, moderation: loadModeration, settings: loadSettings, logging: loadLogging, dms: loadDmSettings, branding: loadBranding, welcome: loadWelcome, security: loadSecurity, automation: loadAutomation };
   try { if (loaders[name]) await loaders[name](); } catch (error) { toast(error.message, true); }
   if (name === "tickets") setTicketView(state.ticketView);
   if (name === "security") setSecurityView(state.securityView);
@@ -2282,10 +2890,14 @@ function resetRolePanelForm() {
   form.elements.id.value = "";
   form.elements.active.checked = true;
   form.elements.layout.value = "buttons";
+  form.elements.buttonStyle.value = "secondary";
+  form.elements.toggleMode.value = "toggle";
   form.elements.maxSelectedPerCategory.value = 0;
   form.elements.removeRoleOnSelect.checked = false;
   form.elements.requiredRoleId.value = "";
   form.elements.logChannelId.value = "";
+  form.elements.thumbnailUrl.value = "";
+  form.elements.imageUrl.value = "";
   form.elements.title.value = "Choose your roles";
   form.elements.color.value = "#5865f2";
   form.elements.colorText.value = "#5865F2";
@@ -2366,6 +2978,96 @@ document.querySelector("#clear-activity").addEventListener("click", () => {
   renderActivity();
 });
 
+document.querySelector("#case-filter-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loadModeration().catch((error) => toast(`Could not search cases: ${error.message}`, true));
+});
+document.querySelector("#case-filter-reset").addEventListener("click", async () => {
+  document.querySelector("#case-filter-form").reset();
+  await loadModeration().catch((error) => toast(`Could not reload cases: ${error.message}`, true));
+});
+document.querySelector("#case-export").addEventListener("click", exportModerationCases);
+document.querySelector("#cases-table").addEventListener("click", async (event) => {
+  const view = event.target.closest("[data-case-view]");
+  const copy = event.target.closest("[data-case-copy]");
+  if (view) {
+    selectModerationCase(view.dataset.caseView);
+  }
+  if (copy) {
+    const item = state.moderationCases.find((entry) => Number(entry.caseNumber) === Number(copy.dataset.caseCopy));
+    if (!item) return;
+    await copyCaseSummary(item);
+  }
+});
+document.querySelector("#case-create-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  clearErrors(form);
+  await withBusy(form.querySelector('[type="submit"]'), "Creating case...", async () => {
+    try {
+      const item = await api("/moderation/cases", {
+        method: "POST",
+        body: JSON.stringify({
+          targetUserId: values.targetUserId || "",
+          targetTag: values.targetTag || "",
+          moderatorId: "dashboard",
+          moderatorTag: "Dashboard",
+          actionType: values.actionType || "manual",
+          reason: values.reason || "",
+          evidenceUrl: values.evidenceUrl || "",
+          status: values.status || "active",
+          notes: values.notes || ""
+        })
+      });
+      form.reset();
+      form.elements.actionType.value = "manual";
+      await loadModeration();
+      selectModerationCase(item.caseNumber);
+      success(`Created case #${item.caseNumber}.`);
+    } catch (error) {
+      showErrors(form, error.fields);
+      toast(`Could not create case: ${error.message}`, true);
+    }
+  });
+});
+document.querySelector("#case-edit-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  await withBusy(form.querySelector('[type="submit"]'), "Saving case...", async () => {
+    try {
+      const item = await api(`/moderation/cases/${values.caseNumber}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          reason: values.reason || "",
+          status: values.status || "active",
+          notes: values.notes || ""
+        })
+      });
+      await loadModeration();
+      selectModerationCase(item.caseNumber);
+      success(`Saved case #${item.caseNumber}.`);
+    } catch (error) {
+      toast(`Could not save case: ${error.message}`, true);
+    }
+  });
+});
+document.querySelector("#case-mark-resolved").addEventListener("click", () => {
+  const form = document.querySelector("#case-edit-form");
+  form.elements.status.value = "resolved";
+  form.requestSubmit();
+});
+document.querySelector("#case-mark-reversed").addEventListener("click", () => {
+  const form = document.querySelector("#case-edit-form");
+  form.elements.status.value = "reversed";
+  form.requestSubmit();
+});
+document.querySelector("#case-copy-summary").addEventListener("click", async () => {
+  if (!state.selectedModerationCase) return;
+  await copyCaseSummary(state.selectedModerationCase);
+});
+
 document.querySelector("#dashboard-search").addEventListener("input", (event) => {
   renderDashboardSearch(event.target.value);
 });
@@ -2444,7 +3146,7 @@ document.querySelector("#discard-changes").addEventListener("click", () => {
     performNavigation(target).catch((error) => toast(error.message, true));
     return;
   }
-  sessionStorage.setItem("odyssey.pendingNavigation", JSON.stringify(target));
+  sessionStorage.setItem("corepanel.pendingNavigation", JSON.stringify(target));
   state.suppressBeforeUnload = true;
   window.location.reload();
 });
@@ -2805,6 +3507,20 @@ document.querySelector("#ticket-form").addEventListener("submit", async (event) 
   });
 });
 
+document.querySelector("#ticket-history-search")?.addEventListener("input", () => renderTicketTables());
+document.querySelector("#ticket-history-status")?.addEventListener("change", () => renderTicketTables());
+document.querySelector("#ticket-transcript-search")?.addEventListener("input", () => renderTicketTables());
+document.querySelector("#ticket-view-history")?.addEventListener("click", (event) => {
+  const transcriptButton = event.target.closest("[data-ticket-transcript-id]");
+  if (transcriptButton) {
+    openTicketTranscript(transcriptButton.dataset.ticketTranscriptId);
+    return;
+  }
+  if (event.target.closest("[data-close-transcript-viewer]")) {
+    document.querySelector("#ticket-transcript-viewer").classList.add("hidden");
+  }
+});
+
 document.querySelector("#announcement-form").addEventListener("input", updateAnnouncementPreview);
 document.querySelector("#announcement-form").addEventListener("submit", async (event) => {
   event.preventDefault();
@@ -2905,17 +3621,27 @@ document.querySelector("#giveaway-form").addEventListener("submit", async (event
           prize: values.prize,
           description: values.description || "",
           winnersCount: Number(values.winnersCount || 1),
+          startsAt: values.startsAt ? new Date(values.startsAt).toISOString() : null,
           endsAt: new Date(values.endsAt).toISOString(),
+          hostUserId: values.hostUserId || null,
           requiredRoleId: values.requiredRoleId || null,
           boosterBonusEntries: Number(values.boosterBonusEntries || 0),
           bonusRoleId: values.bonusRoleId || null,
           bonusRoleEntries: Number(values.bonusRoleEntries || 0),
-          status: "draft"
+          winnerRoleId: values.winnerRoleId || null,
+          winnerDmMessage: values.winnerDmMessage || "",
+          createMessage: values.createMessage || "",
+          imageUrl: values.imageUrl || "",
+          thumbnailUrl: values.thumbnailUrl || "",
+          buttonText: values.buttonText || "Enter Giveaway",
+          status: values.status || "draft"
         })
       });
       form.reset();
       await loadGiveaways();
-      success("Giveaway draft saved. Start it from the giveaway library when ready.");
+      success(values.status === "scheduled"
+        ? "Giveaway scheduled. CorePanel will publish it when the start time arrives."
+        : "Giveaway draft saved. Publish it from the giveaway library when ready.");
     } catch (error) {
       showErrors(form, error.fields);
       toast(`Could not save giveaway: ${error.message}`, true);
@@ -2936,6 +3662,73 @@ document.querySelector("#giveaway-list").addEventListener("click", async (event)
       success(`Giveaway ${action} complete.`);
     } catch (error) {
       toast(`Could not ${action} giveaway: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#add-poll-option").addEventListener("click", () => {
+  addPollOption();
+  updateFormDirtyState(document.querySelector("#poll-form"));
+});
+
+document.querySelector("#poll-form").addEventListener("input", updatePollPreview);
+document.querySelector("#poll-form").addEventListener("change", () => {
+  syncFeatureToggles(document.querySelector("#poll-form"));
+  updatePollPreview();
+});
+document.querySelector("#poll-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  const options = pollOptionsPayload();
+  clearErrors(form);
+  await withBusy(form.querySelector('[type="submit"]'), "Saving poll...", async () => {
+    try {
+      await api("/polls", {
+        method: "POST",
+        body: JSON.stringify({
+          channelId: values.channelId,
+          title: values.title || "",
+          question: values.question,
+          options,
+          startsAt: values.startsAt ? new Date(values.startsAt).toISOString() : null,
+          endsAt: values.endsAt ? new Date(values.endsAt).toISOString() : null,
+          requiredRoleId: values.requiredRoleId || null,
+          anonymous: form.elements.anonymous.checked,
+          multipleChoice: form.elements.multipleChoice.checked,
+          showLiveResults: form.elements.showLiveResults.checked,
+          resultsVisibility: values.resultsVisibility || "public",
+          status: values.status || "draft"
+        })
+      });
+      form.reset();
+      document.querySelector("#poll-options").innerHTML = "";
+      addPollOption("Yes");
+      addPollOption("No");
+      await loadPolls();
+      success(values.status === "scheduled"
+        ? "Poll scheduled. CorePanel will publish it when the start time arrives."
+        : "Poll draft saved. Publish it from the active polls list when ready.");
+    } catch (error) {
+      showErrors(form, error.fields);
+      toast(`Could not save poll: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#page-polls").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-poll-action]");
+  if (!button) return;
+  const id = button.dataset.id;
+  const action = button.dataset.pollAction;
+  if (action === "cancel" && !window.confirm("Cancel this poll?")) return;
+  await withBusy(button, `${action}...`, async () => {
+    try {
+      await api(`/polls/${id}/${action}`, { method: "POST", body: "{}" });
+      await loadPolls();
+      success(`Poll ${action} complete.`);
+    } catch (error) {
+      toast(`Could not ${action} poll: ${error.message}`, true);
     }
   });
 });
@@ -2995,6 +3788,45 @@ document.querySelector("#logging-form").addEventListener("submit", async (event)
   });
 });
 
+document.querySelector("#dm-settings-form").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const values = formObject(form);
+  clearErrors(form);
+  setFormStatus(form, "Saving direct message safety settings...", "saving");
+  await withBusy(form.querySelector('[type="submit"]'), "Saving DMs...", async () => {
+    try {
+      state.dmSettings = await api("/dm-settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          dmCommandEnabled: form.elements.dmCommandEnabled.checked,
+          dmCommandLogContent: form.elements.dmCommandLogContent.checked,
+          dmCommandRateLimitSeconds: Number(values.dmCommandRateLimitSeconds || 30),
+          moderationDmEnabled: form.elements.moderationDmEnabled.checked,
+          dmOnWarn: form.elements.dmOnWarn.checked,
+          dmOnTimeout: form.elements.dmOnTimeout.checked,
+          dmOnKick: form.elements.dmOnKick.checked,
+          dmOnBan: form.elements.dmOnBan.checked,
+          dmOnUnban: form.elements.dmOnUnban.checked,
+          dmOnManualCase: form.elements.dmOnManualCase.checked,
+          moderationDmTemplate: values.moderationDmTemplate,
+          moderationAppealMessage: values.moderationAppealMessage,
+          giveawayWinnerDmEnabled: form.elements.giveawayWinnerDmEnabled.checked,
+          giveawayDefaultWinnerDmMessage: values.giveawayDefaultWinnerDmMessage
+        })
+      });
+      syncFeatureToggles(form);
+      markFormClean(form);
+      setFormStatus(form, "DM settings saved. New giveaway/moderation actions will use these rules immediately.", "success", 9000);
+      success("Successfully saved direct message settings.");
+    } catch (error) {
+      showErrors(form, error.fields);
+      setFormStatus(form, error.message, "error", 12000);
+      toast(`Could not save direct message settings: ${error.message}`, true);
+    }
+  });
+});
+
 document.querySelector("#branding-form").addEventListener("input", updateBrandingPreview);
 document.querySelector("#branding-form").addEventListener("change", updateBrandingPreview);
 document.querySelector("#branding-form").addEventListener("submit", async (event) => {
@@ -3043,7 +3875,7 @@ document.querySelector("#branding-form").addEventListener("submit", async (event
   });
 });
 document.querySelector("#branding-reset").addEventListener("click", async () => {
-  if (!window.confirm("Reset this server's appearance settings to Odyssey Bot defaults?")) return;
+  if (!window.confirm("Reset this server's appearance settings to CorePanel defaults?")) return;
   const button = document.querySelector("#branding-reset");
   const form = document.querySelector("#branding-form");
   await withBusy(button, "Resetting...", async () => {
@@ -3342,6 +4174,8 @@ document.querySelector("#verification-form").addEventListener("submit", async (e
           minServerDays: Number(values.minServerDays),
           vpnCheckEnabled: form.elements.vpnCheckEnabled.checked,
           vpnFailClosed: form.elements.vpnFailClosed.checked,
+          autoKickUnverified: form.elements.autoKickUnverified.checked,
+          autoKickAfterHours: Number(values.autoKickAfterHours),
           recordRetentionHours: Number(values.recordRetentionHours),
           publicChannelIds: selectedValues(form.elements.publicChannelIds),
           publicCategoryIds: selectedValues(form.elements.publicCategoryIds),
@@ -3403,7 +4237,7 @@ document.querySelector("#copy-verification-link").addEventListener("click", asyn
 
 document.querySelector("#copy-stable-verification-link").addEventListener("click", async () => {
   const value = document.querySelector("#stable-verification-link").value;
-  if (!value) return toast("Set VERIFY_PUBLIC_BASE_URL and enable verification first.", true);
+  if (!value) return toast("Set the public verification URL and enable verification first.", true);
   try {
     await navigator.clipboard.writeText(value);
     success("Stable server verification link copied.");
@@ -3428,6 +4262,39 @@ document.querySelector("#verification-records").addEventListener("click", async 
       success(result.warning || `Verification record ${decision === "approve" ? "approved" : "denied"}.`);
     } catch (error) {
       toast(`Could not review verification record: ${error.message}`, true);
+    }
+  });
+});
+
+document.querySelector("#verification-pending-users").addEventListener("click", async (event) => {
+  const copyButton = event.target.closest("[data-verification-copy-link]");
+  if (copyButton) {
+    const value = document.querySelector("#stable-verification-link").value;
+    if (!value) return toast("Set the public verification URL to create a stable verification link first.", true);
+    try {
+      await navigator.clipboard.writeText(value);
+      success("Stable verification link copied for the pending user.");
+    } catch {
+      toast("The browser could not copy the link. Select the stable link and copy it manually.", true);
+    }
+    return;
+  }
+
+  const button = event.target.closest("[data-verification-manual]");
+  if (!button) return;
+  const decision = button.dataset.verificationManual;
+  const userId = button.dataset.userId;
+  const note = window.prompt(`Optional staff note for this ${decision}:`, "") || "";
+  await withBusy(button, decision === "approve" ? "Approving..." : "Denying...", async () => {
+    try {
+      const result = await api("/verification/manual-review", {
+        method: "POST",
+        body: JSON.stringify({ userId, decision, note })
+      });
+      await loadSecurity();
+      success(result.warning || `Pending user ${decision === "approve" ? "approved" : "denied"}.`);
+    } catch (error) {
+      toast(`Could not ${decision} pending user: ${error.message}`, true);
     }
   });
 });
@@ -3479,7 +4346,7 @@ document.querySelector("#repost-verification-embed").addEventListener("click", a
 
 document.querySelector("#disable-verification-mode").addEventListener("click", async () => {
   if (!verificationFormIsSaved()) return;
-  if (!window.confirm("Disable verification and restore every channel overwrite Odyssey Bot backed up? The verification channel and existing verified roles will remain.")) return;
+  if (!window.confirm("Disable verification and restore every channel overwrite CorePanel backed up? The verification channel and existing verified roles will remain.")) return;
   const button = document.querySelector("#disable-verification-mode");
   await withBusy(button, "Restoring permissions...", async () => {
     try {
@@ -3535,15 +4402,19 @@ document.querySelector("#auto-mod-form").addEventListener("submit", async (event
 });
 
 document.querySelector("#role-panel-form").addEventListener("input", updateRolePanelPreview);
-document.querySelector("#role-panel-form").addEventListener("change", (event) => {
-  if (event.target?.name === "roleIds") renderRolePanelOptions();
+document.querySelector("#role-panel-form").addEventListener("change", () => {
   updateRolePanelPreview();
+});
+document.querySelector("#add-role-panel-option").addEventListener("click", () => {
+  addRolePanelOption();
+  updateFormDirtyState(document.querySelector("#role-panel-form"));
 });
 document.querySelector("#role-panel-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   const form = event.currentTarget;
   const values = formObject(form);
   const isUpdate = Boolean(values.id);
+  const options = collectRolePanelOptions();
   clearErrors(form);
   await withBusy(form.querySelector('[type="submit"]'), isUpdate ? "Updating role panel..." : "Creating role panel...", async () => {
     try {
@@ -3556,14 +4427,19 @@ document.querySelector("#role-panel-form").addEventListener("submit", async (eve
           title: values.title,
           description: values.description || "",
           color: values.color || "#5865F2",
+          imageUrl: values.imageUrl || "",
+          thumbnailUrl: values.thumbnailUrl || "",
           active: form.elements.active.checked,
+          buttonStyle: values.buttonStyle || "secondary",
+          toggleMode: values.toggleMode || "toggle",
           maxSelectedPerCategory: Number(values.maxSelectedPerCategory || 0),
           removeRoleOnSelect: form.elements.removeRoleOnSelect.checked,
           requiredRoleId: values.requiredRoleId || null,
           messageId: null,
           logChannelId: values.logChannelId || null,
-          options: collectRolePanelOptions(),
-          roleIds: selectedValues(form.elements.roleIds)
+          categoryRules: collectRolePanelCategoryRules(),
+          options,
+          roleIds: options.map((option) => option.roleId)
         })
       });
       resetRolePanelForm();
@@ -3785,6 +4661,10 @@ document.body.addEventListener("click", async (event) => {
       form.elements.layout.value = item.layout || "buttons";
       form.elements.logChannelId.value = item.logChannelId || "";
       form.elements.requiredRoleId.value = item.requiredRoleId || "";
+      form.elements.buttonStyle.value = item.buttonStyle || "secondary";
+      form.elements.toggleMode.value = item.toggleMode || "toggle";
+      form.elements.thumbnailUrl.value = item.thumbnailUrl || "";
+      form.elements.imageUrl.value = item.imageUrl || "";
       form.elements.maxSelectedPerCategory.value = item.maxSelectedPerCategory ?? 0;
       form.elements.removeRoleOnSelect.checked = Boolean(item.removeRoleOnSelect);
       form.elements.title.value = item.title;
@@ -3792,8 +4672,7 @@ document.body.addEventListener("click", async (event) => {
       form.elements.color.value = item.color;
       form.elements.colorText.value = item.color;
       form.elements.active.checked = item.active;
-      setSelectedValues(form.elements.roleIds, item.roleIds);
-      renderRolePanelOptions(item.options || []);
+      renderRolePanelOptions(item.options || [], item.categoryRules || []);
       form.querySelector(".cancel-edit").style.display = "block";
       updateRolePanelPreview();
       markFormClean(form);
@@ -4012,6 +4891,8 @@ async function init() {
   try {
     renderCommandVariables();
     const session = await api("/session");
+    if (session.setupRequired) return window.location.replace(session.next || "/setup");
+    applyRuntimeBranding(session);
     if (!session.authenticated) return window.location.replace("/login");
     if (!session.guildId) return window.location.replace("/servers");
     await loadGuilds();
@@ -4046,9 +4927,9 @@ async function init() {
       const topic = window.location.pathname.split("/")[2];
       if (topic) await showDocsTopic(topic, false, window.location.hash.replace(/^#/, ""));
     }
-    const pendingTarget = sessionStorage.getItem("odyssey.pendingNavigation");
+    const pendingTarget = sessionStorage.getItem("corepanel.pendingNavigation");
     if (pendingTarget) {
-      sessionStorage.removeItem("odyssey.pendingNavigation");
+      sessionStorage.removeItem("corepanel.pendingNavigation");
       await performNavigation(JSON.parse(pendingTarget));
     }
   } catch (error) {

@@ -22,6 +22,19 @@ export type PlannedVerificationChannel = {
   inherited: boolean;
 };
 
+export type VerificationAutoKickInput = {
+  enabled: boolean;
+  autoKickUnverified: boolean;
+  autoKickAfterHours: number;
+  verifiedRoleId: string | null;
+  joinedAt: string | null;
+  memberRoleIds: string[];
+  trustedRoleIds: string[];
+  isBot: boolean;
+  hasAdminPermission: boolean;
+  nowMs?: number;
+};
+
 const verificationChannelTypes = new Set<number>([
   ChannelType.GuildText,
   ChannelType.GuildAnnouncement,
@@ -51,6 +64,31 @@ export function sanitizeVerificationChannelName(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 100);
   return normalized || "verify";
+}
+
+export function shouldAutoKickUnverified(input: VerificationAutoKickInput): {
+  kick: boolean;
+  reason: string;
+  pendingHours: number;
+} {
+  if (!input.enabled) return { kick: false, reason: "verification_disabled", pendingHours: 0 };
+  if (!input.autoKickUnverified) return { kick: false, reason: "auto_kick_disabled", pendingHours: 0 };
+  if (!input.verifiedRoleId) return { kick: false, reason: "verified_role_missing", pendingHours: 0 };
+  if (input.isBot) return { kick: false, reason: "bot_user", pendingHours: 0 };
+  if (input.hasAdminPermission) return { kick: false, reason: "admin_or_manage_server", pendingHours: 0 };
+  const memberRoles = new Set(input.memberRoleIds);
+  if (memberRoles.has(input.verifiedRoleId)) return { kick: false, reason: "already_verified", pendingHours: 0 };
+  if (input.trustedRoleIds.some((roleId) => memberRoles.has(roleId))) {
+    return { kick: false, reason: "trusted_role", pendingHours: 0 };
+  }
+  if (!input.joinedAt) return { kick: false, reason: "joined_at_unknown", pendingHours: 0 };
+  const joinedMs = new Date(input.joinedAt).getTime();
+  if (!Number.isFinite(joinedMs)) return { kick: false, reason: "joined_at_invalid", pendingHours: 0 };
+  const pendingHours = Math.max(0, (input.nowMs ?? Date.now()) - joinedMs) / 3_600_000;
+  if (pendingHours < input.autoKickAfterHours) {
+    return { kick: false, reason: "within_pending_window", pendingHours };
+  }
+  return { kick: true, reason: "auto_kick_unverified", pendingHours };
 }
 
 function overwriteSignature(overwrites: VerificationPlanOverwrite[] | undefined): string {

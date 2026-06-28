@@ -41,7 +41,7 @@ import {
   resolveCloseRequest
 } from "../database/index.js";
 import type { TicketRecord } from "../database/index.js";
-import type { TicketCloseRequest, TicketPanel, TicketType } from "../shared/types.js";
+import type { TicketCloseRequest, TicketPanel, TicketTranscriptMessage, TicketType } from "../shared/types.js";
 import { emptyEmbedConfig } from "../shared/types.js";
 import { parseDiscordComponentEmoji } from "../shared/discord-components.js";
 import { renderEmbedMessage } from "./messages.js";
@@ -159,7 +159,7 @@ export async function postTicketPanel(guild: Guild, panelId: number, channel: Se
   if (!panel?.active) throw new Error("Ticket panel not found or inactive.");
   const payload = await ticketPanelMessage(guild, panel, channel);
   const botMember = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
-  if (!botMember) throw new Error("Odyssey Bot could not verify its server permissions.");
+  if (!botMember) throw new Error("CorePanel could not verify its server permissions.");
   const permissions = channel.permissionsFor?.(botMember);
   if (permissions) {
     const required = [
@@ -178,7 +178,7 @@ export async function postTicketPanel(guild: Guild, panelId: number, channel: Se
         !permissions.has(PermissionFlagsBits.EmbedLinks) ? "Embed Links" : "",
         payload.files?.length && !permissions.has(PermissionFlagsBits.AttachFiles) ? "Attach Files" : ""
       ].filter(Boolean);
-      throw new Error(`Odyssey Bot is missing these permissions in the target channel: ${names.join(", ")}.`);
+      throw new Error(`CorePanel is missing these permissions in the target channel: ${names.join(", ")}.`);
     }
   }
   await channel.send(payload);
@@ -296,7 +296,7 @@ export function buildTicketTranscriptEmbed(input: {
   return new EmbedBuilder()
     .setColor(asColor("#57F287"))
     .setTitle("Ticket Transcript Saved")
-    .setDescription("The ticket was closed and its latest messages were exported successfully.")
+    .setDescription("The ticket was closed and its transcript was exported successfully.")
     .addFields(
       { name: "Status", value: "Saved and ready to download", inline: false },
       { name: "Ticket", value: `#${channelName}\n\`${channelId}\``, inline: true },
@@ -305,12 +305,47 @@ export function buildTicketTranscriptEmbed(input: {
       { name: "Requester", value: ticket ? `<@${ticket.userId}>\n\`${ticket.userId}\`` : "Unavailable", inline: true },
       { name: "Closed by", value: `<@${closedBy}>\n\`${closedBy}\``, inline: true },
       { name: "Messages saved", value: String(messageCount), inline: true },
+      { name: "Assigned staff", value: ticket?.claimedBy ? `<@${ticket.claimedBy}>\n\`${ticket.claimedBy}\`` : "Unclaimed", inline: true },
+      { name: "Priority", value: ticket?.priority ?? "normal", inline: true },
       { name: "Opened", value: ticket ? formatDiscordDate(ticket.openedAt) : "Unavailable", inline: true },
       { name: "Closed", value: formatDiscordDate(closedAt), inline: true },
       { name: "Close reason", value: reason || "No reason provided.", inline: false }
     )
-    .setFooter({ text: "Odyssey Bot ticket archive" })
+    .setFooter({ text: "CorePanel ticket archive" })
     .setTimestamp(new Date(closedAt));
+}
+
+function summarizeMessageEmbeds(message: Message<true>): TicketTranscriptMessage["embedSummaries"] {
+  return message.embeds.map((embed) => ({
+    title: embed.title ?? "",
+    description: embed.description ?? "",
+    url: embed.url ?? "",
+    fields: embed.fields.map((field) => ({
+      name: field.name,
+      value: field.value,
+      inline: Boolean(field.inline)
+    }))
+  }));
+}
+
+function transcriptMessageLine(message: TicketTranscriptMessage): string {
+  const attachmentLines = message.attachments.map((attachment) =>
+    `    attachment: ${attachment.name} ${attachment.url}`
+  );
+  const embedLines = message.embedSummaries.map((embed, index) => {
+    const parts = [
+      embed.title ? `title="${embed.title}"` : "",
+      embed.description ? `description="${embed.description.replace(/\s+/g, " ").slice(0, 220)}"` : "",
+      embed.url ? `url=${embed.url}` : "",
+      embed.fields.length ? `fields=${embed.fields.length}` : ""
+    ].filter(Boolean).join(", ");
+    return `    embed ${index + 1}: ${parts || "Discord embed without text fields"}`;
+  });
+  return [
+    `[${message.createdAt}] ${message.authorTag} (${message.authorId}): ${message.content || "(no text content)"}`,
+    ...attachmentLines,
+    ...embedLines
+  ].join("\n");
 }
 
 export async function sendTicketTranscript(
@@ -327,39 +362,53 @@ export async function sendTicketTranscript(
       ? await guild.channels.fetch(logChannelId).catch(() => null)
       : null;
     const ticket = await getTicketByChannel(guild.id, channel.id);
+    const closedAt = ticket?.closedAt ?? new Date().toISOString();
     let before: string | undefined;
     const fetched: Message<true>[] = [];
     for (let page = 0; page < 10; page += 1) {
-      const batch = await channel.messages.fetch({ limit: 100, before });
+      const batch = await channel.messages.fetch({ limit: 100, before }).catch((error) => {
+        logError(`Could not fetch ticket transcript page for channel ${channel.id}`, error);
+        return null;
+      });
+      if (!batch) break;
       if (!batch.size) break;
       fetched.push(...batch.values());
       before = batch.last()?.id;
       if (batch.size < 100) break;
     }
     const messages = fetched.sort((left, right) => left.createdTimestamp - right.createdTimestamp);
-    const transcriptMessages = messages.map((message) => ({
+    const transcriptMessages: TicketTranscriptMessage[] = messages.map((message) => ({
       id: message.id,
       authorId: message.author.id,
       authorTag: message.author.tag,
       createdAt: message.createdAt.toISOString(),
       content: message.cleanContent || "",
-      attachments: [...message.attachments.values()].map((file) => file.url),
-      embeds: message.embeds.length
+      attachments: [...message.attachments.values()].map((file) => ({
+        name: file.name ?? file.url.split("/").pop() ?? "Attachment",
+        url: file.url,
+        contentType: file.contentType,
+        size: file.size
+      })),
+      embeds: message.embeds.length,
+      embedSummaries: summarizeMessageEmbeds(message)
     }));
-    const lines = messages
-      .map((message) => {
-        const attachments = [...message.attachments.values()].map((file) => file.url).join(" ");
-        const content = [message.cleanContent, attachments].filter(Boolean).join(" ");
-        return `[${message.createdAt.toISOString()}] ${message.author.tag} (${message.author.id}): ${content || "(no text content)"}`;
-      });
+    const lines = transcriptMessages.map(transcriptMessageLine);
     const transcript = [
       `Ticket: #${channel.name} (${channel.id})`,
+      `Ticket ID: ${ticket ? ticket.id : "Unavailable"}`,
+      `Opened by: ${ticket ? `${ticket.userId}` : "Unavailable"}`,
+      `Assigned staff: ${ticket?.claimedBy ?? "Unclaimed"}`,
+      `Category: ${type?.label ?? "General"}`,
+      `Priority: ${ticket?.priority ?? "normal"}`,
+      `Created: ${ticket?.openedAt ?? "Unavailable"}`,
+      `Closed: ${closedAt}`,
       `Closed by: ${closedBy}`,
       `Reason: ${reason || "No reason provided"}`,
       `Exported messages: ${lines.length}`,
       "",
       ...lines
     ].join("\n");
+    let saved = false;
     if (ticket) {
       await createTicketTranscript({
         guildId: guild.id,
@@ -369,19 +418,24 @@ export async function sendTicketTranscript(
         openerId: ticket.userId,
         closedBy,
         closeReason: reason || "No reason provided",
+        openedAt: ticket.openedAt,
+        closedAt,
+        categoryLabel: type?.label ?? "General",
+        claimedBy: ticket.claimedBy,
+        priority: ticket.priority ?? "normal",
         messageCount: transcriptMessages.length,
         transcriptJson: transcriptMessages,
         transcriptText: transcript
       });
+      saved = true;
     }
     if (!logChannelId || !logChannel?.isTextBased() || logChannel.isDMBased() || !("send" in logChannel)) {
-      return { saved: Boolean(ticket), downloadUrl: null, messageCount: lines.length };
+      return { saved, downloadUrl: null, messageCount: lines.length };
     }
     const safeName = channel.name.replace(/[^a-z0-9-_]/gi, "-").slice(0, 80);
     const file = new AttachmentBuilder(Buffer.from(transcript, "utf8"), {
       name: `${safeName || "ticket"}-transcript.txt`
     });
-    const closedAt = ticket?.closedAt ?? new Date().toISOString();
     const embed = buildTicketTranscriptEmbed({
       channelName: channel.name,
       channelId: channel.id,
@@ -396,7 +450,11 @@ export async function sendTicketTranscript(
       embeds: [embed],
       files: [file],
       allowedMentions: { users: [] }
+    }).catch((error) => {
+      logError(`Could not send ticket transcript to configured log channel ${logChannelId}`, error);
+      return null;
     });
+    if (!sent) return { saved, downloadUrl: null, messageCount: lines.length };
     const downloadUrl = sent.attachments.first()?.url ?? null;
     if (downloadUrl) {
       await sent.edit({
@@ -409,7 +467,7 @@ export async function sendTicketTranscript(
               .setURL(downloadUrl)
           )
         ]
-      });
+      }).catch((error) => logError("Could not add transcript download button", error));
     }
     return { saved: true, downloadUrl, messageCount: lines.length };
   } catch (error) {
@@ -613,7 +671,7 @@ async function createTicket(interaction: TicketCreateInteraction, panelId: numbe
   const staffRoleIds = [...new Set([...settings.staffRoleIds, ...type.staffRoleIds])];
   const botMember = interaction.guild.members.me ?? await interaction.guild.members.fetchMe();
   if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    await interaction.editReply("Odyssey Bot needs the Manage Channels permission before it can create ticket channels.");
+    await interaction.editReply("CorePanel needs the Manage Channels permission before it can create ticket channels.");
     return;
   }
   const parentId = type.categoryId ?? settings.ticketCategoryId;

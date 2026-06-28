@@ -1,6 +1,6 @@
 # Modlogs
 
-Odyssey Bot writes moderation, ticket, and security activity to Discord channels and stores structured records in the database where supported.
+CorePanel writes moderation, ticket, and security activity to Discord channels and stores structured records in the database where supported.
 
 ## Configure channels
 

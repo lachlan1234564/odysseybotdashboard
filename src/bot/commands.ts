@@ -17,12 +17,16 @@ export const slashCommandNames = [
   "announce",
   "reaction-roles",
   "giveaway",
+  "poll",
   "verification",
+  "dm",
   "warn",
   "warnings",
   "timeout",
+  "untimeout",
   "kick",
   "ban",
+  "unban",
   "clear",
   "case",
   "lockdown",
@@ -35,10 +39,10 @@ export type SlashCommandName = typeof slashCommandNames[number];
 export const commandBuilders = [
   new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("Quickly check that Odyssey Bot is online and responding."),
+    .setDescription("Quickly check that CorePanel is online and responding."),
   new SlashCommandBuilder()
     .setName("help")
-    .setDescription("List every Odyssey Bot command, its purpose, and who can use it."),
+    .setDescription("List every CorePanel command, its purpose, and who can use it."),
   new SlashCommandBuilder()
     .setName("server")
     .setDescription("Server information and administration.")
@@ -153,6 +157,10 @@ export const commandBuilders = [
         .addIntegerOption((option) => option.setName("winners").setDescription("Number of winners").setMinValue(1).setMaxValue(20))
         .addStringOption((option) => option.setName("description").setDescription("Extra giveaway details").setMaxLength(1000))
         .addRoleOption((option) => option.setName("required_role").setDescription("Optional required role to enter"))
+        .addIntegerOption((option) => option.setName("booster_bonus_entries").setDescription("Extra entries for server boosters").setMinValue(0).setMaxValue(20))
+        .addRoleOption((option) => option.setName("bonus_role").setDescription("Optional role that receives bonus entries"))
+        .addIntegerOption((option) => option.setName("bonus_role_entries").setDescription("Extra entries for the bonus role").setMinValue(0).setMaxValue(20))
+        .addUserOption((option) => option.setName("host").setDescription("Optional giveaway host shown on the embed"))
         .addChannelOption((option) =>
           option
             .setName("channel")
@@ -177,6 +185,65 @@ export const commandBuilders = [
         .setName("cancel")
         .setDescription("Cancel a giveaway without picking winners.")
         .addIntegerOption((option) => option.setName("id").setDescription("Giveaway ID").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("list")
+        .setDescription("List recent giveaways for this server.")
+    ),
+  new SlashCommandBuilder()
+    .setName("poll")
+    .setDescription("Create, end, cancel, list, or view results for polls.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("create")
+        .setDescription("Publish a restart-safe poll in a selected channel.")
+        .addStringOption((option) => option.setName("question").setDescription("Poll question").setRequired(true).setMaxLength(256))
+        .addStringOption((option) => option.setName("option1").setDescription("First option").setRequired(true).setMaxLength(100))
+        .addStringOption((option) => option.setName("option2").setDescription("Second option").setRequired(true).setMaxLength(100))
+        .addStringOption((option) => option.setName("option_3").setDescription("Third option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_4").setDescription("Fourth option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_5").setDescription("Fifth option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_6").setDescription("Sixth option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_7").setDescription("Seventh option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_8").setDescription("Eighth option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_9").setDescription("Ninth option").setMaxLength(100))
+        .addStringOption((option) => option.setName("option_10").setDescription("Tenth option").setMaxLength(100))
+        .addIntegerOption((option) => option.setName("minutes").setDescription("Optional poll length in minutes").setMinValue(1).setMaxValue(10080))
+        .addChannelOption((option) =>
+          option
+            .setName("channel")
+            .setDescription("Channel to post in")
+            .addChannelTypes(ChannelType.GuildText, ChannelType.GuildAnnouncement)
+        )
+        .addRoleOption((option) => option.setName("required_role").setDescription("Optional required role to vote"))
+        .addBooleanOption((option) => option.setName("anonymous").setDescription("Hide voter names from dashboard/API results"))
+        .addBooleanOption((option) => option.setName("multiple_choice").setDescription("Allow voters to select more than one option"))
+        .addBooleanOption((option) => option.setName("show_results").setDescription("Update live result counts on the poll message"))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("end")
+        .setDescription("End an active poll early.")
+        .addIntegerOption((option) => option.setName("id").setDescription("Poll ID").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("cancel")
+        .setDescription("Cancel a draft, scheduled, or active poll.")
+        .addIntegerOption((option) => option.setName("id").setDescription("Poll ID").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("results")
+        .setDescription("View poll results.")
+        .addIntegerOption((option) => option.setName("id").setDescription("Poll ID").setRequired(true).setMinValue(1))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("list")
+        .setDescription("List recent polls for this server.")
     ),
   new SlashCommandBuilder()
     .setName("verification")
@@ -191,6 +258,28 @@ export const commandBuilders = [
       subcommand
         .setName("status")
         .setDescription("Show the saved verification gate status for this server.")
+    ),
+  new SlashCommandBuilder()
+    .setName("dm")
+    .setDescription("Send one safe staff DM to a server member.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .addUserOption((option) =>
+      option.setName("user").setDescription("User to DM").setRequired(true)
+    )
+    .addStringOption((option) =>
+      option.setName("message").setDescription("Message to send").setRequired(true).setMaxLength(1800)
+    )
+    .addStringOption((option) =>
+      option.setName("reason").setDescription("Internal reason for the DM").setMaxLength(500)
+    )
+    .addBooleanOption((option) =>
+      option.setName("anonymous").setDescription("Show the sender as Server Staff instead of your username")
+    )
+    .addBooleanOption((option) =>
+      option.setName("embed").setDescription("Send the DM as a clean embed")
+    )
+    .addBooleanOption((option) =>
+      option.setName("reply_required").setDescription("Tell the user staff requested a reply")
     ),
   new SlashCommandBuilder()
     .setName("warn")
@@ -213,6 +302,12 @@ export const commandBuilders = [
     )
     .addStringOption((option) => option.setName("reason").setDescription("Reason").setMaxLength(1000)),
   new SlashCommandBuilder()
+    .setName("untimeout")
+    .setDescription("Remove timeout from a server member.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.ModerateMembers)
+    .addUserOption((option) => option.setName("member").setDescription("Member to remove timeout from").setRequired(true))
+    .addStringOption((option) => option.setName("reason").setDescription("Reason").setMaxLength(1000)),
+  new SlashCommandBuilder()
     .setName("kick")
     .setDescription("Kick a server member.")
     .setDefaultMemberPermissions(PermissionFlagsBits.KickMembers)
@@ -225,6 +320,14 @@ export const commandBuilders = [
     .addUserOption((option) => option.setName("member").setDescription("Member to ban").setRequired(true))
     .addIntegerOption((option) =>
       option.setName("delete_days").setDescription("Days of messages to delete").setMinValue(0).setMaxValue(7)
+    )
+    .addStringOption((option) => option.setName("reason").setDescription("Reason").setMaxLength(1000)),
+  new SlashCommandBuilder()
+    .setName("unban")
+    .setDescription("Unban a user by Discord user ID.")
+    .setDefaultMemberPermissions(PermissionFlagsBits.BanMembers)
+    .addStringOption((option) =>
+      option.setName("user_id").setDescription("Discord user ID to unban").setRequired(true).setMinLength(17).setMaxLength(20)
     )
     .addStringOption((option) => option.setName("reason").setDescription("Reason").setMaxLength(1000)),
   new SlashCommandBuilder()
@@ -248,8 +351,23 @@ export const commandBuilders = [
       subcommand
         .setName("search")
         .setDescription("Search recent moderation cases.")
+        .addIntegerOption((option) => option.setName("number").setDescription("Exact case number").setMinValue(1))
+        .addStringOption((option) => option.setName("query").setDescription("Search user IDs, usernames, reasons, or notes").setMaxLength(100))
         .addUserOption((option) => option.setName("member").setDescription("Filter by member"))
+        .addUserOption((option) => option.setName("moderator").setDescription("Filter by moderator"))
         .addStringOption((option) => option.setName("action").setDescription("Filter by action type"))
+        .addStringOption((option) =>
+          option
+            .setName("status")
+            .setDescription("Filter by case status")
+            .addChoices(
+              { name: "Active", value: "active" },
+              { name: "Expired", value: "expired" },
+              { name: "Reversed", value: "reversed" },
+              { name: "Deleted", value: "deleted" },
+              { name: "Resolved", value: "resolved" }
+            )
+        )
     )
     .addSubcommand((subcommand) =>
       subcommand
@@ -258,6 +376,20 @@ export const commandBuilders = [
         .addUserOption((option) => option.setName("member").setDescription("Member for this case").setRequired(true))
         .addStringOption((option) => option.setName("action").setDescription("Action type, such as manual or message_delete").setRequired(true).setMaxLength(40))
         .addStringOption((option) => option.setName("reason").setDescription("Reason").setMaxLength(1000))
+        .addIntegerOption((option) => option.setName("duration_minutes").setDescription("Optional duration in minutes").setMinValue(1).setMaxValue(40320))
+        .addStringOption((option) => option.setName("evidence").setDescription("Optional evidence or message link").setMaxLength(500))
+        .addStringOption((option) =>
+          option
+            .setName("status")
+            .setDescription("Initial case status")
+            .addChoices(
+              { name: "Active", value: "active" },
+              { name: "Expired", value: "expired" },
+              { name: "Reversed", value: "reversed" },
+              { name: "Deleted", value: "deleted" },
+              { name: "Resolved", value: "resolved" }
+            )
+        )
     )
     .addSubcommand((subcommand) =>
       subcommand
@@ -284,6 +416,13 @@ export const commandBuilders = [
         .setDescription("Add or replace a staff note on a case.")
         .addIntegerOption((option) => option.setName("number").setDescription("Case number").setRequired(true).setMinValue(1))
         .addStringOption((option) => option.setName("note").setDescription("Staff note").setRequired(true).setMaxLength(1000))
+    )
+    .addSubcommand((subcommand) =>
+      subcommand
+        .setName("resolve")
+        .setDescription("Mark a moderation case resolved.")
+        .addIntegerOption((option) => option.setName("number").setDescription("Case number").setRequired(true).setMinValue(1))
+        .addStringOption((option) => option.setName("note").setDescription("Optional resolution note").setMaxLength(1000))
     ),
   new SlashCommandBuilder()
     .setName("lockdown")

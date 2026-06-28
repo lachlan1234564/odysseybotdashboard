@@ -2,6 +2,8 @@
 
 This guide walks you through getting the bot running locally and then deploying it to Railway for production use. It is written for first-time server owners—you do not need prior Discord bot experience.
 
+> **Current setup flow:** CorePanel can start without a local `.env` bot token. For normal local or Railway setup, start the dashboard, open `/setup`, paste the Discord bot token/client ID there, and create the dashboard password. `.env` is still supported for infrastructure values and legacy overrides, but it is not the only setup path.
+
 ---
 
 ## Table of Contents
@@ -72,7 +74,7 @@ A Discord application is the container that holds your bot. You create it once i
 
 1. Open [https://discord.com/developers/applications](https://discord.com/developers/applications) in your browser.
 2. Click **New Application** in the top-right corner.
-3. Give it a name, such as `Odyssey Bot`, and click **Create**.
+3. Give it a name, such as `CorePanel`, and click **Create**.
 4. You are now on the **General Information** page.
 5. Copy the **Application ID** (a long number near the top). This is your `DISCORD_CLIENT_ID`.
 6. On the left sidebar, click **Bot**.
@@ -82,7 +84,7 @@ A Discord application is the container that holds your bot. You create it once i
    - **Server Members Intent** for welcome messages and member protection.
    - **Message Content Intent** for dashboard-configured Auto Mod rules.
 
-> **Security warning:** Your bot token is like a password. Anyone who has it can control your bot. Never paste it into chat, screenshots, or public repositories. Store it only in your `.env` file.
+> **Security warning:** Your bot token is like a password. Anyone who has it can control your bot. Never paste it into chat, screenshots, or public repositories. Store it only in the hosted `/setup` flow or private Railway/local environment variables.
 
 ---
 
@@ -127,7 +129,7 @@ Your server has a unique ID number that the bot needs to know.
 5. Right-click your server icon in the left sidebar.
 6. Click **Copy Server ID**.
 
-This long number can be used as the optional `DISCORD_GUILD_ID` preference. Odyssey Bot still discovers and manages every server where it is installed.
+This long number can be used as the optional `DISCORD_GUILD_ID` preference. CorePanel still discovers and manages every server where it is installed.
 
 ---
 
@@ -155,11 +157,11 @@ pnpm setup
 
 ---
 
-## Step 6: Create Your `.env` File
+## Step 6: Optional `.env` File
 
-The `.env` file stores secrets and startup settings. The repository includes an example file called `.env.example`.
+CorePanel's normal setup now happens in the dashboard at `/setup`. The `.env` file is optional for local development unless you need custom database, port, proxy, upload, or compatibility settings. The repository includes an example file called `.env.example`.
 
-1. Copy the example file to create your real `.env`:
+1. If you need custom local settings, copy the example file:
 
 ```bash
 cp .env.example .env
@@ -167,23 +169,22 @@ cp .env.example .env
 
 > **Do not run this command if `.env` already exists.** It would overwrite your current values.
 
-2. Open `.env` in a text editor and fill in the values you collected:
+2. Open `.env` in a text editor and fill only the values you want to override:
 
 ```dotenv
-DISCORD_TOKEN=your_bot_token_here
-DISCORD_CLIENT_ID=your_application_id_here
-# Optional member verification:
-# DISCORD_CLIENT_SECRET=your_oauth_client_secret
-# DISCORD_OAUTH_REDIRECT_URI=https://your-domain.example/api/verify/callback
-# Optional preferred dashboard server:
-DISCORD_GUILD_ID=your_server_id_here
-DASHBOARD_PASSWORD=make_this_long_and_random
 DATABASE_URL=file:./data/bot.db
 DATABASE_SSL=false
 DASHBOARD_PORT=3210
 DASHBOARD_HOST=127.0.0.1
 UPLOADS_DIR=./uploads
 NODE_ENV=development
+# Optional compatibility overrides. The /setup page is preferred.
+# DISCORD_TOKEN=your_bot_token_here
+# DISCORD_CLIENT_ID=your_application_id_here
+# DASHBOARD_PASSWORD=make_this_long_and_random
+# DISCORD_GUILD_ID=your_server_id_here
+# DISCORD_CLIENT_SECRET=your_oauth_client_secret
+# DISCORD_OAUTH_REDIRECT_URI=https://your-domain.example/api/verify/callback
 # PUBLIC_BASE_URL=https://your-domain.example
 # VPN_CHECK_URL_TEMPLATE=https://provider.example/check/{ip}
 # VPN_CHECK_API_KEY=your_provider_api_key
@@ -193,13 +194,14 @@ NODE_ENV=development
 
 | Variable | Required? | What It Does | Example |
 |----------|-----------|--------------|---------|
-| `DISCORD_TOKEN` | **Yes** | The secret token from Developer Portal > Bot | `MTAx...` |
-| `DISCORD_CLIENT_ID` | **Yes** | The Application ID from Developer Portal > General Information | `1234567890123456789` |
+| `COREPANEL_SECRET_KEY` | Production | Encrypts stored setup secrets. Required on Railway. | generated secret |
+| `DISCORD_TOKEN` | Setup or env override | The secret token from Developer Portal > Bot | `MTAx...` |
+| `DISCORD_CLIENT_ID` | Setup or env override | The Application ID from Developer Portal > General Information | `1234567890123456789` |
 | `DISCORD_CLIENT_SECRET` | Verification only | OAuth client secret used by the optional member verification flow. Never share it. | — |
 | `DISCORD_OAUTH_REDIRECT_URI` | Verification only | Exact OAuth callback registered in Discord Developer Portal. | `https://bot.example/api/verify/callback` |
 | `DISCORD_GUILD_ID` | No | Preferred server selected for a new dashboard session. It does not limit the bot to one server. | `9876543210987654321` |
-| `DASHBOARD_PASSWORD` | **Yes** | The shared password for logging into the web dashboard. Minimum 8 characters. | `my-s3cur3-pass` |
-| `DATABASE_URL` | **Yes** | Where the database lives. Use SQLite locally, PostgreSQL on Railway. | `file:./data/bot.db` |
+| `DASHBOARD_PASSWORD` | Setup or env override | The shared password for logging into the web dashboard. Minimum 8 characters. | `my-s3cur3-pass` |
+| `DATABASE_URL` | No locally, yes on Railway | Where the database lives. Use SQLite locally, PostgreSQL on Railway. | `file:./data/bot.db` |
 | `DATABASE_SSL` | No | Whether to use SSL for the database. `false` locally, `true` on Railway. | `false` |
 | `DASHBOARD_PORT` | No | The port the dashboard listens on locally. | `3210` |
 | `DASHBOARD_HOST` | No | The network address the dashboard binds to. `127.0.0.1` means only your computer. | `127.0.0.1` |
@@ -214,7 +216,7 @@ NODE_ENV=development
 
 ### What Should NOT Go in `.env`
 
-Do not put Discord channel IDs, role IDs, ticket categories, colors, images, or announcement settings in `.env`. The dashboard saves those to the database. Only secrets and process startup values belong in `.env`.
+Do not put Discord channel IDs, role IDs, ticket categories, colors, images, or announcement settings in `.env`. The dashboard saves those to the database. Only infrastructure values and optional compatibility secrets belong in `.env`.
 
 ---
 
@@ -255,7 +257,7 @@ pnpm bot
 Keep this terminal window open. A successful login prints something like:
 
 ```
-Odyssey Bot connected to Discord.
+CorePanel connected to Discord.
 ```
 
 Test the bot in Discord by typing:

@@ -9,12 +9,17 @@ import type {
   Branding,
   CustomCommand,
   CustomCommandActionConfig,
+  DmSettings,
   GuildSettings,
   LoggingSettings,
   Giveaway,
   GiveawayEntry,
   ModerationCase,
+  Poll,
+  PollOption,
+  PollVote,
   RolePanel,
+  RolePanelCategoryRule,
   RolePanelOption,
   ScheduledAnnouncement,
   SocialPromotionSettings,
@@ -31,6 +36,7 @@ import type {
 } from "../shared/types.js";
 import { emptyActionConfig } from "../shared/types.js";
 import { normalizeCommandName } from "../shared/validation.js";
+import { decryptSecret, encryptSecret, hashPassword, maskSecret, secretStorageStatus } from "../shared/secrets.js";
 import { db } from "./adapter.js";
 import { postgresMigrations } from "./schema-postgres.js";
 import { migrations as sqliteMigrations } from "./schema.js";
@@ -91,6 +97,210 @@ async function clearDeprecatedVerificationDeviceData(): Promise<void> {
 
 await clearDeprecatedVerificationDeviceData();
 
+export interface AppSetupPublic {
+  setupComplete: boolean;
+  dashboardName: string;
+  botDisplayName: string;
+  supportServerName: string;
+  discordClientId: string;
+  discordClientSecretConfigured: boolean;
+  discordClientSecretMasked: string;
+  discordTokenConfigured: boolean;
+  discordTokenMasked: string;
+  discordGuildId: string;
+  publicBaseUrl: string;
+  verifyPublicBaseUrl: string;
+  discordOauthRedirectUri: string;
+  adminUserIds: string[];
+  encryptionReady: boolean;
+  encryptionSource: "environment" | "local-file" | "missing";
+  encryptionMessage: string;
+  setupCompletedAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface RuntimeAppConfig {
+  setupComplete: boolean;
+  dashboardName: string;
+  botDisplayName: string;
+  supportServerName: string;
+  discordToken: string;
+  discordClientId: string;
+  discordClientSecret: string;
+  discordGuildId: string;
+  publicBaseUrl: string;
+  verifyPublicBaseUrl: string;
+  discordOauthRedirectUri: string;
+  dashboardPassword: string;
+  dashboardPasswordHash: string;
+  adminUserIds: string[];
+  secretError: string | null;
+}
+
+export interface SaveAppSetupInput {
+  dashboardName: string;
+  botDisplayName: string;
+  supportServerName?: string;
+  discordToken: string;
+  discordClientId: string;
+  discordClientSecret?: string;
+  discordGuildId?: string;
+  publicBaseUrl?: string;
+  verifyPublicBaseUrl?: string;
+  discordOauthRedirectUri?: string;
+  dashboardPassword: string;
+  adminUserIds?: string[];
+}
+
+function envValue(name: string): string {
+  return typeof process.env[name] === "string" ? process.env[name]!.trim() : "";
+}
+
+async function ensureAppSetupRow(): Promise<void> {
+  await db.run("INSERT INTO app_setup (id) VALUES (1) ON CONFLICT (id) DO NOTHING");
+}
+
+async function getAppSetupRow(): Promise<Record<string, unknown>> {
+  await ensureAppSetupRow();
+  return (await db.get<Record<string, unknown>>("SELECT * FROM app_setup WHERE id = 1"))!;
+}
+
+function setupCompleteFrom(row: Record<string, unknown>): boolean {
+  return Boolean(
+    row.setup_completed_at
+    || (envValue("DISCORD_TOKEN") && envValue("DISCORD_CLIENT_ID") && envValue("DASHBOARD_PASSWORD"))
+    || (row.discord_token_encrypted && row.discord_client_id && row.dashboard_password_hash)
+  );
+}
+
+function decryptStoredSecret(row: Record<string, unknown>, key: string): { value: string; error: string | null } {
+  const encrypted = String(row[key] ?? "");
+  if (!encrypted) return { value: "", error: null };
+  try {
+    return { value: decryptSecret(encrypted), error: null };
+  } catch {
+    return {
+      value: "",
+      error: "A stored setup secret could not be decrypted. Check COREPANEL_SECRET_KEY."
+    };
+  }
+}
+
+export async function getAppSetup(): Promise<AppSetupPublic> {
+  const row = await getAppSetupRow();
+  const storage = secretStorageStatus();
+  const envToken = envValue("DISCORD_TOKEN");
+  const envClientSecret = envValue("DISCORD_CLIENT_SECRET");
+  return {
+    setupComplete: setupCompleteFrom(row),
+    dashboardName: String(row.dashboard_name ?? "CorePanel"),
+    botDisplayName: String(row.bot_display_name ?? "CorePanel Bot"),
+    supportServerName: String(row.support_server_name ?? ""),
+    discordClientId: envValue("DISCORD_CLIENT_ID") || String(row.discord_client_id ?? ""),
+    discordClientSecretConfigured: Boolean(envClientSecret || row.discord_client_secret_encrypted),
+    discordClientSecretMasked: envClientSecret ? maskSecret(envClientSecret) : (row.discord_client_secret_last4 ? `••••••••${row.discord_client_secret_last4}` : ""),
+    discordTokenConfigured: Boolean(envToken || row.discord_token_encrypted),
+    discordTokenMasked: envToken ? maskSecret(envToken) : (row.discord_token_last4 ? `••••••••${row.discord_token_last4}` : ""),
+    discordGuildId: envValue("DISCORD_GUILD_ID") || String(row.discord_guild_id ?? ""),
+    publicBaseUrl: envValue("PUBLIC_BASE_URL") || String(row.public_base_url ?? ""),
+    verifyPublicBaseUrl: envValue("VERIFY_PUBLIC_BASE_URL") || String(row.verify_public_base_url ?? ""),
+    discordOauthRedirectUri: envValue("DISCORD_OAUTH_REDIRECT_URI") || String(row.discord_oauth_redirect_uri ?? ""),
+    adminUserIds: parseJsonArray(String(row.admin_user_ids ?? "[]")),
+    encryptionReady: storage.ready,
+    encryptionSource: storage.source,
+    encryptionMessage: storage.message,
+    setupCompletedAt: row.setup_completed_at ? String(row.setup_completed_at) : null,
+    updatedAt: row.updated_at ? String(row.updated_at) : null
+  };
+}
+
+export async function getRuntimeAppConfig(): Promise<RuntimeAppConfig> {
+  const row = await getAppSetupRow();
+  const token = decryptStoredSecret(row, "discord_token_encrypted");
+  const clientSecret = decryptStoredSecret(row, "discord_client_secret_encrypted");
+  return {
+    setupComplete: setupCompleteFrom(row),
+    dashboardName: String(row.dashboard_name ?? "CorePanel"),
+    botDisplayName: String(row.bot_display_name ?? "CorePanel Bot"),
+    supportServerName: String(row.support_server_name ?? ""),
+    discordToken: envValue("DISCORD_TOKEN") || token.value,
+    discordClientId: envValue("DISCORD_CLIENT_ID") || String(row.discord_client_id ?? ""),
+    discordClientSecret: envValue("DISCORD_CLIENT_SECRET") || clientSecret.value,
+    discordGuildId: envValue("DISCORD_GUILD_ID") || String(row.discord_guild_id ?? ""),
+    publicBaseUrl: envValue("PUBLIC_BASE_URL") || String(row.public_base_url ?? ""),
+    verifyPublicBaseUrl: envValue("VERIFY_PUBLIC_BASE_URL") || String(row.verify_public_base_url ?? ""),
+    discordOauthRedirectUri: envValue("DISCORD_OAUTH_REDIRECT_URI") || String(row.discord_oauth_redirect_uri ?? ""),
+    dashboardPassword: envValue("DASHBOARD_PASSWORD"),
+    dashboardPasswordHash: String(row.dashboard_password_hash ?? ""),
+    adminUserIds: parseJsonArray(String(row.admin_user_ids ?? "[]")),
+    secretError: token.error || clientSecret.error
+  };
+}
+
+export async function saveAppSetup(input: SaveAppSetupInput): Promise<AppSetupPublic> {
+  await ensureAppSetupRow();
+  const token = input.discordToken.trim();
+  const clientSecret = input.discordClientSecret?.trim() ?? "";
+  await db.run(`
+    UPDATE app_setup SET
+      dashboard_name = @dashboardName,
+      bot_display_name = @botDisplayName,
+      support_server_name = @supportServerName,
+      discord_client_id = @discordClientId,
+      discord_client_secret_encrypted = @discordClientSecretEncrypted,
+      discord_client_secret_last4 = @discordClientSecretLast4,
+      discord_token_encrypted = @discordTokenEncrypted,
+      discord_token_last4 = @discordTokenLast4,
+      discord_guild_id = @discordGuildId,
+      public_base_url = @publicBaseUrl,
+      verify_public_base_url = @verifyPublicBaseUrl,
+      discord_oauth_redirect_uri = @discordOauthRedirectUri,
+      dashboard_password_hash = @dashboardPasswordHash,
+      admin_user_ids = @adminUserIds,
+      setup_completed_at = COALESCE(setup_completed_at, CURRENT_TIMESTAMP),
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+  `, {
+    dashboardName: input.dashboardName.trim(),
+    botDisplayName: input.botDisplayName.trim(),
+    supportServerName: input.supportServerName?.trim() ?? "",
+    discordClientId: input.discordClientId.trim(),
+    discordClientSecretEncrypted: clientSecret ? encryptSecret(clientSecret) : "",
+    discordClientSecretLast4: clientSecret.slice(-4),
+    discordTokenEncrypted: encryptSecret(token),
+    discordTokenLast4: token.slice(-4),
+    discordGuildId: input.discordGuildId?.trim() ?? "",
+    publicBaseUrl: input.publicBaseUrl?.trim() ?? "",
+    verifyPublicBaseUrl: input.verifyPublicBaseUrl?.trim() ?? "",
+    discordOauthRedirectUri: input.discordOauthRedirectUri?.trim() ?? "",
+    dashboardPasswordHash: hashPassword(input.dashboardPassword),
+    adminUserIds: JSON.stringify(input.adminUserIds ?? [])
+  });
+  return getAppSetup();
+}
+
+export async function replaceDiscordToken(discordToken: string): Promise<AppSetupPublic> {
+  await ensureAppSetupRow();
+  const token = discordToken.trim();
+  await db.run(`
+    UPDATE app_setup SET
+      discord_token_encrypted = @discordTokenEncrypted,
+      discord_token_last4 = @discordTokenLast4,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = 1
+  `, {
+    discordTokenEncrypted: encryptSecret(token),
+    discordTokenLast4: token.slice(-4)
+  });
+  return getAppSetup();
+}
+
+export async function resetAppSetup(): Promise<AppSetupPublic> {
+  await db.run("DELETE FROM app_setup WHERE id = 1");
+  await ensureAppSetupRow();
+  return getAppSetup();
+}
+
 function parseJsonArray(value: string | null): string[] {
   if (!value) return [];
   try {
@@ -122,6 +332,7 @@ async function ensureGuildRows(guildId: string): Promise<void> {
   await db.run("INSERT INTO social_promotion_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO verification_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
   await db.run("INSERT INTO logging_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
+  await db.run("INSERT INTO dm_settings (guild_id) VALUES (?) ON CONFLICT (guild_id) DO NOTHING", [guildId]);
 }
 
 export async function getGuildSettings(guildId: string): Promise<GuildSettings> {
@@ -216,6 +427,71 @@ export async function saveLoggingSettings(settings: LoggingSettings): Promise<Lo
     dashboard: Number(settings.dashboard)
   });
   return getLoggingSettings(settings.guildId);
+}
+
+function mapDmSettings(row: Record<string, unknown>): DmSettings {
+  return {
+    guildId: String(row.guild_id ?? row.guildId),
+    dmCommandEnabled: row.dm_command_enabled === undefined ? true : Boolean(row.dm_command_enabled),
+    dmCommandLogContent: Boolean(row.dm_command_log_content),
+    dmCommandRateLimitSeconds: Number(row.dm_command_rate_limit_seconds ?? 30),
+    moderationDmEnabled: Boolean(row.moderation_dm_enabled),
+    dmOnWarn: row.dm_on_warn === undefined ? true : Boolean(row.dm_on_warn),
+    dmOnTimeout: row.dm_on_timeout === undefined ? true : Boolean(row.dm_on_timeout),
+    dmOnKick: row.dm_on_kick === undefined ? true : Boolean(row.dm_on_kick),
+    dmOnBan: row.dm_on_ban === undefined ? true : Boolean(row.dm_on_ban),
+    dmOnUnban: Boolean(row.dm_on_unban),
+    dmOnManualCase: Boolean(row.dm_on_manual_case),
+    moderationDmTemplate: String(row.moderation_dm_template ?? "You received a moderation action in {server}: {action}. Reason: {reason}. Case: {case}. {duration}"),
+    moderationAppealMessage: String(row.moderation_appeal_message ?? ""),
+    giveawayWinnerDmEnabled: row.giveaway_winner_dm_enabled === undefined ? true : Boolean(row.giveaway_winner_dm_enabled),
+    giveawayDefaultWinnerDmMessage: String(row.giveaway_default_winner_dm_message ?? "You won the giveaway in {serverName}: {prize}. Please contact staff or check the giveaway channel for next steps.")
+  };
+}
+
+export async function getDmSettings(guildId: string): Promise<DmSettings> {
+  await ensureGuildRows(guildId);
+  const row = (await db.get<Record<string, unknown>>(
+    "SELECT * FROM dm_settings WHERE guild_id = ?",
+    [guildId]
+  ))!;
+  return mapDmSettings(row);
+}
+
+export async function saveDmSettings(settings: DmSettings): Promise<DmSettings> {
+  await ensureGuildRows(settings.guildId);
+  await db.run(`
+    UPDATE dm_settings SET
+      dm_command_enabled = @dmCommandEnabled,
+      dm_command_log_content = @dmCommandLogContent,
+      dm_command_rate_limit_seconds = @dmCommandRateLimitSeconds,
+      moderation_dm_enabled = @moderationDmEnabled,
+      dm_on_warn = @dmOnWarn,
+      dm_on_timeout = @dmOnTimeout,
+      dm_on_kick = @dmOnKick,
+      dm_on_ban = @dmOnBan,
+      dm_on_unban = @dmOnUnban,
+      dm_on_manual_case = @dmOnManualCase,
+      moderation_dm_template = @moderationDmTemplate,
+      moderation_appeal_message = @moderationAppealMessage,
+      giveaway_winner_dm_enabled = @giveawayWinnerDmEnabled,
+      giveaway_default_winner_dm_message = @giveawayDefaultWinnerDmMessage,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = @guildId
+  `, {
+    ...settings,
+    dmCommandEnabled: Number(settings.dmCommandEnabled),
+    dmCommandLogContent: Number(settings.dmCommandLogContent),
+    moderationDmEnabled: Number(settings.moderationDmEnabled),
+    dmOnWarn: Number(settings.dmOnWarn),
+    dmOnTimeout: Number(settings.dmOnTimeout),
+    dmOnKick: Number(settings.dmOnKick),
+    dmOnBan: Number(settings.dmOnBan),
+    dmOnUnban: Number(settings.dmOnUnban),
+    dmOnManualCase: Number(settings.dmOnManualCase),
+    giveawayWinnerDmEnabled: Number(settings.giveawayWinnerDmEnabled)
+  });
+  return getDmSettings(settings.guildId);
 }
 
 export async function getBranding(guildId: string): Promise<Branding> {
@@ -682,6 +958,7 @@ export interface TicketRecord {
   ticketTypeId: number | null;
   panelId: number | null;
   status: string;
+  priority: string;
   claimedBy: string | null;
   closeReason: string;
   openedAt: string;
@@ -695,6 +972,7 @@ export async function getTicketByChannel(guildId: string, channelId: string): Pr
     SELECT id, guild_id AS "guildId", channel_id AS "channelId", user_id AS "userId",
       ticket_type_id AS "ticketTypeId", status, claimed_by AS "claimedBy",
       panel_id AS "panelId", close_reason AS "closeReason",
+      priority,
       opened_at AS "openedAt", closed_at AS "closedAt", closed_by AS "closedBy",
       last_activity_at AS "lastActivityAt"
     FROM tickets WHERE guild_id = ? AND channel_id = ?
@@ -772,8 +1050,10 @@ export async function recordModerationAction(input: {
 export async function listRecentTickets(guildId: string, limit = 50) {
   return db.all(`
     SELECT tickets.id, tickets.channel_id AS "channelId", tickets.user_id AS "userId",
-      tickets.status, tickets.claimed_by AS "claimedBy", tickets.opened_at AS "openedAt",
-      tickets.closed_at AS "closedAt", ticket_types.label AS "typeLabel"
+      tickets.status, tickets.priority, tickets.claimed_by AS "claimedBy",
+      tickets.close_reason AS "closeReason", tickets.opened_at AS "openedAt",
+      tickets.closed_at AS "closedAt", tickets.closed_by AS "closedBy",
+      ticket_types.label AS "typeLabel"
     FROM tickets LEFT JOIN ticket_types ON ticket_types.id = tickets.ticket_type_id
     WHERE tickets.guild_id = ? ORDER BY tickets.id DESC LIMIT ?
   `, [guildId, limit]);
@@ -793,15 +1073,20 @@ function mapModerationCase(row: Record<string, unknown>): ModerationCase {
     guildId: String(row.guild_id ?? row.guildId),
     caseNumber: Number(row.case_number ?? row.caseNumber),
     targetUserId: String(row.target_user_id ?? row.targetUserId),
+    targetTag: String(row.target_tag ?? row.targetTag ?? ""),
     moderatorId: String(row.moderator_id ?? row.moderatorId),
+    moderatorTag: String(row.moderator_tag ?? row.moderatorTag ?? ""),
     actionType: String(row.action_type ?? row.actionType),
     reason: String(row.reason ?? ""),
     durationSeconds: row.duration_seconds === null || row.duration_seconds === undefined
       ? null
       : Number(row.duration_seconds),
+    expiresAt: row.expires_at || row.expiresAt ? String(row.expires_at ?? row.expiresAt) : null,
     evidenceUrl: String(row.evidence_url ?? row.evidenceUrl ?? ""),
     status: (row.status as ModerationCase["status"]) ?? "active",
     notes: String(row.notes ?? ""),
+    auditLogExecutorId: row.audit_log_executor_id || row.auditLogExecutorId ? String(row.audit_log_executor_id ?? row.auditLogExecutorId) : null,
+    auditLogExecutorTag: String(row.audit_log_executor_tag ?? row.auditLogExecutorTag ?? ""),
     createdAt: String(row.created_at ?? row.createdAt),
     updatedAt: String(row.updated_at ?? row.updatedAt)
   };
@@ -810,42 +1095,66 @@ function mapModerationCase(row: Record<string, unknown>): ModerationCase {
 export async function createModerationCase(input: {
   guildId: string;
   targetUserId: string;
+  targetTag?: string;
   moderatorId: string;
+  moderatorTag?: string;
   actionType: string;
   reason?: string;
   durationSeconds?: number | null;
+  expiresAt?: string | null;
   evidenceUrl?: string;
   status?: ModerationCase["status"];
   notes?: string;
+  auditLogExecutorId?: string | null;
+  auditLogExecutorTag?: string;
 }): Promise<ModerationCase> {
   await ensureGuildRows(input.guildId);
   const row = await db.get<Record<string, unknown>>(`
     INSERT INTO moderation_cases (
-      guild_id, case_number, target_user_id, moderator_id, action_type,
-      reason, duration_seconds, evidence_url, status, notes
+      guild_id, case_number, target_user_id, target_tag, moderator_id, moderator_tag, action_type,
+      reason, duration_seconds, expires_at, evidence_url, status, notes,
+      audit_log_executor_id, audit_log_executor_tag
     ) VALUES (
       @guildId,
       COALESCE((SELECT MAX(case_number) + 1 FROM moderation_cases WHERE guild_id = @guildId), 1),
-      @targetUserId, @moderatorId, @actionType,
-      @reason, @durationSeconds, @evidenceUrl, @status, @notes
+      @targetUserId, @targetTag, @moderatorId, @moderatorTag, @actionType,
+      @reason, @durationSeconds, @expiresAt, @evidenceUrl, @status, @notes,
+      @auditLogExecutorId, @auditLogExecutorTag
     ) RETURNING *
   `, {
     ...input,
+    targetTag: input.targetTag ?? "",
+    moderatorTag: input.moderatorTag ?? "",
     reason: input.reason ?? "",
     durationSeconds: input.durationSeconds ?? null,
+    expiresAt: input.expiresAt ?? null,
     evidenceUrl: input.evidenceUrl ?? "",
     status: input.status ?? "active",
-    notes: input.notes ?? ""
+    notes: input.notes ?? "",
+    auditLogExecutorId: input.auditLogExecutorId ?? null,
+    auditLogExecutorTag: input.auditLogExecutorTag ?? ""
   });
   return mapModerationCase(row!);
 }
 
 export async function listModerationCases(
   guildId: string,
-  filters: { targetUserId?: string; moderatorId?: string; actionType?: string; status?: string; limit?: number } = {}
+  filters: {
+    caseNumber?: number;
+    query?: string;
+    targetUserId?: string;
+    moderatorId?: string;
+    actionType?: string;
+    status?: string;
+    limit?: number;
+  } = {}
 ): Promise<ModerationCase[]> {
   const clauses = ["guild_id = ?"];
   const params: unknown[] = [guildId];
+  if (filters.caseNumber) {
+    clauses.push("case_number = ?");
+    params.push(filters.caseNumber);
+  }
   if (filters.targetUserId) {
     clauses.push("target_user_id = ?");
     params.push(filters.targetUserId);
@@ -861,6 +1170,25 @@ export async function listModerationCases(
   if (filters.status) {
     clauses.push("status = ?");
     params.push(filters.status);
+  }
+  const query = filters.query?.trim();
+  if (query) {
+    const like = `%${query.toLowerCase()}%`;
+    const queryClauses = [
+      "LOWER(target_user_id) LIKE ?",
+      "LOWER(target_tag) LIKE ?",
+      "LOWER(moderator_id) LIKE ?",
+      "LOWER(moderator_tag) LIKE ?",
+      "LOWER(reason) LIKE ?",
+      "LOWER(notes) LIKE ?"
+    ];
+    params.push(like, like, like, like, like, like);
+    const numeric = Number.parseInt(query.replace(/^#/, ""), 10);
+    if (Number.isFinite(numeric)) {
+      queryClauses.push("case_number = ?");
+      params.push(numeric);
+    }
+    clauses.push(`(${queryClauses.join(" OR ")})`);
   }
   params.push(filters.limit ?? 100);
   const rows = await db.all<Record<string, unknown>>(`
@@ -911,11 +1239,19 @@ function mapGiveaway(row: Record<string, unknown>): Giveaway {
     prize: String(row.prize ?? ""),
     description: String(row.description ?? ""),
     winnersCount: Number(row.winners_count ?? row.winnersCount ?? 1),
+    startsAt: row.starts_at || row.startsAt ? String(row.starts_at ?? row.startsAt) : null,
     endsAt: String(row.ends_at ?? row.endsAt),
+    hostUserId: row.host_user_id || row.hostUserId ? String(row.host_user_id ?? row.hostUserId) : null,
     requiredRoleId: row.required_role_id || row.requiredRoleId ? String(row.required_role_id ?? row.requiredRoleId) : null,
     boosterBonusEntries: Number(row.booster_bonus_entries ?? row.boosterBonusEntries ?? 0),
     bonusRoleId: row.bonus_role_id || row.bonusRoleId ? String(row.bonus_role_id ?? row.bonusRoleId) : null,
     bonusRoleEntries: Number(row.bonus_role_entries ?? row.bonusRoleEntries ?? 0),
+    winnerRoleId: row.winner_role_id || row.winnerRoleId ? String(row.winner_role_id ?? row.winnerRoleId) : null,
+    winnerDmMessage: String(row.winner_dm_message ?? row.winnerDmMessage ?? ""),
+    createMessage: String(row.create_message ?? row.createMessage ?? ""),
+    imageUrl: String(row.image_url ?? row.imageUrl ?? ""),
+    thumbnailUrl: String(row.thumbnail_url ?? row.thumbnailUrl ?? ""),
+    buttonText: String(row.button_text ?? row.buttonText ?? "Enter Giveaway"),
     status: (row.status as Giveaway["status"]) ?? "draft",
     winnerUserIds: parseJsonArray(row.winner_user_ids as string | null),
     createdBy: String(row.created_by ?? row.createdBy),
@@ -932,16 +1268,26 @@ export async function createGiveaway(input: Omit<Giveaway, "id" | "messageId" | 
   const row = await db.get<Record<string, unknown>>(`
     INSERT INTO giveaways (
       guild_id, channel_id, message_id, prize, description, winners_count,
-      ends_at, required_role_id, booster_bonus_entries, bonus_role_id,
-      bonus_role_entries, status, winner_user_ids, created_by
+      starts_at, ends_at, host_user_id, required_role_id, booster_bonus_entries, bonus_role_id,
+      bonus_role_entries, winner_role_id, winner_dm_message, create_message, image_url,
+      thumbnail_url, button_text, status, winner_user_ids, created_by
     ) VALUES (
       @guildId, @channelId, @messageId, @prize, @description, @winnersCount,
-      @endsAt, @requiredRoleId, @boosterBonusEntries, @bonusRoleId,
-      @bonusRoleEntries, @status, @winnerUserIds, @createdBy
+      @startsAt, @endsAt, @hostUserId, @requiredRoleId, @boosterBonusEntries, @bonusRoleId,
+      @bonusRoleEntries, @winnerRoleId, @winnerDmMessage, @createMessage, @imageUrl,
+      @thumbnailUrl, @buttonText, @status, @winnerUserIds, @createdBy
     ) RETURNING *
   `, {
     ...input,
     messageId: input.messageId ?? null,
+    startsAt: input.startsAt ?? null,
+    hostUserId: input.hostUserId ?? null,
+    winnerRoleId: input.winnerRoleId ?? null,
+    winnerDmMessage: input.winnerDmMessage ?? "",
+    createMessage: input.createMessage ?? "",
+    imageUrl: input.imageUrl ?? "",
+    thumbnailUrl: input.thumbnailUrl ?? "",
+    buttonText: input.buttonText || "Enter Giveaway",
     winnerUserIds: JSON.stringify(input.winnerUserIds ?? [])
   });
   return mapGiveaway(row!);
@@ -958,9 +1304,13 @@ export async function updateGiveaway(
   const row = await db.get<Record<string, unknown>>(`
     UPDATE giveaways SET
       channel_id = @channelId, message_id = @messageId, prize = @prize,
-      description = @description, winners_count = @winnersCount, ends_at = @endsAt,
+      description = @description, winners_count = @winnersCount, starts_at = @startsAt,
+      ends_at = @endsAt, host_user_id = @hostUserId,
       required_role_id = @requiredRoleId, booster_bonus_entries = @boosterBonusEntries,
       bonus_role_id = @bonusRoleId, bonus_role_entries = @bonusRoleEntries,
+      winner_role_id = @winnerRoleId, winner_dm_message = @winnerDmMessage,
+      create_message = @createMessage, image_url = @imageUrl, thumbnail_url = @thumbnailUrl,
+      button_text = @buttonText,
       status = @status, winner_user_ids = @winnerUserIds, updated_at = CURRENT_TIMESTAMP
     WHERE id = @id AND guild_id = @guildId
     RETURNING *
@@ -983,7 +1333,7 @@ export async function getGiveaway(id: number, guildId: string): Promise<Giveaway
 
 export async function listGiveaways(guildId: string, limit = 100): Promise<Giveaway[]> {
   const rows = await db.all<Record<string, unknown>>(
-    "SELECT * FROM giveaways WHERE guild_id = ? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END, ends_at DESC LIMIT ?",
+    "SELECT * FROM giveaways WHERE guild_id = ? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END, COALESCE(starts_at, ends_at, updated_at) DESC LIMIT ?",
     [guildId, limit]
   );
   return rows.map(mapGiveaway);
@@ -991,8 +1341,14 @@ export async function listGiveaways(guildId: string, limit = 100): Promise<Givea
 
 export async function listDueGiveaways(): Promise<Giveaway[]> {
   const sql = db.dialect === "postgres"
-    ? "SELECT * FROM giveaways WHERE status = 'active' AND ends_at <= CURRENT_TIMESTAMP ORDER BY ends_at"
-    : "SELECT * FROM giveaways WHERE status = 'active' AND datetime(ends_at) <= CURRENT_TIMESTAMP ORDER BY datetime(ends_at)";
+    ? `SELECT * FROM giveaways
+       WHERE (status = 'scheduled' AND starts_at IS NOT NULL AND starts_at <= CURRENT_TIMESTAMP)
+          OR (status = 'active' AND ends_at <= CURRENT_TIMESTAMP)
+       ORDER BY COALESCE(starts_at, ends_at)`
+    : `SELECT * FROM giveaways
+       WHERE (status = 'scheduled' AND starts_at IS NOT NULL AND datetime(starts_at) <= CURRENT_TIMESTAMP)
+          OR (status = 'active' AND datetime(ends_at) <= CURRENT_TIMESTAMP)
+       ORDER BY datetime(COALESCE(starts_at, ends_at))`;
   return (await db.all<Record<string, unknown>>(sql)).map(mapGiveaway);
 }
 
@@ -1025,16 +1381,187 @@ export async function listGiveawayEntries(giveawayId: number, guildId: string): 
   }));
 }
 
+function parsePollOptions(value: string | null): PollOption[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item, index): PollOption | null => {
+        if (typeof item === "string") {
+          const text = item.trim();
+          return text ? { id: String(index + 1), label: text, text, description: "", emoji: "" } : null;
+        }
+        if (!item || typeof item !== "object" || Array.isArray(item)) return null;
+        const candidate = item as Record<string, unknown>;
+        const id = typeof candidate.id === "string" && candidate.id.trim()
+          ? candidate.id.trim()
+          : String(index + 1);
+        const label = typeof candidate.label === "string" && candidate.label.trim()
+          ? candidate.label.trim()
+          : typeof candidate.text === "string"
+            ? candidate.text.trim()
+            : "";
+        const text = typeof candidate.text === "string" && candidate.text.trim()
+          ? candidate.text.trim()
+          : label;
+        const description = typeof candidate.description === "string" ? candidate.description.trim() : "";
+        const emoji = typeof candidate.emoji === "string" ? candidate.emoji.trim() : "";
+        return label ? { id, label, text, description, emoji } : null;
+      })
+      .filter((item): item is PollOption => Boolean(item));
+  } catch {
+    return [];
+  }
+}
+
+function mapPoll(row: Record<string, unknown>): Poll {
+  return {
+    id: Number(row.id),
+    guildId: String(row.guild_id ?? row.guildId),
+    channelId: String(row.channel_id ?? row.channelId),
+    messageId: row.message_id || row.messageId ? String(row.message_id ?? row.messageId) : null,
+    title: String(row.title ?? ""),
+    question: String(row.question ?? ""),
+    options: parsePollOptions(row.options_json as string | null),
+    startsAt: row.starts_at || row.startsAt ? String(row.starts_at ?? row.startsAt) : null,
+    endsAt: row.ends_at || row.endsAt ? String(row.ends_at ?? row.endsAt) : null,
+    anonymous: Boolean(row.anonymous),
+    multipleChoice: Boolean(row.multiple_choice ?? row.multipleChoice),
+    requiredRoleId: row.required_role_id || row.requiredRoleId ? String(row.required_role_id ?? row.requiredRoleId) : null,
+    showLiveResults: row.show_live_results === undefined ? true : Boolean(row.show_live_results ?? row.showLiveResults),
+    resultsVisibility: (row.results_visibility as Poll["resultsVisibility"]) ?? "public",
+    status: (row.status as Poll["status"]) ?? "draft",
+    createdBy: String(row.created_by ?? row.createdBy),
+    createdAt: String(row.created_at ?? row.createdAt),
+    updatedAt: String(row.updated_at ?? row.updatedAt)
+  };
+}
+
+export async function createPoll(input: Omit<Poll, "id" | "messageId" | "createdAt" | "updatedAt"> & {
+  messageId?: string | null;
+}): Promise<Poll> {
+  await ensureGuildRows(input.guildId);
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO polls (
+      guild_id, channel_id, message_id, title, question, options_json, starts_at, ends_at,
+      anonymous, multiple_choice, required_role_id, show_live_results, results_visibility, status, created_by
+    ) VALUES (
+      @guildId, @channelId, @messageId, @title, @question, @optionsJson, @startsAt, @endsAt,
+      @anonymous, @multipleChoice, @requiredRoleId, @showLiveResults, @resultsVisibility, @status, @createdBy
+    ) RETURNING *
+  `, {
+    ...input,
+    messageId: input.messageId ?? null,
+    title: input.title ?? "",
+    startsAt: input.startsAt ?? null,
+    optionsJson: JSON.stringify(input.options),
+    anonymous: Number(input.anonymous),
+    multipleChoice: Number(input.multipleChoice),
+    showLiveResults: Number(input.showLiveResults),
+    resultsVisibility: input.resultsVisibility ?? "public"
+  });
+  return mapPoll(row!);
+}
+
+export async function updatePoll(
+  id: number,
+  guildId: string,
+  input: Partial<Omit<Poll, "id" | "guildId" | "createdAt" | "updatedAt">>
+): Promise<Poll | null> {
+  const current = await getPoll(id, guildId);
+  if (!current) return null;
+  const next = { ...current, ...input };
+  const row = await db.get<Record<string, unknown>>(`
+    UPDATE polls SET
+      channel_id = @channelId, message_id = @messageId, title = @title, question = @question,
+      options_json = @optionsJson, starts_at = @startsAt, ends_at = @endsAt, anonymous = @anonymous,
+      multiple_choice = @multipleChoice, required_role_id = @requiredRoleId,
+      show_live_results = @showLiveResults, results_visibility = @resultsVisibility,
+      status = @status, updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id AND guild_id = @guildId
+    RETURNING *
+  `, {
+    ...next,
+    id,
+    guildId,
+    optionsJson: JSON.stringify(next.options),
+    anonymous: Number(next.anonymous),
+    multipleChoice: Number(next.multipleChoice),
+    showLiveResults: Number(next.showLiveResults)
+  });
+  return row ? mapPoll(row) : null;
+}
+
+export async function getPoll(id: number, guildId: string): Promise<Poll | null> {
+  const row = await db.get<Record<string, unknown>>(
+    "SELECT * FROM polls WHERE id = ? AND guild_id = ?",
+    [id, guildId]
+  );
+  return row ? mapPoll(row) : null;
+}
+
+export async function listPolls(guildId: string, limit = 100): Promise<Poll[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    "SELECT * FROM polls WHERE guild_id = ? ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'scheduled' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END, COALESCE(starts_at, ends_at, updated_at) DESC LIMIT ?",
+    [guildId, limit]
+  );
+  return rows.map(mapPoll);
+}
+
+export async function listDuePolls(): Promise<Poll[]> {
+  const sql = db.dialect === "postgres"
+    ? `SELECT * FROM polls
+       WHERE (status = 'scheduled' AND starts_at IS NOT NULL AND starts_at <= CURRENT_TIMESTAMP)
+          OR (status = 'active' AND ends_at IS NOT NULL AND ends_at <= CURRENT_TIMESTAMP)
+       ORDER BY COALESCE(starts_at, ends_at)`
+    : `SELECT * FROM polls
+       WHERE (status = 'scheduled' AND starts_at IS NOT NULL AND datetime(starts_at) <= CURRENT_TIMESTAMP)
+          OR (status = 'active' AND ends_at IS NOT NULL AND datetime(ends_at) <= CURRENT_TIMESTAMP)
+       ORDER BY datetime(COALESCE(starts_at, ends_at))`;
+  return (await db.all<Record<string, unknown>>(sql)).map(mapPoll);
+}
+
+export async function upsertPollVote(input: PollVote): Promise<void> {
+  await db.run(`
+    INSERT INTO poll_votes (poll_id, guild_id, user_id, option_ids)
+    VALUES (@pollId, @guildId, @userId, @optionIds)
+    ON CONFLICT (poll_id, user_id) DO UPDATE SET
+      option_ids = excluded.option_ids,
+      updated_at = CURRENT_TIMESTAMP
+  `, {
+    ...input,
+    optionIds: JSON.stringify(input.optionIds)
+  });
+}
+
+export async function listPollVotes(pollId: number, guildId: string): Promise<PollVote[]> {
+  const rows = await db.all<Record<string, unknown>>(
+    "SELECT * FROM poll_votes WHERE poll_id = ? AND guild_id = ? ORDER BY updated_at",
+    [pollId, guildId]
+  );
+  return rows.map((row) => ({
+    pollId: Number(row.poll_id),
+    guildId: String(row.guild_id),
+    userId: String(row.user_id),
+    optionIds: parseJsonArray(row.option_ids as string | null),
+    createdAt: String(row.created_at),
+    updatedAt: String(row.updated_at)
+  }));
+}
+
 export async function createTicketTranscript(
   input: Omit<TicketTranscript, "id" | "createdAt">
 ): Promise<TicketTranscript> {
   const row = await db.get<Record<string, unknown>>(`
     INSERT INTO ticket_transcripts (
       guild_id, ticket_id, channel_id, channel_name, opener_id, closed_by,
-      close_reason, message_count, transcript_json, transcript_text
+      close_reason, opened_at, closed_at, category_label, claimed_by, priority,
+      message_count, transcript_json, transcript_text
     ) VALUES (
       @guildId, @ticketId, @channelId, @channelName, @openerId, @closedBy,
-      @closeReason, @messageCount, @transcriptJson, @transcriptText
+      @closeReason, @openedAt, @closedAt, @categoryLabel, @claimedBy, @priority,
+      @messageCount, @transcriptJson, @transcriptText
     ) RETURNING *
   `, {
     ...input,
@@ -1048,9 +1575,52 @@ function parseTranscriptMessages(value: string | null): TicketTranscriptMessage[
   try {
     const parsed: unknown = JSON.parse(value);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is TicketTranscriptMessage =>
-      Boolean(item) && typeof item === "object" && !Array.isArray(item)
-    );
+    return parsed
+      .filter((item): item is Record<string, unknown> =>
+        Boolean(item) && typeof item === "object" && !Array.isArray(item)
+      )
+      .map((item) => ({
+        id: String(item.id ?? ""),
+        authorId: String(item.authorId ?? ""),
+        authorTag: String(item.authorTag ?? "Unknown user"),
+        createdAt: String(item.createdAt ?? ""),
+        content: String(item.content ?? ""),
+        attachments: Array.isArray(item.attachments)
+          ? item.attachments.map((attachment) => {
+            if (typeof attachment === "string") {
+              return { name: attachment.split("/").pop() || "Attachment", url: attachment, contentType: null, size: null };
+            }
+            const record = attachment as Record<string, unknown>;
+            return {
+              name: String(record.name ?? "Attachment"),
+              url: String(record.url ?? ""),
+              contentType: record.contentType === null || record.contentType === undefined ? null : String(record.contentType),
+              size: typeof record.size === "number" ? record.size : null
+            };
+          }).filter((attachment) => attachment.url)
+          : [],
+        embeds: Number(item.embeds ?? 0),
+        embedSummaries: Array.isArray(item.embedSummaries)
+          ? item.embedSummaries.map((embed) => {
+            const record = embed as Record<string, unknown>;
+            return {
+              title: String(record.title ?? ""),
+              description: String(record.description ?? ""),
+              url: String(record.url ?? ""),
+              fields: Array.isArray(record.fields)
+                ? record.fields.map((field) => {
+                  const fieldRecord = field as Record<string, unknown>;
+                  return {
+                    name: String(fieldRecord.name ?? ""),
+                    value: String(fieldRecord.value ?? ""),
+                    inline: Boolean(fieldRecord.inline)
+                  };
+                })
+                : []
+            };
+          })
+          : []
+      }));
   } catch {
     return [];
   }
@@ -1066,6 +1636,11 @@ function mapTicketTranscript(row: Record<string, unknown>): TicketTranscript {
     openerId: String(row.opener_id ?? row.openerId),
     closedBy: String(row.closed_by ?? row.closedBy),
     closeReason: String(row.close_reason ?? row.closeReason ?? ""),
+    openedAt: row.opened_at || row.openedAt ? String(row.opened_at ?? row.openedAt) : null,
+    closedAt: row.closed_at || row.closedAt ? String(row.closed_at ?? row.closedAt) : null,
+    categoryLabel: String(row.category_label ?? row.categoryLabel ?? ""),
+    claimedBy: row.claimed_by || row.claimedBy ? String(row.claimed_by ?? row.claimedBy) : null,
+    priority: String(row.priority ?? "normal"),
     messageCount: Number(row.message_count ?? row.messageCount ?? 0),
     transcriptJson: parseTranscriptMessages(row.transcript_json as string | null),
     transcriptText: String(row.transcript_text ?? row.transcriptText ?? ""),
@@ -1430,6 +2005,8 @@ export async function getVerificationSettings(guildId: string): Promise<Verifica
     minServerDays: Number(row.min_server_days ?? 0),
     vpnCheckEnabled: Boolean(row.vpn_check_enabled),
     vpnFailClosed: Boolean(row.vpn_fail_closed),
+    autoKickUnverified: Boolean(row.auto_kick_unverified),
+    autoKickAfterHours: Number(row.auto_kick_after_hours ?? 24),
     recordRetentionHours: Number(row.record_retention_hours ?? 168),
     publicChannelIds: parseJsonArray(row.public_channel_ids as string),
     publicCategoryIds: parseJsonArray(row.public_category_ids as string),
@@ -1465,6 +2042,8 @@ export async function saveVerificationSettings(settings: VerificationSettings): 
       min_server_days = @minServerDays,
       vpn_check_enabled = @vpnCheckEnabled,
       vpn_fail_closed = @vpnFailClosed,
+      auto_kick_unverified = @autoKickUnverified,
+      auto_kick_after_hours = @autoKickAfterHours,
       record_retention_hours = @recordRetentionHours,
       public_channel_ids = @publicChannelIds,
       public_category_ids = @publicCategoryIds,
@@ -1485,6 +2064,7 @@ export async function saveVerificationSettings(settings: VerificationSettings): 
     enabled: Number(settings.enabled),
     vpnCheckEnabled: Number(settings.vpnCheckEnabled),
     vpnFailClosed: Number(settings.vpnFailClosed),
+    autoKickUnverified: Number(settings.autoKickUnverified),
     publicChannelIds: JSON.stringify(settings.publicChannelIds),
     publicCategoryIds: JSON.stringify(settings.publicCategoryIds),
     hiddenChannelIds: JSON.stringify(settings.hiddenChannelIds),
@@ -1612,36 +2192,8 @@ export async function getVerificationLink(tokenHash: string): Promise<{ guildId:
   return row ? { guildId: String(row.guild_id), expiresAt: String(row.expires_at) } : null;
 }
 
-export async function createVerificationRecord(
-  record: Omit<VerificationRecord, "id" | "verifiedAt" | "reviewedBy" | "reviewedAt" | "staffNote">
-): Promise<void> {
-  await db.run(`
-    INSERT INTO verification_records (
-      guild_id, user_id, status, reason_codes, risk_score,
-      account_created_at, server_joined_at, vpn_detected, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `, [
-    record.guildId,
-    record.userId,
-    record.status,
-    JSON.stringify(record.reasonCodes),
-    record.riskScore,
-    record.accountCreatedAt,
-    record.serverJoinedAt ?? null,
-    record.vpnDetected === null ? null : Number(record.vpnDetected),
-    record.expiresAt
-  ]);
-}
-
-export async function listVerificationRecords(guildId: string, limit = 50): Promise<VerificationRecord[]> {
-  await db.run("DELETE FROM verification_records WHERE expires_at <= CURRENT_TIMESTAMP");
-  const rows = await db.all<Record<string, unknown>>(`
-    SELECT * FROM verification_records
-    WHERE guild_id = ?
-    ORDER BY verified_at DESC
-    LIMIT ?
-  `, [guildId, limit]);
-  return rows.map((row) => ({
+function mapVerificationRecord(row: Record<string, unknown>): VerificationRecord {
+  return {
     id: Number(row.id),
     guildId: String(row.guild_id),
     userId: String(row.user_id),
@@ -1658,7 +2210,52 @@ export async function listVerificationRecords(guildId: string, limit = 50): Prom
     reviewedBy: row.reviewed_by ? String(row.reviewed_by) : null,
     reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
     staffNote: String(row.staff_note ?? "")
-  }));
+  };
+}
+
+export async function createVerificationRecord(
+  record: Omit<VerificationRecord, "id" | "verifiedAt" | "reviewedBy" | "reviewedAt" | "staffNote"> & {
+    verifiedAt?: string;
+    reviewedBy?: string | null;
+    reviewedAt?: string | null;
+    staffNote?: string;
+  }
+): Promise<VerificationRecord> {
+  const row = await db.get<Record<string, unknown>>(`
+    INSERT INTO verification_records (
+      guild_id, user_id, status, reason_codes, risk_score,
+      account_created_at, server_joined_at, vpn_detected, verified_at,
+      expires_at, reviewed_by, reviewed_at, staff_note
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    RETURNING *
+  `, [
+    record.guildId,
+    record.userId,
+    record.status,
+    JSON.stringify(record.reasonCodes),
+    record.riskScore,
+    record.accountCreatedAt,
+    record.serverJoinedAt ?? null,
+    record.vpnDetected === null ? null : Number(record.vpnDetected),
+    record.verifiedAt ?? new Date().toISOString(),
+    record.expiresAt,
+    record.reviewedBy ?? null,
+    record.reviewedAt ?? null,
+    record.staffNote ?? ""
+  ]);
+  if (!row) throw new Error("Verification record could not be created.");
+  return mapVerificationRecord(row);
+}
+
+export async function listVerificationRecords(guildId: string, limit = 50): Promise<VerificationRecord[]> {
+  await db.run("DELETE FROM verification_records WHERE expires_at <= CURRENT_TIMESTAMP");
+  const rows = await db.all<Record<string, unknown>>(`
+    SELECT * FROM verification_records
+    WHERE guild_id = ?
+    ORDER BY verified_at DESC
+    LIMIT ?
+  `, [guildId, limit]);
+  return rows.map(mapVerificationRecord);
 }
 
 export async function updateVerificationRecordReview(input: {
@@ -1681,24 +2278,7 @@ export async function updateVerificationRecordReview(input: {
     staffNote: input.staffNote ?? ""
   });
   if (!row) return null;
-  return {
-    id: Number(row.id),
-    guildId: String(row.guild_id),
-    userId: String(row.user_id),
-    status: row.status as VerificationRecord["status"],
-    reasonCodes: parseJsonArray(row.reason_codes as string),
-    riskScore: Number(row.risk_score ?? 0),
-    accountCreatedAt: String(row.account_created_at ?? ""),
-    serverJoinedAt: row.server_joined_at ? String(row.server_joined_at) : null,
-    vpnDetected: row.vpn_detected === null || row.vpn_detected === undefined
-      ? null
-      : Boolean(row.vpn_detected),
-    verifiedAt: String(row.verified_at),
-    expiresAt: String(row.expires_at),
-    reviewedBy: row.reviewed_by ? String(row.reviewed_by) : null,
-    reviewedAt: row.reviewed_at ? String(row.reviewed_at) : null,
-    staffNote: String(row.staff_note ?? "")
-  };
+  return mapVerificationRecord(row);
 }
 
 export async function listAntiNukeTrusted(guildId: string): Promise<AntiNukeTrusted[]> {
@@ -1725,7 +2305,7 @@ export async function removeAntiNukeTrusted(id: number, guildId: string): Promis
 async function getRolePanelOptions(panelId: number): Promise<RolePanelOption[]> {
   const rows = await db.all<Record<string, unknown>>(
     `SELECT role_id AS "roleId", label, description, emoji, category,
-      required_role_id AS "requiredRoleId"
+      required_role_id AS "requiredRoleId", button_style AS "buttonStyle"
      FROM role_panel_roles WHERE panel_id = ? ORDER BY sort_order, role_id`,
     [panelId]
   );
@@ -1735,8 +2315,36 @@ async function getRolePanelOptions(panelId: number): Promise<RolePanelOption[]> 
     description: String(row.description ?? ""),
     emoji: String(row.emoji ?? ""),
     category: String(row.category ?? "General") || "General",
-    requiredRoleId: row.requiredRoleId ? String(row.requiredRoleId) : null
+    requiredRoleId: row.requiredRoleId ? String(row.requiredRoleId) : null,
+    buttonStyle: normalizeRolePanelButtonStyle(row.buttonStyle)
   }));
+}
+
+function normalizeRolePanelButtonStyle(value: unknown): RolePanel["buttonStyle"] | "" {
+  return value === "primary" || value === "success" || value === "danger" || value === "secondary" ? value : "";
+}
+
+function normalizeRolePanelToggleMode(value: unknown): RolePanel["toggleMode"] {
+  return value === "add_only" ? "add_only" : "toggle";
+}
+
+function parseRolePanelCategoryRules(value: string | null): RolePanelCategoryRule[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item))
+      .map((item) => ({
+        name: String(item.name ?? "General").trim() || "General",
+        title: String(item.title ?? "").trim(),
+        description: String(item.description ?? "").trim(),
+        maxSelected: Math.max(0, Number(item.maxSelected ?? 0) || 0),
+        removeRoleOnSelect: Boolean(item.removeRoleOnSelect)
+      }));
+  } catch {
+    return [];
+  }
 }
 
 async function mapRolePanel(row: Record<string, unknown>): Promise<RolePanel> {
@@ -1750,12 +2358,17 @@ async function mapRolePanel(row: Record<string, unknown>): Promise<RolePanel> {
     title: row.title as string,
     description: row.description as string,
     color: row.color as string,
+    imageUrl: String(row.image_url ?? ""),
+    thumbnailUrl: String(row.thumbnail_url ?? ""),
     active: Boolean(row.active),
+    buttonStyle: normalizeRolePanelButtonStyle(row.button_style) || "secondary",
+    toggleMode: normalizeRolePanelToggleMode(row.toggle_mode),
     maxSelectedPerCategory: Number(row.max_selected_per_category ?? 0),
     removeRoleOnSelect: Boolean(row.remove_role_on_select),
     requiredRoleId: row.required_role_id as string | null,
     messageId: row.message_id as string | null,
     logChannelId: row.log_channel_id as string | null,
+    categoryRules: parseRolePanelCategoryRules(row.category_rules_json as string | null),
     options,
     roleIds: options.map((option) => option.roleId),
     createdAt: String(row.created_at),
@@ -1784,8 +2397,8 @@ async function saveRolePanelRoles(panelId: number, options: RolePanelOption[]): 
   for (const [index, option] of options.entries()) {
     await db.run(
       `INSERT INTO role_panel_roles (
-        panel_id, role_id, sort_order, label, description, emoji, category, required_role_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        panel_id, role_id, sort_order, label, description, emoji, category, required_role_id, button_style
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         panelId,
         option.roleId,
@@ -1794,7 +2407,8 @@ async function saveRolePanelRoles(panelId: number, options: RolePanelOption[]): 
         option.description,
         option.emoji,
         option.category || "General",
-        option.requiredRoleId
+        option.requiredRoleId,
+        normalizeRolePanelButtonStyle(option.buttonStyle)
       ]
     );
   }
@@ -1807,19 +2421,26 @@ export async function createRolePanel(
     const row = await db.get<{ id: number }>(`
       INSERT INTO role_panels (
         guild_id, name, channel_id, layout, title, description, color, active,
+        image_url, thumbnail_url, button_style, toggle_mode,
         max_selected_per_category, remove_role_on_select, required_role_id,
-        message_id, log_channel_id
+        message_id, log_channel_id, category_rules_json
       ) VALUES (
         @guildId, @name, @channelId, @layout, @title, @description, @color, @active,
+        @imageUrl, @thumbnailUrl, @buttonStyle, @toggleMode,
         @maxSelectedPerCategory, @removeRoleOnSelect, @requiredRoleId,
-        @messageId, @logChannelId
+        @messageId, @logChannelId, @categoryRulesJson
       ) RETURNING id
     `, {
       ...input,
       active: Number(input.active),
+      imageUrl: input.imageUrl ?? "",
+      thumbnailUrl: input.thumbnailUrl ?? "",
+      buttonStyle: normalizeRolePanelButtonStyle(input.buttonStyle) || "secondary",
+      toggleMode: normalizeRolePanelToggleMode(input.toggleMode),
       removeRoleOnSelect: Number(input.removeRoleOnSelect),
       messageId: input.messageId ?? null,
-      logChannelId: input.logChannelId ?? null
+      logChannelId: input.logChannelId ?? null,
+      categoryRulesJson: JSON.stringify(input.categoryRules ?? [])
     });
     const panelId = Number(row!.id);
     await saveRolePanelRoles(panelId, input.options.length
@@ -1830,7 +2451,8 @@ export async function createRolePanel(
         description: "",
         emoji: "",
         category: "General",
-        requiredRoleId: null
+        requiredRoleId: null,
+        buttonStyle: ""
       })));
     return panelId;
   });
@@ -1847,11 +2469,16 @@ export async function updateRolePanel(
       UPDATE role_panels SET
         name = @name, channel_id = @channelId, layout = @layout, title = @title,
         description = @description, color = @color, active = @active,
+        image_url = @imageUrl,
+        thumbnail_url = @thumbnailUrl,
+        button_style = @buttonStyle,
+        toggle_mode = @toggleMode,
         max_selected_per_category = @maxSelectedPerCategory,
         remove_role_on_select = @removeRoleOnSelect,
         required_role_id = @requiredRoleId,
         message_id = @messageId,
         log_channel_id = @logChannelId,
+        category_rules_json = @categoryRulesJson,
         updated_at = CURRENT_TIMESTAMP
       WHERE id = @id AND guild_id = @guildId
     `, {
@@ -1859,9 +2486,14 @@ export async function updateRolePanel(
       id,
       guildId,
       active: Number(input.active),
+      imageUrl: input.imageUrl ?? "",
+      thumbnailUrl: input.thumbnailUrl ?? "",
+      buttonStyle: normalizeRolePanelButtonStyle(input.buttonStyle) || "secondary",
+      toggleMode: normalizeRolePanelToggleMode(input.toggleMode),
       removeRoleOnSelect: Number(input.removeRoleOnSelect),
       messageId: input.messageId ?? null,
-      logChannelId: input.logChannelId ?? null
+      logChannelId: input.logChannelId ?? null,
+      categoryRulesJson: JSON.stringify(input.categoryRules ?? [])
     });
     if (!result.changes) return false;
     await saveRolePanelRoles(id, input.options.length
@@ -1872,7 +2504,8 @@ export async function updateRolePanel(
         description: "",
         emoji: "",
         category: "General",
-        requiredRoleId: null
+        requiredRoleId: null,
+        buttonStyle: ""
       })));
     return true;
   });

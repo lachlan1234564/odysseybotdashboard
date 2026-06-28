@@ -8,16 +8,18 @@ import open from "open";
 import { ZodError } from "zod";
 import { loadDashboardConfig, resolveUploadsPath } from "../shared/config.js";
 import { logError, logErrorStack } from "../shared/logging.js";
+import { getRuntimeAppConfig } from "../database/index.js";
 import { dashboardApi } from "./api.js";
 
 const config = loadDashboardConfig();
+const runtimeConfig = await getRuntimeAppConfig();
 const app = express();
 const publicPath = path.join(config.projectRoot, "src/dashboard/public");
 const uploadsPath = resolveUploadsPath(config.UPLOADS_DIR);
-const sessionSecret = crypto
-  .createHash("sha256")
-  .update(`${config.DASHBOARD_PASSWORD}:${config.DISCORD_CLIENT_ID}`)
-  .digest("hex");
+const sessionSecret = config.DASHBOARD_SESSION_SECRET
+  || config.COREPANEL_SECRET_KEY
+  || runtimeConfig.dashboardPasswordHash
+  || crypto.randomBytes(32).toString("hex");
 
 app.disable("x-powered-by");
 if (config.NODE_ENV === "production" || config.TRUST_PROXY === "true") {
@@ -36,7 +38,7 @@ app.use(helmet({
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 app.use(express.json({ limit: "250kb" }));
 app.use(session({
-  name: "rapidbot.sid",
+  name: "corepanel.sid",
   secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
@@ -49,6 +51,7 @@ app.use(session({
 }));
 
 app.use("/api", dashboardApi);
+app.get(["/setup", "/setup.html"], (_req, res) => res.sendFile(path.join(publicPath, "setup.html")));
 app.get(["/docs", "/docs/:topic", "/help"], (req, res) => {
   if (!req.session.authenticated) {
     res.redirect("/login");
@@ -147,7 +150,7 @@ const host = config.PORT ? "0.0.0.0" : config.DASHBOARD_HOST;
 const displayHost = host === "0.0.0.0" ? "localhost" : host;
 const url = `http://${displayHost}:${port}`;
 const server = app.listen(port, host, async () => {
-  console.log(`Odyssey Bot dashboard listening on ${host}:${port}`);
+  console.log(`CorePanel dashboard listening on ${host}:${port}`);
   if (process.argv.includes("--open") && config.NODE_ENV !== "production") {
     await open(url).catch((error) => logError("Could not open the browser", error));
   }

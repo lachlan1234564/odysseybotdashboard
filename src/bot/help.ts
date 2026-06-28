@@ -14,7 +14,7 @@ export function buildHelpEmbed(settings: GuildSettings) {
 
   return new EmbedBuilder()
     .setColor(asColor("#5865F2"))
-    .setTitle("Odyssey Bot Command Guide")
+    .setTitle("CorePanel Command Guide")
     .setDescription("Commands are grouped below. Permission labels describe who can run each command.")
     .addFields(
       {
@@ -41,8 +41,10 @@ export function buildHelpEmbed(settings: GuildSettings) {
         value: [
           "`/announce` — Preview and post a saved announcement.",
           "`/socials-post` — Publish the saved social promotion.",
+          "`/dm user message` — Send one permission-checked staff DM with audit logging.",
           "`/reaction-roles` — Post a saved self-service button/dropdown role panel.",
-          "`/giveaway start/end/reroll/cancel` — Manage restart-safe giveaways.",
+          "`/giveaway start/end/reroll/cancel/list` — Manage restart-safe giveaways. The dashboard adds scheduling, images, DMs, and winner roles.",
+          "`/poll create/end/cancel/results/list` — Manage restart-safe community polls. The dashboard adds scheduling, option icons, and result visibility.",
           "`/verification setup` — **Manage Server.** Apply the configured verification gate.",
           "`/verification status` — **Manage Server.** Review gate setup status.",
           "`/automod-status` — Review active Auto Mod and channel link rules.",
@@ -52,10 +54,10 @@ export function buildHelpEmbed(settings: GuildSettings) {
       {
         name: "Moderation · Discord Permission Required",
         value: [
-          "`/warn`, `/warnings`, `/timeout` — **Moderate Members**.",
-          "`/case view/search/create/edit/note` — **Moderate Members**. Manage moderation cases.",
+          "`/warn`, `/warnings`, `/timeout`, `/untimeout` — **Moderate Members**.",
+          "`/case view/search/create/edit/note/resolve` — **Moderate Members**. Manage moderation cases.",
           "`/kick` — **Kick Members**.",
-          "`/ban` — **Ban Members**.",
+          "`/ban`, `/unban` — **Ban Members**.",
           "`/clear` — **Manage Messages**."
         ].join("\n")
       },

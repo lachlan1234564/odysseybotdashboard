@@ -66,7 +66,7 @@ const topics: DocsTopicDefinition[] = [
     description: "Self-service reaction role buttons.",
     files: ["role-panels.md"],
     path: "Guides → Role Panel Setup",
-    aliases: ["reaction roles", "role panels"]
+    aliases: ["reaction roles", "role panels", "button roles", "dropdown roles", "self roles", "role hierarchy"]
   },
   {
     slug: "modlogs",
@@ -130,7 +130,11 @@ test("docs search covers the required feature queries", () => {
     "automod setup": "auto-mod",
     automod: "auto-mod",
     commands: "custom-commands",
-    "reaction roles": "role-panels"
+    "reaction roles": "role-panels",
+    "button roles": "role-panels",
+    "dropdown roles": "role-panels",
+    "self roles": "role-panels",
+    "role hierarchy": "role-panels"
   };
   for (const [query, slug] of Object.entries(expected)) {
     assert.equal(search(query)[0]?.slug, slug, query);

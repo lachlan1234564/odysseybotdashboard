@@ -1,6 +1,6 @@
 # Quick Start
 
-Use this checklist to download Odyssey Bot from GitHub and run it locally for the first time.
+Use this checklist to download CorePanel from GitHub and run it locally for the first time.
 
 ## 1. Download the project
 
@@ -17,25 +17,26 @@ If the project is already on your computer:
 cd ~/Desktop/rapid-discord-bot
 ```
 
-## 2. Create your local environment file
+## 2. Start with dashboard setup
 
-Only do this when `.env` does not already exist:
+CorePanel no longer needs a local `.env` file for normal first-run setup. The dashboard can start without a bot token, then guide you through setup at `/setup`.
+
+Only create `.env` if you want to override infrastructure values locally:
 
 ```bash
 cp .env.example .env
 ```
 
-Open `.env` locally and add your Discord bot token, application ID, dashboard password, and database URL. Never commit or share this file.
+Never commit or share `.env`.
 
 ## 3. Install and prepare
 
 ```bash
 pnpm install
 pnpm db:setup
-pnpm deploy:commands
 ```
 
-`db:setup` applies pending SQLite or PostgreSQL migrations. `deploy:commands` registers the static Discord slash commands, including `/ping`, `/help`, `/server info`, `/user-info`, `/automod-status`, `/socials-post`, `/bot-status`, `/custom`, `/ticket-panel`, `/announce`, `/reaction-roles`, `/close-request`, `/lockdown`, `/unlockdown`, and the moderation commands.
+`db:setup` applies pending SQLite or PostgreSQL migrations.
 
 ## 4. Start development
 
@@ -52,7 +53,15 @@ pnpm bot
 pnpm dashboard
 ```
 
-The local dashboard opens at `http://127.0.0.1:3210`. Sign in with `DASHBOARD_PASSWORD`.
+Open `http://127.0.0.1:3210/setup`, paste your Discord bot token and application ID, then create the dashboard password.
+
+After setup is saved, stop and restart `pnpm dev` so the bot process logs in with the stored token. Then register slash commands:
+
+```bash
+pnpm deploy:commands
+```
+
+`deploy:commands` registers the static Discord slash commands, including `/ping`, `/help`, `/server info`, `/user-info`, `/automod-status`, `/socials-post`, `/bot-status`, `/custom`, `/ticket-panel`, `/announce`, `/reaction-roles`, `/dm`, `/close-request`, `/lockdown`, `/unlockdown`, and the moderation commands.
 
 ## 5. Configure the first workflow
 
@@ -71,6 +80,7 @@ Open these pages only after the basic bot works:
 - **Automation > Role Panels:** use harmless member roles below the bot.
 - **Automation > Sticky Messages:** start with a 30-second delay.
 - **Automation > Scheduled:** create an announcement template before creating a schedule.
+- **Direct Messages:** configure `/dm`, moderation DMs, and giveaway winner DMs after staff roles and log channels are set.
 
 Every successful dashboard save, test, post, or delete appears in **Overview > Recent dashboard activity**.
 

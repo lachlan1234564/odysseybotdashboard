@@ -1,14 +1,14 @@
 # Verification gate
 
-Odyssey Bot can place a Discord server behind a privacy-respecting verification gate. New members see the verification channel and any public areas selected by an administrator. After a successful Discord OAuth check, the bot assigns the configured verified/community role, which unlocks the normal server.
+CorePanel can place a Discord server behind a privacy-respecting verification gate. New members see the verification channel and any public areas selected by an administrator. After a successful Discord OAuth check, the bot assigns the configured verified/community role, which unlocks the normal server.
 
 The system confirms Discord identity, server membership, and optional account-age or VPN/proxy signals. It does not fingerprint browsers or claim to identify alternate accounts.
 
 ## Before enabling it
 
 1. Create a normal Discord role such as `Community` or `Verified`.
-2. Move the **Odyssey Bot** role above that role.
-3. Give Odyssey Bot:
+2. Move the **CorePanel** role above that role.
+3. Give CorePanel:
    - View Channels
    - Send Messages
    - Embed Links
@@ -64,7 +64,7 @@ The dashboard can still create temporary 24-hour links for one-off sharing.
 - **Always hidden categories/channels:** hidden selections override public selections.
 - **Read-only verification channel:** members can read and click the button but cannot chat.
 
-Odyssey Bot changes only the `@everyone`, verified role, configured admin/staff role, and bot-member overwrites required by the gate. It preserves unrelated role and user overwrites.
+CorePanel changes only the `@everyone`, verified role, configured admin/staff role, and bot-member overwrites required by the gate. It preserves unrelated role and user overwrites.
 
 Before each first change, the original overwrite is saved in the database. Re-running setup derives changes from that saved original instead of repeatedly stacking permissions.
 
@@ -102,7 +102,7 @@ Use this command to inspect saved status:
 1. The member opens the verification link.
 2. The public page explains what is and is not collected.
 3. The member continues to Discord OAuth using `identify guilds.members.read`.
-4. Odyssey Bot verifies that the OAuth user is still a member of the selected server.
+4. CorePanel verifies that the OAuth user is still a member of the selected server.
 5. Configured account-age, server-time, and optional VPN/proxy checks run.
 6. Passed members receive the verified/community role.
 7. The role unlocks normal channels through the gate overwrites.
@@ -111,11 +111,11 @@ If the member is not in the server, verification fails safely. If role assignmen
 
 ## New member behaviour
 
-When verification is enabled, Odyssey Bot never assigns the verified/community role through Welcome auto-roles. Other configured auto-roles still work. The verification log records that the new member is pending verification.
+When verification is enabled, CorePanel never assigns the verified/community role through Welcome auto-roles. Other configured auto-roles still work. The verification log records that the new member is pending verification.
 
 ## Reposting and repair
 
-Use **Repost / update embed** if the message was deleted or the text changed. If the saved message is gone, Odyssey Bot posts a replacement and stores its new message ID.
+Use **Repost / update embed** if the message was deleted or the text changed. If the saved message is gone, CorePanel posts a replacement and stores its new message ID.
 
 Re-run setup after changing public areas, role hierarchy, or channel structure.
 
@@ -154,7 +154,7 @@ Raw IP addresses, browser fingerprints, device identifiers, and OAuth access tok
 | OAuth says redirect URI is invalid | Make `DISCORD_OAUTH_REDIRECT_URI` exactly match the Developer Portal entry. |
 | Members see Cloudflare Access | Remove Access protection from `verify.YOUR_DOMAIN.com`. |
 | Bot cannot create or lock channels | Grant Manage Channels and move the bot role appropriately. |
-| Role is not assigned | Grant Manage Roles and move Odyssey Bot above the verified role. |
+| Role is not assigned | Grant Manage Roles and move CorePanel above the verified role. |
 | Verification message disappeared | Use **Repost / update embed**. |
 | Some permission changes failed | Open the dry-run/setup result, fix channel access, and run setup again. |
 | Flagged members do not unlock the server | This is expected in **Hold for staff review** mode. |

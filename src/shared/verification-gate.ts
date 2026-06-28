@@ -233,7 +233,7 @@ function verificationMessageBody(settings: VerificationSettings, verificationUrl
       color: Number.parseInt(settings.embedColor.slice(1), 16),
       title: settings.embedTitle,
       description: settings.embedDescription,
-      footer: { text: "Discord OAuth verification • Odyssey Bot" },
+      footer: { text: "Discord OAuth verification • CorePanel" },
       timestamp: new Date().toISOString()
     }],
     components: [{
@@ -261,7 +261,7 @@ export async function sendVerificationEventLog(
     body: {
       embeds: [{
         color: 0xC58B4B,
-        author: { name: "Odyssey Bot • Verification" },
+        author: { name: "CorePanel • Verification" },
         title,
         description,
         fields: fields.slice(0, 25),
@@ -354,13 +354,13 @@ function ensureValidSetup(
   ].filter(([permission]) => requireGatePermissions && !hasPermission(botPermissions, permission as bigint))
     .map(([, label]) => label);
   if (missing.length) {
-    throw new VerificationSetupError(`Odyssey Bot is missing: ${missing.join(", ")}.`);
+    throw new VerificationSetupError(`CorePanel is missing: ${missing.join(", ")}.`);
   }
   const roleMap = new Map(roles.map((role) => [role.id, role]));
   const botHighestPosition = Math.max(0, ...botMember.roles.map((roleId) => roleMap.get(roleId)?.position ?? 0));
   if (verifiedRole.position >= botHighestPosition) {
     throw new VerificationSetupError(
-      "Move the Odyssey Bot role above the verified/community role before running setup."
+      "Move the CorePanel role above the verified/community role before running setup."
     );
   }
 }
@@ -676,7 +676,7 @@ export async function assignVerifiedRole(input: {
       input.rest,
       input.settings,
       "Verification role assignment failed",
-      `<@${input.userId}> passed verification, but Odyssey Bot could not assign the configured role.`,
+      `<@${input.userId}> passed verification, but CorePanel could not assign the configured role.`,
       [{ name: "Action required", value: "Check Manage Roles and move the bot role above the verified role." }]
     );
     return {

@@ -21,6 +21,12 @@ test("dashboard search finds the server logging settings", () => {
   assert.equal(searchDashboardItems("voice logs")[0]?.label, "Server Logs");
 });
 
+test("dashboard search finds direct message settings", () => {
+  assert.ok(searchDashboardItems("staff dm").some((item) => item.label === "Staff /dm command"));
+  assert.equal(searchDashboardItems("moderation dm")[0]?.page, "dms");
+  assert.ok(searchDashboardItems("winner dm").some((item) => item.label === "Giveaway winner DMs"));
+});
+
 test("dashboard search surfaces categorized role and verification destinations", () => {
   const roleResults = searchDashboardItems("roles");
   assert.ok(roleResults.some((item) => item.label === "Role Panels" && item.category === "Page"));
@@ -31,6 +37,25 @@ test("dashboard search surfaces categorized role and verification destinations",
   assert.ok(verificationResults.some((item) => item.label === "Verification" && item.page === "security"));
   assert.ok(verificationResults.some((item) => item.label === "Verification setup guide" && item.docTopic === "verification-process"));
   assert.ok(verificationResults.some((item) => item.label === "Verification channel" && item.targetId === "verification-form"));
+  assert.equal(searchDashboardItems("kick unverified")[0]?.label, "Verification auto-kick");
+  assert.equal(searchDashboardItems("pending verification")[0]?.label, "Verification");
+});
+
+test("dashboard search resolves Role Panels 2.0 aliases", () => {
+  for (const query of ["reaction roles", "button roles", "dropdown roles", "self roles", "role hierarchy"]) {
+    const result = searchDashboardItems(query)[0];
+    assert.equal(result?.label, "Role Panels", query);
+    assert.equal(result?.page, "automation", query);
+    assert.equal(result?.automationView, "role-panels", query);
+  }
+});
+
+test("dashboard search resolves moderation case aliases", () => {
+  for (const query of ["cases", "case system", "moderation cases", "untimeout", "unban"]) {
+    const result = searchDashboardItems(query)[0];
+    assert.equal(result?.label, "Moderation", query);
+    assert.equal(result?.page, "moderation", query);
+  }
 });
 
 test("dashboard search covers major feature areas and direct settings", () => {

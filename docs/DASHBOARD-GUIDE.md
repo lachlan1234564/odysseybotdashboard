@@ -31,13 +31,14 @@ cd ~/Desktop/rapid-discord-bot
 pnpm dashboard
 ```
 
-Your browser opens `http://127.0.0.1:3210`. Enter the value of `DASHBOARD_PASSWORD` from `.env`.
+Your browser opens `http://127.0.0.1:3210`. If this is your first run, open `http://127.0.0.1:3210/setup` first and create the dashboard password there. After setup, log in with the password you created.
 
 The password is checked by the backend and is **never sent back to the browser**.
 
 ### Railway Production
 
 Open your Railway service's generated HTTPS domain and use the production dashboard password.
+On first deploy, visit `/setup` to create that password and save the Discord bot details.
 
 ---
 
@@ -77,7 +78,7 @@ The **Tickets** sidebar group contains four pages:
 - **History:** Recent ticket records with status, user, and claim information.
 - **Close Requests:** Pending, approved, and denied ticket closure requests.
 
-Staff can claim and close tickets inside the ticket channel. When a ticket closes, the bot exports the newest 100 messages if a transcript channel is configured.
+Staff can claim and close tickets inside the ticket channel. When a ticket closes, the bot saves a dashboard transcript and can also post a downloadable text file when a transcript channel is configured.
 
 **Important:** Create ticket types **before** panels, because a panel must contain one or more saved ticket types.
 
@@ -421,7 +422,7 @@ With the close-request button enabled:
 
 Auto-close checks run approximately every 15 minutes.
 
-The transcript exporter saves the newest 100 messages and posts a **Ticket Transcript Saved** card with archive details and a download button when a transcript channel is configured.
+The transcript exporter fetches up to the newest 1,000 messages, saves ticket metadata and message details for the dashboard, and posts a **Ticket Transcript Saved** card with a download button when a transcript channel is configured.
 
 ---
 
@@ -541,11 +542,11 @@ Appearance sets fallback branding used when a specific panel, type, or template 
 | Field | What It Does | When to Use It | What Happens If Blank |
 |-------|--------------|----------------|----------------------|
 | **Server / bot name** | Displayed in footers and logs. | Always set this. | Falls back to generic text. |
-| **Dashboard accent** | Changes dashboard highlights for the selected server. | Match the dashboard to your server brand. | Uses the Odyssey Bot default accent. |
+| **Dashboard accent** | Changes dashboard highlights for the selected server. | Match the dashboard to your server brand. | Uses the CorePanel default accent. |
 | **Ticket button style** | Chooses neutral gray, Discord blue, or green ticket buttons. | Use when a panel is displayed as buttons. | Uses neutral gray. |
 | **Footer text** | Default footer for embeds. | Set a branded footer. | No footer appears unless specified elsewhere. |
 | **Embed icon** | Small icon in embed footers. | Upload your server logo. | No icon appears. |
-| **Ticket panel title and description** | Fallback copy for ticket entry messages. | Set a consistent support prompt. | Uses Odyssey Bot defaults. |
+| **Ticket panel title and description** | Fallback copy for ticket entry messages. | Set a consistent support prompt. | Uses CorePanel defaults. |
 | **Ticket panel color and banner** | Fallback color and large image for ticket entry messages. | Set branded ticket media. | Uses the default color and no banner. |
 | **Default announcement color** | Fallback color for announcements. | Set a brand color. | Uses `#5865F2` (Discord blurple). |
 | **Default announcement image/thumbnail** | Fallback media for announcements. | Set branded images. | No image/thumbnail appears unless specified in the template. |

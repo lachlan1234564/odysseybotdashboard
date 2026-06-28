@@ -12,6 +12,7 @@ import { asColor, buildActionLogEmbed, sendGuildLog } from "./utils.js";
 
 interface ActionEntry {
   executorId: string;
+  eventType: string;
   targetId?: string;
   timestamp: number;
 }
@@ -34,11 +35,13 @@ function countByExecutor(guildId: string, executorId: string, eventFilter?: (e: 
   return getLog(guildId).filter((e) => e.executorId === executorId && (!eventFilter || eventFilter(e))).length;
 }
 
-function addEntry(guildId: string, executorId: string, targetId?: string): void {
-  getLog(guildId).push({ executorId, targetId, timestamp: Date.now() });
+function addEntry(guildId: string, executorId: string, eventType: string, targetId?: string): void {
+  getLog(guildId).push({ executorId, eventType, targetId, timestamp: Date.now() });
 }
 
 async function isTrusted(guildId: string, executorId: string, member?: GuildMember | null): Promise<boolean> {
+  if (member?.guild.ownerId === executorId) return true;
+  if (member?.guild.members.me?.id === executorId) return true;
   if (!member) return false;
   if (member.id === member.guild.ownerId) return true;
   const trusted = await listAntiNukeTrusted(guildId);
@@ -65,10 +68,18 @@ async function takeAction(
 ): Promise<void> {
   const action = settings.action;
   let status = action === "alert" ? "Alerted" : "Completed";
+  const me = executor.guild.members.me;
 
-  if (action === "remove_roles") {
-    if (executor.id === executor.guild.ownerId) status = "Skipped: server owner";
-    const me = executor.guild.members.me;
+  if (executor.id === executor.guild.ownerId) {
+    status = "Skipped: server owner";
+  } else if (executor.id === me?.id) {
+    status = "Skipped: bot self-action";
+  }
+
+  if (action === "remove_roles" && status === "Completed") {
+    if (!me?.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      status = "Failed: missing Manage Roles";
+    }
     const manageable = executor.roles.cache.filter((r) => r.id !== r.guild.id && me && me.roles.highest.comparePositionTo(r) > 0);
     if (status === "Completed" && manageable.size > 0) {
       status = await executor.roles.remove(manageable, `Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed");
@@ -77,27 +88,33 @@ async function takeAction(
     }
   }
 
-  if (action === "timeout_executor") {
-    if (executor.moderatable) {
-      status = await executor.timeout(60 * 60_000, `Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed");
+  if (action === "timeout_executor" && status === "Completed") {
+    if (!me?.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+      status = "Failed: missing Moderate Members";
     } else {
-      status = "Failed: executor is not moderatable";
+      status = executor.moderatable
+        ? await executor.timeout(60 * 60_000, `Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed")
+        : "Failed: executor is not moderatable";
     }
   }
 
-  if (action === "kick_executor") {
-    if (executor.kickable) {
-      status = await executor.kick(`Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed");
+  if (action === "kick_executor" && status === "Completed") {
+    if (!me?.permissions.has(PermissionFlagsBits.KickMembers)) {
+      status = "Failed: missing Kick Members";
     } else {
-      status = "Failed: executor is not kickable";
+      status = executor.kickable
+        ? await executor.kick(`Anti-nuke: ${reason}`).then(() => "Completed").catch(() => "Failed")
+        : "Failed: executor is not kickable";
     }
   }
 
-  if (action === "ban_executor") {
-    if (executor.bannable) {
-      status = await executor.ban({ deleteMessageSeconds: 0, reason: `Anti-nuke: ${reason}` }).then(() => "Completed").catch(() => "Failed");
+  if (action === "ban_executor" && status === "Completed") {
+    if (!me?.permissions.has(PermissionFlagsBits.BanMembers)) {
+      status = "Failed: missing Ban Members";
     } else {
-      status = "Failed: executor is not bannable";
+      status = executor.bannable
+        ? await executor.ban({ deleteMessageSeconds: 0, reason: `Anti-nuke: ${reason}` }).then(() => "Completed").catch(() => "Failed")
+        : "Failed: executor is not bannable";
     }
   }
 
@@ -132,7 +149,7 @@ export async function checkEvent(guild: Guild, executorId: string, eventType: st
   const member = await guild.members.fetch(executorId).catch(() => null);
   if (await isTrusted(guild.id, executorId, member)) return;
 
-  addEntry(guild.id, executorId, targetId);
+  addEntry(guild.id, executorId, eventType, targetId);
   pruneLog(guild.id, settings.timeWindowSeconds * 1000);
 
   let threshold = 0;
@@ -154,10 +171,7 @@ export async function checkEvent(guild: Guild, executorId: string, eventType: st
 
   if (threshold <= 0) return;
 
-  const count = countByExecutor(guild.id, executorId, (e) => {
-    // For simplicity, we count all actions by executor. In production you might separate by event.
-    return true;
-  });
+  const count = countByExecutor(guild.id, executorId, (e) => e.eventType === eventType);
 
   if (count >= threshold) {
     if (member) await takeAction(guild, member, settings, reason, eventType, targetId);

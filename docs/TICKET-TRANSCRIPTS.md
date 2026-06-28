@@ -23,6 +23,8 @@ To use a different channel for one ticket type:
 - Who closed the ticket.
 - Close reason.
 - Message time, author, author ID, text, and attachment links.
+- Basic embed summaries when the message contains embeds.
+- Ticket category, priority, assigned staff, opened time, and closed time.
 - Up to the newest 1,000 fetched messages.
 
 The database transcript is created before the ticket channel is deleted, even if no transcript channel is configured.
@@ -31,7 +33,7 @@ The database transcript is created before the ticket channel is deleted, even if
 
 - A clear **Ticket Transcript Saved** title.
 - Saved status.
-- Ticket name, channel ID, and Odyssey Bot ticket number.
+- Ticket name, channel ID, and CorePanel ticket number.
 - Ticket requester and the person who closed it.
 - Ticket category, open time, close time, and close reason.
 - Number of exported messages.
@@ -44,8 +46,9 @@ Open **Tickets > History** and review **Ticket transcripts**. Each saved transcr
 - Ticket ID and ticket channel name.
 - Opener and closer IDs.
 - Close reason.
+- Category, priority, opened/closed time, and assigned staff when available.
 - Message count.
-- Download link for a plain-text copy.
+- View and download actions for a readable dashboard copy and a plain-text copy.
 
 The dashboard copy is useful when Discord attachment upload fails or no transcript channel is configured.
 

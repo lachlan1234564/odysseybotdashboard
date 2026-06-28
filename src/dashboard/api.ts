@@ -10,6 +10,7 @@ import {
   createAnnouncement,
   createGiveaway,
   createModerationCase,
+  createPoll,
   createRolePanel,
   createScheduledAnnouncement,
   createStickyMessage,
@@ -25,17 +26,20 @@ import {
   deleteCustomCommand,
   deleteTicketPanel,
   deleteTicketType,
+  getAppSetup,
   getAntiNukeSettings,
   getAntiRoleSettings,
   getAntiRaidSettings,
   getAutoModSettings,
   getAnnouncement,
   getBranding,
+  getDmSettings,
   getGiveaway,
   getGuildSettings,
   getLoggingSettings,
   getModerationCase,
   getOverview,
+  getPoll,
   getTicketTranscript,
   getTicketPanel,
   getRolePanel,
@@ -44,12 +48,15 @@ import {
   getVerificationLink,
   getVerificationSettings,
   getWelcomeSettings,
+  getRuntimeAppConfig,
   listAnnouncements,
   listCustomCommands,
   listGiveaways,
   listGiveawayEntries,
   listModerationCases,
   listModerationActions,
+  listPolls,
+  listPollVotes,
   listRolePanels,
   listScheduledAnnouncements,
   listStickyMessages,
@@ -65,7 +72,11 @@ import {
   saveAntiRaidSettings,
   saveAutoModSettings,
   saveBranding,
+  saveDmSettings,
   resetBranding,
+  replaceDiscordToken,
+  resetAppSetup,
+  saveAppSetup,
   saveGuildSettings,
   saveLoggingSettings,
   saveSocialPromotionSettings,
@@ -75,6 +86,7 @@ import {
   updateCustomCommand,
   updateGiveaway,
   updateModerationCase,
+  updatePoll,
   updateVerificationRecordReview,
   updateTicketPanel,
   updateTicketType,
@@ -83,10 +95,18 @@ import {
   updateStickyMessage
 } from "../database/index.js";
 import { loadDashboardConfig, resolveUploadsPath } from "../shared/config.js";
+import { verifyPassword } from "../shared/secrets.js";
 import { withTimeout } from "../shared/async.js";
 import { normalizeDomain } from "../shared/domains.js";
 import { updateAutoModSettingsCache } from "../shared/auto-mod-cache.js";
 import { parseDiscordComponentEmoji } from "../shared/discord-components.js";
+import {
+  pollDisplayTitle,
+  pollPublicDescription,
+  POLL_CLOSED_COLOR,
+  POLL_OPEN_COLOR,
+  tallyPollVotes
+} from "../shared/polls.js";
 import {
   friendlyDiscordError,
   logDiscordError,
@@ -95,6 +115,7 @@ import {
   safeErrorSummary
 } from "../shared/logging.js";
 import { emptyActionConfig, emptyEmbedConfig } from "../shared/types.js";
+import type { Giveaway, Poll, PollOption, PollVote, VerificationPendingUser, VerificationRecord } from "../shared/types.js";
 import { customCommandNeedsTrustedAccess } from "../shared/security.js";
 import { isValidCommandName, normalizeCommandName } from "../shared/validation.js";
 import { resolveGuildSelection, type ManageableGuild } from "./guild-selection.js";
@@ -121,8 +142,10 @@ import {
 } from "../shared/verification-gate.js";
 
 const config = loadDashboardConfig();
+let runtimeConfig = await getRuntimeAppConfig();
 const router = Router();
-const rest = new REST({ version: "10", timeout: 5_000, retries: 1 }).setToken(config.DISCORD_TOKEN);
+const rest = new REST({ version: "10", timeout: 5_000, retries: 1 });
+if (runtimeConfig.discordToken) rest.setToken(runtimeConfig.discordToken);
 const loginAttempts = new Map<string, { count: number; blockedUntil: number }>();
 type DiscordGuildSummary = ManageableGuild;
 let guildCache: { expiresAt: number; guilds: DiscordGuildSummary[] } | null = null;
@@ -132,7 +155,7 @@ const uploadsPath = resolveUploadsPath(config.UPLOADS_DIR);
 fs.mkdirSync(uploadsPath, { recursive: true });
 const docsPath = path.join(config.projectRoot, "docs");
 const docsTopics: readonly DocsTopicDefinition[] = [
-  { slug: "introduction", title: "Introduction", description: "What Odyssey Bot does, what the dashboard controls, and how the pieces fit together.", files: ["GETTING-STARTED.md", "QUICK-START.md"], path: "Overview → Introduction", category: "Overview", aliases: ["start here", "what is odyssey bot", "overview"] },
+  { slug: "introduction", title: "Introduction", description: "What CorePanel does, what the dashboard controls, and how the pieces fit together.", files: ["GETTING-STARTED.md", "QUICK-START.md"], path: "Overview → Introduction", category: "Overview", aliases: ["start here", "what is corepanel bot", "overview"] },
   { slug: "dashboard-guide", title: "Dashboard Overview", description: "A guided tour of the current dashboard pages and safe testing workflow.", files: ["DASHBOARD-GUIDE.md"], path: "Overview → Dashboard overview", category: "Overview", aliases: ["dashboard overview", "dashboard guide", "pages"] },
   { slug: "features", title: "Features", description: "A plain-language map of the bot modules and where to configure them.", files: ["DASHBOARD-GUIDE.md", "SECURITY-OVERVIEW.md"], path: "Overview → Features", category: "Overview", aliases: ["feature overview", "what can the bot do"], defaultHash: "dashboard-pages-overview" },
 
@@ -167,8 +190,10 @@ const docsTopics: readonly DocsTopicDefinition[] = [
   { slug: "ticket-setup", title: "Ticket Setup", description: "Create ticket types, attach them to panels, post the panel, and verify close/transcript behavior.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md", "TICKET-CLOSE.md", "TICKET-TRANSCRIPTS.md"], path: "Guides → Ticket setup", category: "Guides", aliases: ["tickets", "support setup", "ticket panel setup", "requests", "close requests", "ticket close requests", "request review"] },
   { slug: "modlogs", title: "Logging Setup", description: "Choose the log channel, enable event categories, and understand what is intentionally ignored.", files: ["MODLOGS.md", "SECURITY-LOGS.md"], path: "Guides → Logging setup", category: "Guides", aliases: ["logging", "logging setup", "logs", "audit logs", "server logs", "mod logs"] },
   { slug: "auto-mod", title: "AutoMod Setup", description: "Configure invite blocking, suspicious links, caps, spam, mass mentions, and exemptions.", files: ["AUTO-MOD.md"], path: "Guides → AutoMod setup", category: "Guides", aliases: ["automod", "automod setup", "auto moderation", "invite blocker", "spam filters"] },
-  { slug: "role-panels", title: "Role Panel Setup", description: "Create safe self-service role buttons and test role hierarchy before publishing.", files: ["ROLE-PANELS.md"], path: "Guides → Role panel setup", category: "Guides", aliases: ["roles", "role panels", "reaction roles", "button roles", "self roles"] },
-  { slug: "giveaways", title: "Giveaway Setup", description: "Create restart-safe giveaways, collect entries, end early, cancel, and reroll winners.", files: ["GIVEAWAYS.md"], path: "Guides → Giveaway setup", category: "Guides", aliases: ["giveaways", "giveaway setup", "reroll", "winners"] },
+  { slug: "role-panels", title: "Role Panel Setup", description: "Create safe self-service role buttons and test role hierarchy before publishing.", files: ["ROLE-PANELS.md"], path: "Guides → Role panel setup", category: "Guides", aliases: ["roles", "role panels", "reaction roles", "button roles", "dropdown roles", "select roles", "self roles", "role hierarchy"] },
+  { slug: "giveaways", title: "Giveaway Setup", description: "Create restart-safe giveaways, schedule starts, add bonus entries, assign winner roles, end early, cancel, and reroll winners.", files: ["GIVEAWAYS.md"], path: "Guides → Giveaway setup", category: "Guides", aliases: ["giveaways", "giveaway setup", "scheduled giveaway", "reroll", "winners", "winner role", "winner dm", "bonus entries"] },
+  { slug: "polls", title: "Poll Setup", description: "Create restart-safe button polls, schedule starts, add option emojis, control result visibility, and read results.", files: ["POLLS.md"], path: "Guides → Poll setup", category: "Guides", aliases: ["polls", "poll setup", "vote", "voting", "survey", "poll emoji", "poll results", "scheduled poll", "button voting", "poll buttons", "button poll"] },
+  { slug: "dm-features", title: "Direct Message Features", description: "Configure safe staff DMs, moderation notices, and giveaway winner messages.", files: ["DM-FEATURES.md"], path: "Guides → Direct message setup", category: "Guides", aliases: ["dm", "direct messages", "staff dm", "moderation dm", "giveaway winner dm", "winner dm"] },
   { slug: "moderation-setup", title: "Moderation Setup", description: "Use warnings, timeouts, kicks, bans, clears, and moderation records safely.", files: ["DASHBOARD-GUIDE.md", "MODLOGS.md"], path: "Guides → Moderation setup", category: "Guides", aliases: ["moderation", "warn", "kick", "ban", "timeout"], defaultHash: "moderation" },
   { slug: "custom-commands", title: "Commands Setup", description: "Build command actions, permissions, placeholders, cooldowns, embeds, and channel sends.", files: ["COMMAND-BUILDER.md", "ACTION-TEMPLATES.md", "command-studio-variables.md", "PLAINTEXT-REPLIES.md", "EMBED-REPLIES.md", "CHANNEL-SENDS.md", "ROLE-ACTIONS.md"], path: "Guides → Commands setup", category: "Guides", aliases: ["commands", "custom commands", "command setup", "command builder"] },
 
@@ -176,11 +201,12 @@ const docsTopics: readonly DocsTopicDefinition[] = [
   { slug: "tickets", title: "Tickets", description: "Feature reference for ticket types, public panels, close requests, history, and transcripts.", files: ["TICKET-TYPES.md", "TICKET-PANELS.md", "TICKET-CLOSE.md", "TICKET-TRANSCRIPTS.md"], path: "Features → Tickets", category: "Features", aliases: ["support tickets", "ticket types", "ticket close requests", "requests", "close requests"] },
   { slug: "logging", title: "Logging", description: "Feature reference for server event logs, moderation logs, security logs, and dashboard changes.", files: ["MODLOGS.md", "SECURITY-LOGS.md"], path: "Features → Logging", category: "Features", aliases: ["server logs", "audit feed", "event logging"] },
   { slug: "automod", title: "AutoMod", description: "Feature reference for message rules, link rules, bypasses, actions, and safe testing.", files: ["AUTO-MOD.md"], path: "Features → AutoMod", category: "Features", aliases: ["automod feature", "auto moderation rules"] },
-  { slug: "role-panels-feature", title: "Role Panels", description: "Feature reference for self-service roles, button panels, hierarchy, and member testing.", files: ["ROLE-PANELS.md", "ROLE-PROTECTION.md"], path: "Features → Role panels", category: "Features", aliases: ["reaction roles feature", "self roles feature"] },
+  { slug: "role-panels-feature", title: "Role Panels", description: "Feature reference for self-service roles, button panels, hierarchy, and member testing.", files: ["ROLE-PANELS.md", "ROLE-PROTECTION.md"], path: "Features → Role panels", category: "Features", aliases: ["reaction roles feature", "self roles feature", "dropdown role panels", "button role panels"] },
   { slug: "moderation", title: "Moderation", description: "Feature reference for moderation commands, warning history, and audit visibility.", files: ["DASHBOARD-GUIDE.md", "MODLOGS.md"], path: "Features → Moderation", category: "Features", aliases: ["warnings", "moderation records"], defaultHash: "moderation" },
   { slug: "moderation-cases", title: "Moderation Cases", description: "Feature reference for case numbers, case search, manual cases, notes, and statuses.", files: ["MODERATION-CASES.md"], path: "Features → Moderation cases", category: "Features", aliases: ["cases", "case system", "moderation cases"] },
   { slug: "commands", title: "Commands", description: "Feature reference for command builder fields, action templates, variables, and role actions.", files: ["COMMAND-BUILDER.md", "ACTION-TEMPLATES.md", "VARIABLES.md", "command-studio-variables.md"], path: "Features → Commands", category: "Features", aliases: ["custom command reference", "command variables"] },
   { slug: "social-promotion", title: "Socials", description: "Feature reference for the social promotion embed, link safety, images, and channel sending.", files: ["SOCIAL-PROMOTION.md"], path: "Features → Socials", category: "Features", aliases: ["socials", "social promotion"] },
+  { slug: "polls-feature", title: "Polls", description: "Feature reference for poll options, role restrictions, anonymity, and result handling.", files: ["POLLS.md"], path: "Features → Polls", category: "Features", aliases: ["poll feature", "community voting"], defaultHash: "how-polls-work" },
   { slug: "welcome-messages", title: "Welcome and Boost Messages", description: "Configure joins, leaves, DMs, boost messages, and automatic roles.", files: ["WELCOME.md"], path: "Features → Welcome and boost messages", category: "Features", aliases: ["welcome", "goodbye", "boost messages", "auto roles"], hiddenFromNav: true },
   { slug: "security-overview", title: "Security Safeguards", description: "Understand anti-raid, anti-nuke, role protection, and safe rollout basics.", files: ["SECURITY-OVERVIEW.md", "ANTI-RAID.md", "ANTI-NUKE.md", "ROLE-PROTECTION.md"], path: "Features → Security safeguards", category: "Features", aliases: ["security guide", "anti raid", "anti nuke"], hiddenFromNav: true },
   { slug: "role-protection", title: "Role Protection", description: "Detect protected-role assignment and dangerous role changes.", files: ["ROLE-PROTECTION.md"], path: "Features → Role protection", category: "Features", aliases: ["anti role", "role security", "protected roles"], hiddenFromNav: true },
@@ -254,6 +280,43 @@ const urlOrEmpty = z.union([
   z.string().url(),
   z.string().regex(/^\/uploads\/[a-zA-Z0-9._-]+$/)
 ]).default("");
+const publicUrlOrEmpty = z.union([z.literal(""), z.string().url()]).default("");
+const setupSecret = z.string()
+  .trim()
+  .min(30, "Paste the full Discord bot token.")
+  .max(256, "That token looks too long.")
+  .refine((value) => !/\s/.test(value), "Tokens cannot contain spaces or line breaks.");
+const setupSchema = z.object({
+  dashboardName: z.string().trim().min(2).max(40).default("CorePanel"),
+  botDisplayName: z.string().trim().min(2).max(40).default("CorePanel Bot"),
+  supportServerName: z.string().trim().max(60).default(""),
+  discordToken: setupSecret,
+  discordClientId: z.string().trim().regex(/^\d{16,22}$/, "Paste the Discord application/client ID."),
+  discordClientSecret: z.string().trim().max(256).default(""),
+  discordGuildId: z.string().trim().regex(/^\d{16,22}$/, "Paste a Discord server ID or leave it blank.").or(z.literal("")).default(""),
+  publicBaseUrl: publicUrlOrEmpty,
+  verifyPublicBaseUrl: publicUrlOrEmpty,
+  discordOauthRedirectUri: publicUrlOrEmpty,
+  dashboardPassword: z.string().min(8, "Use at least 8 characters for the dashboard password.").max(200),
+  adminUserIds: z.array(z.string().trim().regex(/^\d{16,22}$/)).max(25).default([])
+}).superRefine((value, context) => {
+  if (value.discordClientSecret && value.discordClientSecret.length < 20) {
+    context.addIssue({
+      code: "custom",
+      path: ["discordClientSecret"],
+      message: "The client secret looks too short. Leave it blank if you are not using OAuth verification yet."
+    });
+  }
+  if (value.discordOauthRedirectUri && !value.verifyPublicBaseUrl && !value.publicBaseUrl) {
+    context.addIssue({
+      code: "custom",
+      path: ["discordOauthRedirectUri"],
+      message: "Add the public dashboard or verification URL too, so OAuth links can be built safely."
+    });
+  }
+});
+const replaceTokenSchema = z.object({ discordToken: setupSecret });
+const resetSetupSchema = z.object({ confirm: z.literal("RESET COREPANEL") });
 
 const settingsSchema = z.object({
   modLogChannelId: optionalId,
@@ -304,6 +367,23 @@ const loggingSettingsSchema = z.object({
       message: "Enable at least one logging category."
     });
   }
+});
+
+const dmSettingsSchema = z.object({
+  dmCommandEnabled: z.boolean().default(true),
+  dmCommandLogContent: z.boolean().default(false),
+  dmCommandRateLimitSeconds: z.coerce.number().int().min(5).max(3600).default(30),
+  moderationDmEnabled: z.boolean().default(false),
+  dmOnWarn: z.boolean().default(true),
+  dmOnTimeout: z.boolean().default(true),
+  dmOnKick: z.boolean().default(true),
+  dmOnBan: z.boolean().default(true),
+  dmOnUnban: z.boolean().default(false),
+  dmOnManualCase: z.boolean().default(false),
+  moderationDmTemplate: z.string().trim().min(1).max(1800).default("You received a moderation action in {server}: {action}. Reason: {reason}. Case: {case}. {duration}"),
+  moderationAppealMessage: z.string().max(1000).default(""),
+  giveawayWinnerDmEnabled: z.boolean().default(true),
+  giveawayDefaultWinnerDmMessage: z.string().trim().min(1).max(1000).default("You won the giveaway in {serverName}: {prize}. Please contact staff or check the giveaway channel for next steps.")
 });
 
 const brandingSchema = z.object({
@@ -676,6 +756,37 @@ function publicRequestError(
   return Object.assign(new Error(message), { statusCode, expose: true, fields });
 }
 
+async function refreshRuntimeConfig(): Promise<void> {
+  runtimeConfig = await getRuntimeAppConfig();
+  rest.setToken(runtimeConfig.discordToken || "");
+  guildCache = null;
+}
+
+function setupRequired(): boolean {
+  return !runtimeConfig.setupComplete || !runtimeConfig.discordToken || !runtimeConfig.discordClientId;
+}
+
+function requireDiscordClientId(): string {
+  if (!runtimeConfig.discordClientId) {
+    throw publicRequestError("Discord client ID is not configured. Open setup and add the application ID.", 503);
+  }
+  return runtimeConfig.discordClientId;
+}
+
+function requireDiscordClientSecret(): string {
+  if (!runtimeConfig.discordClientSecret) {
+    throw publicRequestError("Discord OAuth client secret is not configured.", 503);
+  }
+  return runtimeConfig.discordClientSecret;
+}
+
+function requireVerifyPublicBaseUrl(): string {
+  if (!runtimeConfig.verifyPublicBaseUrl) {
+    throw publicRequestError("Set the public verification URL before using verification links.", 503);
+  }
+  return runtimeConfig.verifyPublicBaseUrl;
+}
+
 function dashboardComponentEmoji(value: string) {
   try {
     return parseDiscordComponentEmoji(value);
@@ -686,7 +797,7 @@ function dashboardComponentEmoji(value: string) {
 
 function getVerificationHmacSecret(): string {
   return crypto.createHash("sha256")
-    .update(`${config.DASHBOARD_PASSWORD}:${config.DISCORD_CLIENT_ID}`)
+    .update(`${runtimeConfig.dashboardPasswordHash || runtimeConfig.dashboardPassword || "corepanel"}:${runtimeConfig.discordClientId || "setup"}`)
     .digest("hex");
 }
 
@@ -695,8 +806,8 @@ function hashVerificationToken(token: string): string {
 }
 
 function verificationRedirectUri(req: Request): string {
-  return config.DISCORD_OAUTH_REDIRECT_URI
-    ?? `${config.VERIFY_PUBLIC_BASE_URL ?? config.PUBLIC_BASE_URL ?? `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
+  return runtimeConfig.discordOauthRedirectUri
+    || `${runtimeConfig.verifyPublicBaseUrl || runtimeConfig.publicBaseUrl || `${req.protocol}://${req.get("host")}`}/api/verify/callback`;
 }
 
 function verificationResultUrl(result: string, guildId?: string): string {
@@ -848,6 +959,7 @@ function dashboardActionLabel(method: string, pathValue: string): string {
   const labels: Record<string, string> = {
     "PUT settings": "Server settings changed",
     "PUT logging": "Server logging settings changed",
+    "PUT dm-settings": "DM settings changed",
     "PUT branding": "Appearance settings changed",
     "DELETE branding": "Appearance settings reset",
     "POST custom-commands": "Custom command created",
@@ -873,7 +985,17 @@ function dashboardActionLabel(method: string, pathValue: string): string {
     "POST verification/dry-run": "Verification setup previewed",
     "POST verification/setup": "Verification setup applied",
     "POST verification/repost": "Verification embed updated",
-    "POST verification/disable": "Verification mode disabled"
+    "POST verification/disable": "Verification mode disabled",
+    "POST verification/manual-review": "Verification manual review completed",
+    "POST giveaways": "Giveaway draft created",
+    "POST giveaways/:id/start": "Giveaway started",
+    "POST giveaways/:id/end": "Giveaway ended",
+    "POST giveaways/:id/reroll": "Giveaway rerolled",
+    "POST giveaways/:id/cancel": "Giveaway cancelled",
+    "POST polls": "Poll draft created",
+    "POST polls/:id/start": "Poll started",
+    "POST polls/:id/end": "Poll ended",
+    "POST polls/:id/cancel": "Poll cancelled"
   };
   return labels[`${method} ${cleanPath}`] ?? `Dashboard ${method} /${cleanPath}`;
 }
@@ -889,7 +1011,7 @@ async function sendDashboardChangeLog(
   await sendDiscordMessage(guildId, settings.channelId, {
     embeds: [{
       color: 0xA17A58,
-      author: { name: "Odyssey Bot • Dashboard" },
+      author: { name: "CorePanel • Dashboard" },
       title,
       description: "A successful configuration change was made from the protected dashboard.",
       fields: [
@@ -1006,11 +1128,58 @@ async function validateTicketPanelReferences(
   }
 }
 
+router.get("/setup/status", async (_req, res, next) => {
+  try {
+    await refreshRuntimeConfig();
+    const setup = await getAppSetup();
+    res.json({
+      ...setup,
+      setupRequired: setupRequired(),
+      botNeedsRestart: setup.discordTokenConfigured && setup.setupComplete
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/setup", async (req, res, next) => {
+  try {
+    await refreshRuntimeConfig();
+    if (!setupRequired()) {
+      res.status(409).json({ error: "CorePanel is already configured. Log in to replace or reset credentials." });
+      return;
+    }
+    const input = setupSchema.parse(req.body);
+    await saveAppSetup(input);
+    await refreshRuntimeConfig();
+    req.session.regenerate((error) => {
+      if (error) {
+        res.status(500).json({ error: "Setup was saved, but the dashboard session could not be created." });
+        return;
+      }
+      req.session.authenticated = true;
+      delete req.session.selectedGuildId;
+      res.status(201).json({
+        ok: true,
+        next: "/servers",
+        message: "Setup saved. Restart the Railway service or local process if the bot was already running without a token."
+      });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.get("/session", (req, res) => {
   res.json({
     authenticated: Boolean(req.session.authenticated),
+    setupRequired: setupRequired(),
+    dashboardName: runtimeConfig.dashboardName,
+    botDisplayName: runtimeConfig.botDisplayName,
     guildId: req.session.authenticated ? req.session.selectedGuildId : undefined,
-    next: req.session.authenticated
+    next: setupRequired()
+      ? "/setup"
+      : req.session.authenticated
       ? req.session.selectedGuildId ? "/" : "/servers"
       : "/login"
   });
@@ -1025,7 +1194,12 @@ router.post("/login", (req, res) => {
   }
 
   const password = typeof req.body?.password === "string" ? req.body.password : "";
-  if (!safeEqual(password, config.DASHBOARD_PASSWORD)) {
+  const passwordMatches = runtimeConfig.dashboardPassword
+    ? safeEqual(password, runtimeConfig.dashboardPassword)
+    : runtimeConfig.dashboardPasswordHash
+      ? verifyPassword(password, runtimeConfig.dashboardPasswordHash)
+      : false;
+  if (!passwordMatches) {
     const count = (current?.count ?? 0) + 1;
     loginAttempts.set(ip, {
       count: count >= 5 ? 0 : count,
@@ -1053,7 +1227,7 @@ router.post("/logout", (req, res) => {
 
 router.get("/verify/:token/start", async (req, res, next) => {
   try {
-    if (!config.DISCORD_CLIENT_SECRET) {
+    if (!runtimeConfig.discordClientSecret) {
       throw publicRequestError("Discord OAuth verification is not configured.", 503);
     }
     const tokenHash = hashVerificationToken(req.params.token);
@@ -1068,7 +1242,7 @@ router.get("/verify/:token/start", async (req, res, next) => {
     req.session.verificationOAuthState = state;
     const redirectUri = verificationRedirectUri(req);
     const authorization = new URL("https://discord.com/oauth2/authorize");
-    authorization.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
+    authorization.searchParams.set("client_id", requireDiscordClientId());
     authorization.searchParams.set("response_type", "code");
     authorization.searchParams.set("scope", "identify guilds.members.read");
     authorization.searchParams.set("redirect_uri", redirectUri);
@@ -1081,7 +1255,7 @@ router.get("/verify/:token/start", async (req, res, next) => {
 
 router.get("/verify/server/:guildId/start", async (req, res, next) => {
   try {
-    if (!config.DISCORD_CLIENT_SECRET || !config.VERIFY_PUBLIC_BASE_URL) {
+    if (!runtimeConfig.discordClientSecret || !runtimeConfig.verifyPublicBaseUrl) {
       throw publicRequestError("Discord OAuth verification is not configured.", 503);
     }
     const guildId = z.string().regex(/^\d{17,20}$/).parse(req.params.guildId);
@@ -1093,7 +1267,7 @@ router.get("/verify/server/:guildId/start", async (req, res, next) => {
     req.session.verificationGuildId = guildId;
     req.session.verificationOAuthState = state;
     const authorization = new URL("https://discord.com/oauth2/authorize");
-    authorization.searchParams.set("client_id", config.DISCORD_CLIENT_ID);
+    authorization.searchParams.set("client_id", requireDiscordClientId());
     authorization.searchParams.set("response_type", "code");
     authorization.searchParams.set("scope", "identify guilds.members.read");
     authorization.searchParams.set("redirect_uri", verificationRedirectUri(req));
@@ -1142,7 +1316,7 @@ router.get("/verify/callback", async (req, res, next) => {
     }
     if (!activeGuildId) throw publicRequestError("The verification server could not be resolved.", 400);
     const settings = await getVerificationSettings(activeGuildId);
-    if (!settings.enabled || !config.DISCORD_CLIENT_SECRET) {
+    if (!settings.enabled || !runtimeConfig.discordClientSecret) {
       throw publicRequestError("Verification is not currently available.", 503);
     }
 
@@ -1151,8 +1325,8 @@ router.get("/verify/callback", async (req, res, next) => {
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
-        client_id: config.DISCORD_CLIENT_ID,
-        client_secret: config.DISCORD_CLIENT_SECRET,
+        client_id: requireDiscordClientId(),
+        client_secret: runtimeConfig.discordClientSecret,
         grant_type: "authorization_code",
         code,
         redirect_uri: redirectUri
@@ -1192,7 +1366,7 @@ router.get("/verify/callback", async (req, res, next) => {
 
     const reasonCodes: string[] = [];
     let riskScore = 0;
-    let status: "passed" | "flagged" | "denied" = "passed";
+    let status: VerificationRecord["status"] = "passed";
 
     if (memberMissing) {
       reasonCodes.push("not_server_member");
@@ -1233,19 +1407,19 @@ router.get("/verify/callback", async (req, res, next) => {
     }
 
     const expiresAt = new Date(Date.now() + settings.recordRetentionHours * 3_600_000).toISOString();
-    await createVerificationRecord({
-      guildId: activeGuildId,
-      userId: user.id,
-      status,
-      reasonCodes,
-      riskScore,
-      accountCreatedAt: accountCreatedAt.toISOString(),
-      serverJoinedAt,
-      vpnDetected,
-      expiresAt
-    });
 
     if (status === "denied") {
+      await createVerificationRecord({
+        guildId: activeGuildId,
+        userId: user.id,
+        status,
+        reasonCodes,
+        riskScore,
+        accountCreatedAt: accountCreatedAt.toISOString(),
+        serverJoinedAt,
+        vpnDetected,
+        expiresAt
+      });
       await logVerificationFailure({
         rest,
         settings,
@@ -1255,6 +1429,17 @@ router.get("/verify/callback", async (req, res, next) => {
       });
       res.redirect(verificationResultUrl("failed", activeGuildId));
     } else if (status === "flagged") {
+      await createVerificationRecord({
+        guildId: activeGuildId,
+        userId: user.id,
+        status,
+        reasonCodes,
+        riskScore,
+        accountCreatedAt: accountCreatedAt.toISOString(),
+        serverJoinedAt,
+        vpnDetected,
+        expiresAt
+      });
       await logVerificationFailure({
         rest,
         settings,
@@ -1268,7 +1453,23 @@ router.get("/verify/callback", async (req, res, next) => {
       if (settings.verifiedRoleId) {
         const assignment = await assignVerifiedRole({ rest, settings, userId: user.id });
         roleAssigned = assignment.assigned;
+        if (!roleAssigned) {
+          status = "failed";
+          reasonCodes.push("role_assignment_failed");
+          riskScore += 80;
+        }
       }
+      await createVerificationRecord({
+        guildId: activeGuildId,
+        userId: user.id,
+        status,
+        reasonCodes,
+        riskScore,
+        accountCreatedAt: accountCreatedAt.toISOString(),
+        serverJoinedAt,
+        vpnDetected,
+        expiresAt
+      });
       if (!settings.verifiedRoleId) {
         await sendVerificationEventLog(
           rest,
@@ -1293,11 +1494,50 @@ router.use((req, res, next) => {
   next();
 });
 
+router.put("/setup/token", async (req, res, next) => {
+  try {
+    const input = replaceTokenSchema.parse(req.body);
+    await replaceDiscordToken(input.discordToken);
+    await refreshRuntimeConfig();
+    res.json({
+      ok: true,
+      setup: await getAppSetup(),
+      message: "Bot token replaced. Restart the bot process if it was already connected with the old token."
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.delete("/setup", async (req, res, next) => {
+  try {
+    resetSetupSchema.parse(req.body);
+    await resetAppSetup();
+    await refreshRuntimeConfig();
+    req.session.destroy(() => {
+      res.json({ ok: true, next: "/setup" });
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.use((req, res, next) => {
+  if (!setupRequired()) {
+    next();
+    return;
+  }
+  res.status(428).json({
+    error: "CorePanel setup is incomplete. Open /setup and save the Discord bot configuration first.",
+    setupRequired: true
+  });
+});
+
 router.get("/guilds", async (req, res, next) => {
   try {
     const guilds = await listDiscordGuilds();
     if (!guilds.length) {
-      throw publicRequestError("Odyssey Bot is not installed in any Discord servers.", 503);
+      throw publicRequestError("CorePanel is not installed in any Discord servers.", 503);
     }
     const selection = resolveGuildSelection(guilds, req.session.selectedGuildId);
     if (selection.selectedGuildId) req.session.selectedGuildId = selection.selectedGuildId;
@@ -1318,7 +1558,7 @@ router.post("/guilds/select", async (req, res, next) => {
     const guildId = z.string().regex(/^\d+$/).parse(req.body?.guildId);
     const guilds = await listDiscordGuilds(true);
     if (!guilds.some((guild) => guild.id === guildId)) {
-      res.status(400).json({ error: "Odyssey Bot is not installed in that server." });
+      res.status(400).json({ error: "CorePanel is not installed in that server." });
       return;
     }
     req.session.selectedGuildId = guildId;
@@ -1508,6 +1748,15 @@ router.put("/logging", async (req, res) => {
     }
   }
   res.json(await saveLoggingSettings({ guildId: res.locals.guildId, ...input }));
+});
+
+router.get("/dm-settings", async (_req, res) => {
+  res.json(await getDmSettings(res.locals.guildId));
+});
+
+router.put("/dm-settings", async (req, res) => {
+  const input = dmSettingsSchema.parse(req.body);
+  res.json(await saveDmSettings({ guildId: res.locals.guildId, ...input }));
 });
 
 router.get("/branding", async (_req, res) => {
@@ -1911,22 +2160,29 @@ router.get("/moderation", async (_req, res) => {
 });
 
 const moderationCaseSchema = z.object({
-  targetUserId: z.string().regex(/^\d{17,20}$/),
-  moderatorId: z.string().regex(/^\d{17,20}$/).default("dashboard"),
+  targetUserId: z.union([z.string().regex(/^\d{17,20}$/), z.literal("")]).default(""),
+  targetTag: z.string().trim().max(120).default(""),
+  moderatorId: z.union([z.string().regex(/^\d{17,20}$/), z.literal("dashboard")]).default("dashboard"),
+  moderatorTag: z.string().trim().max(120).default("Dashboard"),
   actionType: z.string().trim().min(1).max(40),
   reason: z.string().max(1000).default(""),
   durationSeconds: z.coerce.number().int().min(0).max(2_419_200).nullable().default(null),
+  expiresAt: z.union([z.string().datetime(), z.literal(""), z.null()]).transform((value) => value || null).default(null),
   evidenceUrl: urlOrEmpty,
   status: z.enum(["active", "expired", "reversed", "deleted", "resolved"]).default("active"),
-  notes: z.string().max(2000).default("")
+  notes: z.string().max(2000).default(""),
+  auditLogExecutorId: optionalId,
+  auditLogExecutorTag: z.string().trim().max(120).default("")
 });
 
 router.get("/moderation/cases", async (req, res) => {
   const filters = z.object({
+    caseNumber: z.coerce.number().int().min(1).optional(),
+    query: z.string().trim().max(100).optional(),
     targetUserId: z.string().regex(/^\d{17,20}$/).optional(),
     moderatorId: z.string().regex(/^\d{17,20}$/).optional(),
     actionType: z.string().max(40).optional(),
-    status: z.string().max(40).optional()
+    status: z.enum(["active", "expired", "reversed", "deleted", "resolved"]).optional()
   }).parse(req.query);
   res.json(await listModerationCases(res.locals.guildId, { ...filters, limit: 100 }));
 });
@@ -2307,7 +2563,7 @@ async function refreshAutoModReadiness(guildId: string): Promise<AutoModReadines
       && (basePermissions & PermissionFlagsBits.Administrator) === 0n
       && (basePermissions & PermissionFlagsBits.ModerateMembers) === 0n
     ) {
-      warnings.push("Timeout is selected, but Odyssey Bot does not have Moderate Members.");
+      warnings.push("Timeout is selected, but CorePanel does not have Moderate Members.");
     }
     if (!logChannelId) {
       warnings.push("No AutoMod or global moderation log channel is configured.");
@@ -2318,7 +2574,7 @@ async function refreshAutoModReadiness(guildId: string): Promise<AutoModReadines
       || (logPermissions & PermissionFlagsBits.SendMessages) === 0n
       || (logPermissions & PermissionFlagsBits.EmbedLinks) === 0n
     ) {
-      warnings.push(`Odyssey Bot cannot send embeds in #${logChannel.name}. Check View Channel, Send Messages, and Embed Links.`);
+      warnings.push(`CorePanel cannot send embeds in #${logChannel.name}. Check View Channel, Send Messages, and Embed Links.`);
     }
     const response: AutoModReadinessResult = {
       ok: warnings.length === 0,
@@ -2369,13 +2625,13 @@ function autoModReadinessFailureCopy(error: unknown): { summary?: string; warnin
     : undefined;
   if ([10004, 10007, 50001].includes(code ?? 0)) {
     return {
-      summary: "Odyssey Bot could not access the selected Discord server.",
+      summary: "CorePanel could not access the selected Discord server.",
       warning: "Confirm the bot is still installed in this server and can view its channels. Saved AutoMod settings remain available."
     };
   }
   if (code === 50013) {
     return {
-      summary: "Discord responded, but Odyssey Bot is missing access needed for the readiness check.",
+      summary: "Discord responded, but CorePanel is missing access needed for the readiness check.",
       warning: "Review the bot role and channel permissions. Saved AutoMod settings can still be edited and saved."
     };
   }
@@ -2467,6 +2723,8 @@ const verificationSettingsSchema = z.object({
   minServerDays: z.coerce.number().int().min(0).max(3650).default(0),
   vpnCheckEnabled: z.boolean().default(false),
   vpnFailClosed: z.boolean().default(false),
+  autoKickUnverified: z.boolean().default(false),
+  autoKickAfterHours: z.coerce.number().int().min(1).max(720).default(24),
   recordRetentionHours: z.coerce.number().int().min(1).max(8760).default(168),
   publicChannelIds: idArray,
   publicCategoryIds: idArray,
@@ -2516,6 +2774,52 @@ type VerificationDiscordRole = {
   position: number;
   managed: boolean;
 };
+type VerificationDiscordMember = {
+  user?: {
+    id: string;
+    username?: string;
+    global_name?: string | null;
+    discriminator?: string;
+    bot?: boolean;
+  };
+  roles: string[];
+  joined_at?: string | null;
+};
+
+function expectedVerificationRedirectUri(): string | null {
+  if (!runtimeConfig.verifyPublicBaseUrl) return null;
+  try {
+    return `${runtimeConfig.verifyPublicBaseUrl.replace(/\/$/, "")}/api/verify/callback`;
+  } catch {
+    return null;
+  }
+}
+
+function verificationRecordExpiry(settings: Awaited<ReturnType<typeof getVerificationSettings>>): string {
+  return new Date(Date.now() + settings.recordRetentionHours * 3_600_000).toISOString();
+}
+
+function discordUserLabel(member: VerificationDiscordMember): string {
+  const user = member.user;
+  if (!user) return "Unknown user";
+  if (user.global_name) return user.global_name;
+  if (user.discriminator && user.discriminator !== "0") return `${user.username ?? "unknown"}#${user.discriminator}`;
+  return user.username ?? user.id;
+}
+
+async function getVerificationMember(guildId: string, userId: string): Promise<VerificationDiscordMember | null> {
+  try {
+    return await rest.get(Routes.guildMember(guildId, userId)) as VerificationDiscordMember;
+  } catch (error) {
+    const errorCode = error && typeof error === "object" && "code" in error ? Number(error.code) : null;
+    if (errorCode === 10007) return null;
+    throw error;
+  }
+}
+
+function memberHasConfiguredRole(member: VerificationDiscordMember, roleId: string | null): boolean {
+  return Boolean(roleId && member.roles.includes(roleId));
+}
 
 async function verificationDiscordState(
   guildId: string,
@@ -2525,7 +2829,7 @@ async function verificationDiscordState(
     const [channelsValue, rolesValue, memberValue] = await Promise.all([
       rest.get(Routes.guildChannels(guildId)),
       rest.get(Routes.guildRoles(guildId)),
-      rest.get(Routes.guildMember(guildId, config.DISCORD_CLIENT_ID))
+      rest.get(Routes.guildMember(guildId, requireDiscordClientId()))
     ]);
     const channels = channelsValue as VerificationDiscordChannel[];
     const roles = rolesValue as VerificationDiscordRole[];
@@ -2544,7 +2848,8 @@ async function verificationDiscordState(
       ["Manage Roles", PermissionFlagsBits.ManageRoles],
       ["View Channels", PermissionFlagsBits.ViewChannel],
       ["Send Messages", PermissionFlagsBits.SendMessages],
-      ["Embed Links", PermissionFlagsBits.EmbedLinks]
+      ["Embed Links", PermissionFlagsBits.EmbedLinks],
+      ...(settings.autoKickUnverified ? [["Kick Members", PermissionFlagsBits.KickMembers] as const] : [])
     ].map(([label, permission]) => ({
       label: String(label),
       ok: administrator || (permissions & (permission as bigint)) !== 0n
@@ -2554,10 +2859,10 @@ async function verificationDiscordState(
     else if (!verifiedRole) warnings.push("The configured verified role no longer exists.");
     else if (verifiedRole.managed) warnings.push("Discord-managed roles cannot be assigned by the bot.");
     else if (verifiedRole.position >= botHighestPosition) {
-      warnings.push("Move the Odyssey Bot role above the verified/community role.");
+      warnings.push("Move the CorePanel role above the verified/community role.");
     }
     if (!permissionChecks.every((check) => check.ok)) {
-      warnings.push("Odyssey Bot is missing one or more permissions required for verification setup.");
+      warnings.push("CorePanel is missing one or more permissions required for verification setup.");
     }
     if (
       settings.verificationChannelId
@@ -2566,6 +2871,18 @@ async function verificationDiscordState(
       )
     ) {
       warnings.push("The saved verification channel is missing or is not a text channel.");
+    }
+    if (
+      settings.logChannelId
+      && !channels.some((channel) =>
+        channel.id === settings.logChannelId
+        && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type as ChannelType)
+      )
+    ) {
+      warnings.push("The saved verification log channel is missing or is not a text channel.");
+    }
+    if (settings.autoKickUnverified && !permissionChecks.some((check) => check.label === "Kick Members" && check.ok)) {
+      warnings.push("Auto-kick is enabled, but CorePanel is missing Kick Members.");
     }
     return {
       available: true,
@@ -2664,16 +2981,69 @@ async function validateVerificationReferences(
   }
 }
 
+async function listPendingVerificationUsers(
+  guildId: string,
+  settings: Awaited<ReturnType<typeof getVerificationSettings>>,
+  records: VerificationRecord[]
+): Promise<VerificationPendingUser[]> {
+  if (!settings.enabled || !settings.verifiedRoleId) return [];
+  const [membersValue, rolesValue, guildSettings] = await Promise.all([
+    rest.get(Routes.guildMembers(guildId), {
+      query: new URLSearchParams({ limit: "1000" })
+    }) as Promise<VerificationDiscordMember[]>,
+    rest.get(Routes.guildRoles(guildId)) as Promise<VerificationDiscordRole[]>,
+    getGuildSettings(guildId)
+  ]);
+  const roles = new Map(rolesValue.map((role) => [role.id, role]));
+  const trustedRoleIds = new Set([...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds]);
+  const finalRecordStatuses = new Map<string, VerificationRecord["status"]>();
+  for (const record of records) {
+    if (!finalRecordStatuses.has(record.userId)) finalRecordStatuses.set(record.userId, record.status);
+  }
+  return membersValue
+    .filter((member) => {
+      if (!member.user?.id || member.user.bot) return false;
+      if (member.roles.includes(settings.verifiedRoleId!)) return false;
+      if (member.roles.some((roleId) => trustedRoleIds.has(roleId))) return false;
+      const latestStatus = finalRecordStatuses.get(member.user.id);
+      if (latestStatus && ["passed", "denied", "failed"].includes(latestStatus)) return false;
+      const permissions = member.roles.reduce((bits, roleId) => bits | BigInt(roles.get(roleId)?.permissions ?? "0"), 0n);
+      if ((permissions & PermissionFlagsBits.Administrator) !== 0n) return false;
+      if ((permissions & PermissionFlagsBits.ManageGuild) !== 0n) return false;
+      return true;
+    })
+    .map((member) => {
+      const joinedMs = member.joined_at ? new Date(member.joined_at).getTime() : NaN;
+      return {
+        userId: member.user!.id,
+        username: member.user?.username ?? member.user!.id,
+        displayName: discordUserLabel(member),
+        joinedAt: member.joined_at ? new Date(member.joined_at).toISOString() : null,
+        pendingHours: Number.isFinite(joinedMs) ? Math.max(0, (Date.now() - joinedMs) / 3_600_000) : 0,
+        status: "pending" as const
+      };
+    })
+    .sort((a, b) => b.pendingHours - a.pendingHours);
+}
+
 router.get("/verification", async (_req, res) => {
   const [settings, records] = await Promise.all([
     getVerificationSettings(res.locals.guildId),
     listVerificationRecords(res.locals.guildId)
   ]);
   const readiness = await verificationDiscordState(res.locals.guildId, settings);
+  let pendingUsers: VerificationPendingUser[] = [];
+  let pendingUsersError: string | null = null;
+  try {
+    pendingUsers = await listPendingVerificationUsers(res.locals.guildId, settings, records);
+  } catch (error) {
+    logDiscordError("Verification pending user list failed", error);
+    pendingUsersError = "Pending users could not be loaded from Discord right now. Settings and existing records are still available.";
+  }
   let stableUrl: string | null = null;
-  if (config.VERIFY_PUBLIC_BASE_URL) {
+  if (runtimeConfig.verifyPublicBaseUrl) {
     try {
-      stableUrl = buildStableVerificationUrl(config.VERIFY_PUBLIC_BASE_URL, res.locals.guildId);
+      stableUrl = buildStableVerificationUrl(runtimeConfig.verifyPublicBaseUrl, res.locals.guildId);
     } catch {
       stableUrl = null;
     }
@@ -2681,22 +3051,30 @@ router.get("/verification", async (_req, res) => {
   res.json({
     settings,
     records,
+    pendingUsers,
+    pendingUsersError,
     readiness,
     stableUrl,
-    oauthConfigured: Boolean(config.DISCORD_CLIENT_SECRET),
-    oauthRedirectConfigured: Boolean(config.DISCORD_OAUTH_REDIRECT_URI),
+    oauthConfigured: Boolean(runtimeConfig.discordClientSecret),
+    oauthRedirectConfigured: Boolean(runtimeConfig.discordOauthRedirectUri),
+    oauthRedirectExpected: expectedVerificationRedirectUri(),
+    oauthRedirectMatchesPublicUrl: Boolean(
+      runtimeConfig.discordOauthRedirectUri
+      && expectedVerificationRedirectUri()
+      && runtimeConfig.discordOauthRedirectUri === expectedVerificationRedirectUri()
+    ),
     vpnProviderConfigured: Boolean(config.VPN_CHECK_URL_TEMPLATE && config.VPN_CHECK_API_KEY),
-    verifyPublicUrlConfigured: Boolean(config.VERIFY_PUBLIC_BASE_URL),
-    publicUrlConfigured: Boolean(config.PUBLIC_BASE_URL),
+    verifyPublicUrlConfigured: Boolean(runtimeConfig.verifyPublicBaseUrl),
+    publicUrlConfigured: Boolean(runtimeConfig.publicBaseUrl),
     trustProxyEnabled: config.TRUST_PROXY === "true"
   });
 });
 
 router.put("/verification", async (req, res) => {
   const input = verificationSettingsSchema.parse(req.body);
-  if (input.enabled && (!config.DISCORD_CLIENT_SECRET || !config.VERIFY_PUBLIC_BASE_URL)) {
+  if (input.enabled && (!runtimeConfig.discordClientSecret || !runtimeConfig.discordOauthRedirectUri || !runtimeConfig.verifyPublicBaseUrl)) {
     throw publicRequestError(
-      "Add DISCORD_CLIENT_SECRET, DISCORD_OAUTH_REDIRECT_URI, and VERIFY_PUBLIC_BASE_URL before enabling verification.",
+      "Add the Discord client secret, OAuth redirect URI, and public verification URL before enabling verification.",
       400,
       { enabled: "Discord OAuth or the public verification hostname is not configured." }
     );
@@ -2716,10 +3094,15 @@ router.put("/verification", async (req, res) => {
     ...input,
     updatedBy: "dashboard"
   });
+  const logTitle = !current.enabled && saved.enabled
+    ? "Verification enabled"
+    : current.enabled && !saved.enabled
+      ? "Verification disabled"
+      : "Verification setup updated";
   await sendVerificationEventLog(
     rest,
     saved,
-    saved.enabled ? "Verification settings updated" : "Verification disabled",
+    logTitle,
     "Verification configuration was changed from the protected dashboard."
   );
   if (saved.enabled && saved.applyPermissionsImmediately) {
@@ -2727,10 +3110,10 @@ router.put("/verification", async (req, res) => {
     const setup = await runVerificationSetup({
       rest,
       guildId: res.locals.guildId,
-      botUserId: config.DISCORD_CLIENT_ID,
+      botUserId: requireDiscordClientId(),
       settings: saved,
       trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
-      publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL!,
+      publicBaseUrl: runtimeConfig.verifyPublicBaseUrl!,
       updatedBy: "dashboard"
     });
     res.json({ settings: await getVerificationSettings(res.locals.guildId), setup });
@@ -2742,13 +3125,13 @@ router.put("/verification", async (req, res) => {
 router.post("/verification/link", async (req, res) => {
   const settings = await getVerificationSettings(res.locals.guildId);
   if (!settings.enabled) throw publicRequestError("Enable verification before creating a link.");
-  if (!config.DISCORD_CLIENT_SECRET || !config.VERIFY_PUBLIC_BASE_URL) {
-    throw publicRequestError("Discord OAuth or VERIFY_PUBLIC_BASE_URL is not configured.", 503);
+  if (!runtimeConfig.discordClientSecret || !runtimeConfig.verifyPublicBaseUrl) {
+    throw publicRequestError("Discord OAuth or the public verification URL is not configured.", 503);
   }
   const token = crypto.randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + 24 * 3_600_000).toISOString();
   await createVerificationLink(res.locals.guildId, hashVerificationToken(token), expiresAt);
-  const baseUrl = config.VERIFY_PUBLIC_BASE_URL.replace(/\/$/, "");
+  const baseUrl = runtimeConfig.verifyPublicBaseUrl.replace(/\/$/, "");
   await sendVerificationEventLog(
     rest,
     settings,
@@ -2770,30 +3153,113 @@ router.post("/verification/records/:id/review", async (req, res, next) => {
       note: z.string().max(1000).default("")
     }).parse(req.body);
     const settings = await getVerificationSettings(res.locals.guildId);
+    let finalStatus: VerificationRecord["status"] = input.decision === "approve" ? "passed" : "denied";
+    let warning = "";
+    const existing = (await listVerificationRecords(res.locals.guildId, 250))
+      .find((record) => record.id === recordId);
+    if (!existing) return res.status(404).json({ error: "Verification record not found." });
+    if (input.decision === "approve") {
+      if (!settings.verifiedRoleId) {
+        throw publicRequestError(
+          "Choose a verified/community role before approving users.",
+          400,
+          { verifiedRoleId: "Choose the role members should receive after verification." }
+        );
+      }
+      const assignment = await assignVerifiedRole({ rest, settings, userId: existing.userId });
+      if (!assignment.assigned) {
+        finalStatus = "failed";
+        warning = assignment.reason ?? "Record approved, but the verified role could not be assigned.";
+      }
+    }
     const reviewed = await updateVerificationRecordReview({
       guildId: res.locals.guildId,
       recordId,
-      status: input.decision === "approve" ? "passed" : "denied",
+      status: finalStatus,
       reviewedBy: "dashboard",
       staffNote: input.note
     });
     if (!reviewed) return res.status(404).json({ error: "Verification record not found." });
-    if (input.decision === "approve" && settings.verifiedRoleId) {
-      const assignment = await assignVerifiedRole({ rest, settings, userId: reviewed.userId });
-      if (!assignment.assigned) {
-        return res.status(207).json({
-          record: reviewed,
-          warning: assignment.reason ?? "Record approved, but the verified role could not be assigned."
-        });
-      }
-    }
     await sendVerificationEventLog(
       rest,
       settings,
-      input.decision === "approve" ? "Verification manually approved" : "Verification manually denied",
+      finalStatus === "failed"
+        ? "Verification manual approval failed"
+        : input.decision === "approve" ? "Verification manually approved" : "Verification manually denied",
       `<@${reviewed.userId}> was ${input.decision === "approve" ? "approved" : "denied"} from the dashboard.`
     );
-    return res.json({ record: reviewed });
+    return res.status(warning ? 207 : 200).json({ record: reviewed, warning: warning || undefined });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/verification/manual-review", async (req, res, next) => {
+  try {
+    const input = z.object({
+      userId: z.string().regex(/^\d{17,20}$/, "Enter a valid Discord user ID."),
+      decision: z.enum(["approve", "deny"]),
+      note: z.string().max(1000).default("")
+    }).parse(req.body);
+    const settings = await getVerificationSettings(res.locals.guildId);
+    const member = await getVerificationMember(res.locals.guildId, input.userId);
+    if (!member && input.decision === "approve") {
+      throw publicRequestError(
+        "That user is no longer in this Discord server, so they cannot be approved.",
+        404
+      );
+    }
+    if (input.decision === "approve" && !settings.verifiedRoleId) {
+      throw publicRequestError(
+        "Choose a verified/community role before approving users.",
+        400,
+        { verifiedRoleId: "Choose the role members should receive after verification." }
+      );
+    }
+
+    let status: VerificationRecord["status"] = input.decision === "approve" ? "passed" : "denied";
+    const reasonCodes = input.decision === "approve" ? ["manual_approval"] : ["manual_denial"];
+    let warning = "";
+    if (input.decision === "approve") {
+      if (member && memberHasConfiguredRole(member, settings.verifiedRoleId)) {
+        reasonCodes.push("already_had_verified_role");
+      } else {
+        const assignment = await assignVerifiedRole({ rest, settings, userId: input.userId });
+        if (!assignment.assigned) {
+          status = "failed";
+          reasonCodes.push("role_assignment_failed");
+          warning = assignment.reason ?? "Manual approval was recorded, but the verified role could not be assigned.";
+        }
+      }
+    }
+
+    const created = await createVerificationRecord({
+      guildId: res.locals.guildId,
+      userId: input.userId,
+      status,
+      reasonCodes,
+      riskScore: status === "failed" ? 80 : 0,
+      accountCreatedAt: discordAccountCreatedAt(input.userId).toISOString(),
+      serverJoinedAt: member?.joined_at ? new Date(member.joined_at).toISOString() : null,
+      vpnDetected: null,
+      expiresAt: verificationRecordExpiry(settings),
+      reviewedBy: "dashboard",
+      reviewedAt: new Date().toISOString(),
+      staffNote: input.note
+    });
+    await sendVerificationEventLog(
+      rest,
+      settings,
+      status === "failed"
+        ? "Verification manual approval failed"
+        : input.decision === "approve" ? "Verification manually approved" : "Verification manually denied",
+      `<@${input.userId}> was ${input.decision === "approve" ? "approved" : "denied"} from the dashboard.`,
+      [
+        { name: "Reviewed by", value: "Dashboard admin", inline: true },
+        { name: "Note", value: input.note || "No note provided.", inline: false }
+      ]
+    );
+    res.status(warning ? 207 : 201).json({ record: created, warning: warning || undefined });
   } catch (error) {
     next(error);
   }
@@ -2801,17 +3267,17 @@ router.post("/verification/records/:id/review", async (req, res, next) => {
 
 router.post("/verification/dry-run", async (_req, res) => {
   const settings = await getVerificationSettings(res.locals.guildId);
-  if (!config.VERIFY_PUBLIC_BASE_URL) {
-    throw publicRequestError("Set VERIFY_PUBLIC_BASE_URL before previewing verification setup.", 503);
+  if (!runtimeConfig.verifyPublicBaseUrl) {
+    throw publicRequestError("Set the public verification URL before previewing verification setup.", 503);
   }
   const guildSettings = await getGuildSettings(res.locals.guildId);
   const result = await runVerificationSetup({
     rest,
     guildId: res.locals.guildId,
-    botUserId: config.DISCORD_CLIENT_ID,
+    botUserId: requireDiscordClientId(),
     settings,
     trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
-    publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+    publicBaseUrl: runtimeConfig.verifyPublicBaseUrl,
     dryRun: true,
     updatedBy: "dashboard"
   });
@@ -2820,17 +3286,17 @@ router.post("/verification/dry-run", async (_req, res) => {
 
 router.post("/verification/setup", async (_req, res) => {
   const settings = await getVerificationSettings(res.locals.guildId);
-  if (!config.VERIFY_PUBLIC_BASE_URL) {
-    throw publicRequestError("Set VERIFY_PUBLIC_BASE_URL before applying verification setup.", 503);
+  if (!runtimeConfig.verifyPublicBaseUrl) {
+    throw publicRequestError("Set the public verification URL before applying verification setup.", 503);
   }
   const guildSettings = await getGuildSettings(res.locals.guildId);
   const result = await runVerificationSetup({
     rest,
     guildId: res.locals.guildId,
-    botUserId: config.DISCORD_CLIENT_ID,
+    botUserId: requireDiscordClientId(),
     settings,
     trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
-    publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+    publicBaseUrl: runtimeConfig.verifyPublicBaseUrl,
     updatedBy: "dashboard"
   });
   res.json(result);
@@ -2838,22 +3304,30 @@ router.post("/verification/setup", async (_req, res) => {
 
 router.post("/verification/repost", async (_req, res) => {
   const settings = await getVerificationSettings(res.locals.guildId);
-  if (!config.VERIFY_PUBLIC_BASE_URL) {
-    throw publicRequestError("Set VERIFY_PUBLIC_BASE_URL before posting the verification embed.", 503);
+  if (!runtimeConfig.verifyPublicBaseUrl) {
+    throw publicRequestError("Set the public verification URL before posting the verification embed.", 503);
   }
   const guildSettings = await getGuildSettings(res.locals.guildId);
   const result = await runVerificationSetup({
     rest,
     guildId: res.locals.guildId,
-    botUserId: config.DISCORD_CLIENT_ID,
+    botUserId: requireDiscordClientId(),
     settings,
     trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
-    publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+    publicBaseUrl: runtimeConfig.verifyPublicBaseUrl,
     applyPermissions: false,
     postEmbed: true,
     forceEmbedUpdate: true,
     updatedBy: "dashboard"
   });
+  await sendVerificationEventLog(
+    rest,
+    settings,
+    result.embedPosted ? "Verification embed posted" : "Verification embed updated",
+    result.verificationChannelId
+      ? `The verification message was ${result.embedPosted ? "posted" : "updated"} in <#${result.verificationChannelId}>.`
+      : "The verification message update completed."
+  );
   res.json(result);
 });
 
@@ -2890,7 +3364,16 @@ const rolePanelOptionSchema = z.object({
   description: z.string().max(100).default(""),
   emoji: z.string().max(100).default(""),
   category: z.string().trim().max(80).default("General").transform((value) => value || "General"),
-  requiredRoleId: optionalId
+  requiredRoleId: optionalId,
+  buttonStyle: z.enum(["", "primary", "secondary", "success", "danger"]).default("")
+});
+
+const rolePanelCategoryRuleSchema = z.object({
+  name: z.string().trim().max(80).default("General").transform((value) => value || "General"),
+  title: z.string().trim().max(100).default(""),
+  description: z.string().trim().max(200).default(""),
+  maxSelected: z.coerce.number().int().min(0).max(25).default(0),
+  removeRoleOnSelect: z.boolean().default(false)
 });
 
 const rolePanelSchema = z.object({
@@ -2900,12 +3383,17 @@ const rolePanelSchema = z.object({
   title: z.string().min(1).max(256),
   description: z.string().max(4000).default(""),
   color,
+  imageUrl: urlOrEmpty,
+  thumbnailUrl: urlOrEmpty,
   active: z.boolean().default(true),
+  buttonStyle: z.enum(["primary", "secondary", "success", "danger"]).default("secondary"),
+  toggleMode: z.enum(["toggle", "add_only"]).default("toggle"),
   maxSelectedPerCategory: z.coerce.number().int().min(0).max(25).default(0),
   removeRoleOnSelect: z.boolean().default(false),
   requiredRoleId: optionalId,
   messageId: optionalId,
   logChannelId: optionalId,
+  categoryRules: z.array(rolePanelCategoryRuleSchema).max(25).default([]),
   options: z.array(rolePanelOptionSchema).max(25).default([]),
   roleIds: idArray.default([])
 }).transform((value) => {
@@ -2917,11 +3405,14 @@ const rolePanelSchema = z.object({
       description: "",
       emoji: "",
       category: "General",
-      requiredRoleId: null
+      requiredRoleId: null,
+      buttonStyle: "" as const
     }));
+  const categories = new Set(options.map((option) => option.category || "General"));
   return {
     ...value,
     options,
+    categoryRules: value.categoryRules.filter((rule) => categories.has(rule.name)),
     roleIds: options.map((option) => option.roleId)
   };
 }).superRefine((value, context) => {
@@ -2942,7 +3433,7 @@ async function getRolePanelSafetyIssue(guildId: string, roleIds: string[]): Prom
       permissions: string;
       position: number;
     }>>,
-    rest.get(Routes.guildMember(guildId, config.DISCORD_CLIENT_ID)) as Promise<{
+    rest.get(Routes.guildMember(guildId, requireDiscordClientId())) as Promise<{
       roles: string[];
     }>
   ]);
@@ -2976,6 +3467,39 @@ async function getRolePanelSafetyIssue(guildId: string, roleIds: string[]): Prom
   return null;
 }
 
+function rolePanelButtonStyleNumber(style: string | null | undefined): number {
+  if (style === "primary") return 1;
+  if (style === "success") return 3;
+  if (style === "danger") return 4;
+  return 2;
+}
+
+function rolePanelRuleFor(panel: { categoryRules?: Array<{ name: string; maxSelected: number; removeRoleOnSelect: boolean }> }, category: string) {
+  return panel.categoryRules?.find((rule) => rule.name === category);
+}
+
+async function sendRolePanelLifecycleLog(
+  guildId: string,
+  panel: Awaited<ReturnType<typeof getRolePanel>> | Awaited<ReturnType<typeof createRolePanel>>,
+  title: string,
+  description: string,
+  colorValue = 0x57f287
+): Promise<void> {
+  if (!panel) return;
+  const settings = await getGuildSettings(guildId);
+  const channelId = panel.logChannelId ?? settings.modLogChannelId;
+  if (!channelId) return;
+  await sendDiscordMessage(guildId, channelId, {
+    embeds: [{
+      title,
+      description,
+      color: colorValue,
+      timestamp: new Date().toISOString(),
+      footer: { text: `Role panel ${panel.id} • ${panel.name}` }
+    }]
+  }, [], "Could not send the role panel log.").catch(() => null);
+}
+
 router.get("/role-panels", async (_req, res) => {
   res.json(await listRolePanels(res.locals.guildId));
 });
@@ -2984,7 +3508,14 @@ router.post("/role-panels", async (req, res) => {
   const input = rolePanelSchema.parse(req.body);
   const safetyIssue = await getRolePanelSafetyIssue(res.locals.guildId, input.roleIds);
   if (safetyIssue) return res.status(400).json({ error: safetyIssue, fields: { roleIds: safetyIssue } });
-  res.status(201).json(await createRolePanel({ guildId: res.locals.guildId, ...input }));
+  const panel = await createRolePanel({ guildId: res.locals.guildId, ...input });
+  await sendRolePanelLifecycleLog(
+    res.locals.guildId,
+    panel,
+    "Role Panel Created",
+    `**${panel.name}** was created with ${panel.options.length} role option(s).`
+  );
+  res.status(201).json(panel);
 });
 
 router.put("/role-panels/:id", async (req, res) => {
@@ -2994,15 +3525,32 @@ router.put("/role-panels/:id", async (req, res) => {
   const safetyIssue = await getRolePanelSafetyIssue(res.locals.guildId, input.roleIds);
   if (safetyIssue) return res.status(400).json({ error: safetyIssue, fields: { roleIds: safetyIssue } });
   const result = await updateRolePanel(id, res.locals.guildId, input);
+  if (result) {
+    await sendRolePanelLifecycleLog(
+      res.locals.guildId,
+      result,
+      "Role Panel Updated",
+      `**${result.name}** was updated. It now has ${result.options.length} role option(s).`
+    );
+  }
   return result ? res.json(result) : res.status(404).json({ error: "Role panel not found." });
 });
 
 router.delete("/role-panels/:id", async (req, res) => {
   const id = parseId(req.params.id);
   if (!id) return res.status(400).json({ error: "Invalid ID." });
-  return (await deleteRolePanel(id, res.locals.guildId))
-    ? res.status(204).end()
-    : res.status(404).json({ error: "Role panel not found." });
+  const existing = await getRolePanel(id, res.locals.guildId);
+  if (!(await deleteRolePanel(id, res.locals.guildId))) {
+    return res.status(404).json({ error: "Role panel not found." });
+  }
+  await sendRolePanelLifecycleLog(
+    res.locals.guildId,
+    existing,
+    "Role Panel Deleted",
+    existing ? `**${existing.name}** was deleted from the dashboard.` : "A role panel was deleted.",
+    0xed4245
+  );
+  return res.status(204).end();
 });
 
 router.post("/role-panels/:id/post", async (req, res, next) => {
@@ -3020,7 +3568,10 @@ router.post("/role-panels/:id/post", async (req, res, next) => {
     if (!selected.length) return res.status(400).json({ error: "None of this panel's roles still exist." });
     const components = [];
     if (panel.layout === "dropdown") {
-      const maxValues = Math.max(1, Math.min(25, panel.maxSelectedPerCategory || selected.length));
+      const categoryLimits = selected
+        .map((option) => rolePanelRuleFor(panel, option.category || "General")?.maxSelected || panel.maxSelectedPerCategory)
+        .filter((value) => value > 0);
+      const maxValues = Math.max(1, Math.min(25, selected.length, categoryLimits.length ? Math.max(...categoryLimits) : selected.length));
       components.push({
         type: 1,
         components: [{
@@ -3055,7 +3606,7 @@ router.post("/role-panels/:id/post", async (req, res, next) => {
             const role = roleMap.get(option.roleId)!;
             const output: Record<string, unknown> = {
               type: 2,
-              style: 2,
+              style: rolePanelButtonStyleNumber(option.buttonStyle || panel.buttonStyle),
               custom_id: `role-panel:toggle:${panel.id}:${role.id}`,
               label: (option.label || role.name).slice(0, 80)
             };
@@ -3071,15 +3622,28 @@ router.post("/role-panels/:id/post", async (req, res, next) => {
         });
       }
     }
-    await sendDiscordMessage(res.locals.guildId, channelId, {
-      embeds: [{
+    const embed: Record<string, unknown> = {
         title: panel.title,
         description: panel.description || "Choose a role below.",
         color: Number.parseInt(panel.color.slice(1), 16)
-      }],
+    };
+    if (panel.thumbnailUrl) embed.thumbnail = { url: panel.thumbnailUrl };
+    if (panel.imageUrl) embed.image = { url: panel.imageUrl };
+    const sent = await sendDiscordMessage(res.locals.guildId, channelId, {
+      embeds: [embed],
       components
-    });
-    return res.json({ ok: true });
+    }, [], "Could not publish the role panel.") as { id?: string } | null;
+    if (sent?.id) {
+      const { id: _id, guildId: _guildId, createdAt: _createdAt, updatedAt: _updatedAt, ...updateInput } = panel;
+      await updateRolePanel(panel.id, res.locals.guildId, { ...updateInput, channelId, messageId: sent.id });
+    }
+    await sendRolePanelLifecycleLog(
+      res.locals.guildId,
+      { ...panel, channelId, messageId: sent?.id ?? panel.messageId },
+      "Role Panel Published",
+      `**${panel.name}** was published in <#${channelId}> with ${selected.length} role option(s).`
+    );
+    return res.json({ ok: true, messageId: sent?.id ?? null });
   } catch (error) {
     next(error);
   }
@@ -3216,57 +3780,150 @@ router.post("/scheduled-announcements/:id/test", async (req, res, next) => {
   }
 });
 
+const datetimeOrNull = z.union([z.string().datetime(), z.literal(""), z.null(), z.undefined()])
+  .transform((value) => value || null);
+
+function validComponentEmoji(value: string): boolean {
+  if (!value.trim()) return true;
+  try {
+    parseDiscordComponentEmoji(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const giveawaySchema = z.object({
   channelId: z.string().regex(/^\d+$/, "Choose a channel."),
   prize: z.string().trim().min(1).max(200),
   description: z.string().max(1000).default(""),
   winnersCount: z.coerce.number().int().min(1).max(20).default(1),
+  startsAt: datetimeOrNull,
   endsAt: z.string().datetime(),
+  hostUserId: optionalId,
   requiredRoleId: optionalId,
   boosterBonusEntries: z.coerce.number().int().min(0).max(20).default(0),
   bonusRoleId: optionalId,
   bonusRoleEntries: z.coerce.number().int().min(0).max(20).default(0),
-  status: z.enum(["draft", "active"]).default("draft")
+  winnerRoleId: optionalId,
+  winnerDmMessage: z.string().max(1000).default(""),
+  createMessage: z.string().max(2000).default(""),
+  imageUrl: urlOrEmpty,
+  thumbnailUrl: urlOrEmpty,
+  buttonText: z.string().trim().min(1).max(80).default("Enter Giveaway"),
+  status: z.enum(["draft", "scheduled"]).default("draft")
 }).superRefine((value, context) => {
   if (new Date(value.endsAt).getTime() <= Date.now()) {
     context.addIssue({ code: "custom", path: ["endsAt"], message: "Choose a future end date." });
+  }
+  if (value.status === "scheduled" && !value.startsAt) {
+    context.addIssue({ code: "custom", path: ["startsAt"], message: "Choose when the giveaway should start, or save it as a draft." });
+  }
+  if (value.startsAt && new Date(value.startsAt).getTime() <= Date.now()) {
+    context.addIssue({ code: "custom", path: ["startsAt"], message: "Scheduled giveaways need a future start time." });
+  }
+  if (value.startsAt && new Date(value.endsAt).getTime() <= new Date(value.startsAt).getTime()) {
+    context.addIssue({ code: "custom", path: ["endsAt"], message: "The end time must be after the scheduled start time." });
   }
   if (value.bonusRoleEntries > 0 && !value.bonusRoleId) {
     context.addIssue({ code: "custom", path: ["bonusRoleId"], message: "Choose the role that receives bonus entries." });
   }
 });
 
-function giveawayPayload(giveaway: {
-  id: number;
-  prize: string;
-  description: string;
-  winnersCount: number;
-  endsAt: string;
-  requiredRoleId: string | null;
-}, entries = 0, ended = false) {
+const pollOptionSchema = z.object({
+  label: z.string().trim().min(1).max(100),
+  description: z.string().trim().max(100).default(""),
+  emoji: z.string().trim().max(80).default("").refine(validComponentEmoji, {
+    message: "Use one Unicode emoji or a Discord custom emoji such as <:vote:123456789012345678>."
+  })
+});
+
+function pollOptionsFrom(values: Array<z.infer<typeof pollOptionSchema>>): PollOption[] {
+  return values.map((option, index) => ({
+    id: String(index + 1),
+    label: option.label.trim(),
+    text: option.label.trim(),
+    description: option.description.trim(),
+    emoji: option.emoji.trim()
+  }));
+}
+
+const pollSchema = z.object({
+  channelId: z.string().regex(/^\d+$/, "Choose a channel."),
+  title: z.string().trim().max(120).default(""),
+  question: z.string().trim().min(1).max(256),
+  options: z.array(pollOptionSchema).min(2).max(10),
+  startsAt: datetimeOrNull,
+  endsAt: datetimeOrNull,
+  anonymous: z.boolean().default(false),
+  multipleChoice: z.boolean().default(false),
+  requiredRoleId: optionalId,
+  showLiveResults: z.boolean().default(true),
+  resultsVisibility: z.enum(["public", "after_close", "hidden"]).default("public"),
+  status: z.enum(["draft", "scheduled"]).default("draft")
+}).superRefine((value, context) => {
+  if (new Set(value.options.map((option) => option.label.toLowerCase())).size !== value.options.length) {
+    context.addIssue({ code: "custom", path: ["options"], message: "Poll options must be unique." });
+  }
+  if (value.status === "scheduled" && !value.startsAt) {
+    context.addIssue({ code: "custom", path: ["startsAt"], message: "Choose when the poll should start, or save it as a draft." });
+  }
+  if (value.startsAt && new Date(value.startsAt).getTime() <= Date.now()) {
+    context.addIssue({ code: "custom", path: ["startsAt"], message: "Scheduled polls need a future start time." });
+  }
+  if (value.endsAt && new Date(value.endsAt).getTime() <= Date.now()) {
+    context.addIssue({ code: "custom", path: ["endsAt"], message: "Choose a future end date, or leave it blank for a manual-close poll." });
+  }
+  if (value.startsAt && value.endsAt && new Date(value.endsAt).getTime() <= new Date(value.startsAt).getTime()) {
+    context.addIssue({ code: "custom", path: ["endsAt"], message: "The poll end time must be after the scheduled start time." });
+  }
+});
+
+function httpUrl(value: string): boolean {
+  return /^https?:\/\/\S+$/i.test(value);
+}
+
+function giveawayPayload(giveaway: Giveaway, entries = 0, ended = false) {
   const endsAt = Math.floor(new Date(giveaway.endsAt).getTime() / 1000);
+  const startsAt = giveaway.startsAt ? Math.floor(new Date(giveaway.startsAt).getTime() / 1000) : null;
+  const embed: Record<string, unknown> = {
+    color: ended ? 0x879C68 : 0xC58B4B,
+    title: ended ? `Giveaway ended: ${giveaway.prize}` : `Giveaway: ${giveaway.prize}`,
+    description: [
+      giveaway.description || "Click the button below to enter.",
+      "",
+      `**Prize:** ${giveaway.prize}`,
+      `**Winners:** ${giveaway.winnersCount}`,
+      startsAt && giveaway.status === "scheduled" ? `**Starts:** <t:${startsAt}:R>` : "",
+      ended ? `**Ended:** <t:${endsAt}:R>` : `**Ends:** <t:${endsAt}:R>`,
+      giveaway.hostUserId ? `**Host:** <@${giveaway.hostUserId}>` : "",
+      giveaway.requiredRoleId ? `**Required role:** <@&${giveaway.requiredRoleId}>` : "",
+      giveaway.boosterBonusEntries ? `**Booster bonus:** +${giveaway.boosterBonusEntries} entries` : "",
+      giveaway.bonusRoleId && giveaway.bonusRoleEntries ? `**Bonus role:** <@&${giveaway.bonusRoleId}> (+${giveaway.bonusRoleEntries})` : "",
+      giveaway.winnerRoleId ? `**Winner role:** <@&${giveaway.winnerRoleId}>` : "",
+      entries ? `**Entries:** ${entries}` : "",
+      giveaway.winnerUserIds.length ? `**Winner(s):** ${giveaway.winnerUserIds.map((winner) => `<@${winner}>`).join(", ")}` : ""
+    ].filter(Boolean).join("\n"),
+    fields: [
+      { name: "Status", value: ended ? "Ended" : giveaway.status === "active" ? "Open" : giveaway.status, inline: true },
+      { name: "Access", value: giveaway.requiredRoleId ? `<@&${giveaway.requiredRoleId}>` : "Everyone", inline: true },
+      { name: "Entries", value: String(entries), inline: true }
+    ],
+    footer: { text: `Giveaway #${giveaway.id}` },
+    timestamp: new Date(giveaway.endsAt).toISOString()
+  };
+  if (httpUrl(giveaway.thumbnailUrl)) embed.thumbnail = { url: giveaway.thumbnailUrl };
+  if (httpUrl(giveaway.imageUrl)) embed.image = { url: giveaway.imageUrl };
   return {
-    embeds: [{
-      color: ended ? 0x879C68 : 0xC58B4B,
-      title: ended ? `Giveaway ended: ${giveaway.prize}` : `Giveaway: ${giveaway.prize}`,
-      description: [
-        giveaway.description || "Click Enter Giveaway below to join.",
-        "",
-        `**Winners:** ${giveaway.winnersCount}`,
-        ended ? `**Ended:** <t:${endsAt}:R>` : `**Ends:** <t:${endsAt}:R>`,
-        giveaway.requiredRoleId ? `**Required role:** <@&${giveaway.requiredRoleId}>` : "",
-        entries ? `**Entries:** ${entries}` : ""
-      ].filter(Boolean).join("\n"),
-      footer: { text: `Giveaway #${giveaway.id}` },
-      timestamp: new Date(giveaway.endsAt).toISOString()
-    }],
+    content: giveaway.createMessage || undefined,
+    embeds: [embed],
     components: [{
       type: 1,
       components: [{
         type: 2,
         style: ended ? 2 : 3,
         custom_id: `giveaway:enter:${giveaway.id}`,
-        label: ended ? "Giveaway Ended" : "Enter Giveaway",
+        label: ended ? "Giveaway Ended" : giveaway.buttonText,
         disabled: ended
       }]
     }],
@@ -3274,9 +3931,58 @@ function giveawayPayload(giveaway: {
   };
 }
 
+function pollPayload(poll: Poll, votes: PollVote[] = [], closed = false) {
+  const disabled = closed || poll.status === "ended" || poll.status === "cancelled";
+  const buttons = poll.options.slice(0, 10).map((option, index) => {
+    const button: Record<string, unknown> = {
+      type: 2,
+      style: 2,
+      custom_id: `poll:vote:${poll.id}:${option.id}`,
+      label: String(index + 1),
+      disabled
+    };
+    if (option.emoji) {
+      try {
+        button.emoji = parseDiscordComponentEmoji(option.emoji);
+      } catch {
+        // Invalid stored emoji should not block the whole poll from rendering.
+      }
+    }
+    return button;
+  });
+  return {
+    embeds: [{
+      color: poll.status === "cancelled" ? POLL_CLOSED_COLOR : POLL_OPEN_COLOR,
+      title: pollDisplayTitle(poll, closed),
+      description: pollPublicDescription(poll, votes, closed),
+      footer: { text: `Poll #${poll.id}` },
+      timestamp: disabled ? new Date().toISOString() : poll.endsAt ?? new Date().toISOString()
+    }],
+    components: Array.from({ length: Math.ceil(buttons.length / 5) }, (_value, index) => ({
+      type: 1,
+      components: buttons.slice(index * 5, index * 5 + 5)
+    })),
+    allowed_mentions: { parse: [] }
+  };
+}
+
+function renderWinnerDm(template: string, giveaway: Giveaway, userId: string, guildName = "your server"): string {
+  return template
+    .replaceAll("{user}", `<@${userId}>`)
+    .replaceAll("{user_id}", userId)
+    .replaceAll("{server}", guildName)
+    .replaceAll("{serverName}", guildName)
+    .replaceAll("{server_name}", guildName)
+    .replaceAll("{prize}", giveaway.prize)
+    .replaceAll("{giveaway_id}", String(giveaway.id));
+}
+
 async function finishGiveawayFromDashboard(guildId: string, id: number, reroll = false) {
   const giveaway = await getGiveaway(id, guildId);
   if (!giveaway) throw publicRequestError("Giveaway not found.", 404);
+  const dmSettings = await getDmSettings(guildId);
+  const guild = await rest.get(Routes.guild(guildId)).catch(() => null) as { name?: string } | null;
+  const guildName = guild?.name || "your server";
   const entries = await listGiveawayEntries(id, guildId);
   const weighted = entries.flatMap((entry) => Array.from({ length: Math.max(1, entry.entries) }, () => entry.userId));
   const winners: string[] = [];
@@ -3289,6 +3995,29 @@ async function finishGiveawayFromDashboard(guildId: string, id: number, reroll =
   }
   const ended = await updateGiveaway(id, guildId, { status: "ended", winnerUserIds: winners });
   if (!ended) throw publicRequestError("Giveaway not found.", 404);
+  for (const winner of winners) {
+    if (giveaway.winnerRoleId) {
+      await rest.put(Routes.guildMemberRole(guildId, winner, giveaway.winnerRoleId), {
+        reason: `Won giveaway #${giveaway.id}`
+      }).catch((error) => logDiscordError("Could not give giveaway winner role", error));
+    }
+    if (dmSettings.giveawayWinnerDmEnabled) {
+      const dmMessage = giveaway.winnerDmMessage.trim() || dmSettings.giveawayDefaultWinnerDmMessage;
+      const dmChannel = await rest.post(Routes.userChannels(), { body: { recipient_id: winner } })
+        .catch((error) => {
+          logDiscordError("Could not open giveaway winner DM", error);
+          return null;
+        }) as { id?: string } | null;
+      if (dmChannel?.id) {
+        await rest.post(Routes.channelMessages(dmChannel.id), {
+          body: {
+            content: renderWinnerDm(dmMessage, giveaway, winner, guildName),
+            allowed_mentions: { parse: [] }
+          }
+        }).catch((error) => logDiscordError("Could not send giveaway winner DM", error));
+      }
+    }
+  }
   if (giveaway.messageId) {
     await rest.patch(Routes.channelMessage(giveaway.channelId, giveaway.messageId), {
       body: giveawayPayload(ended, entries.length, true)
@@ -3328,15 +4057,24 @@ router.post("/giveaways/:id/start", async (req, res, next) => {
     if (!id) return res.status(400).json({ error: "Invalid ID." });
     const giveaway = await getGiveaway(id, res.locals.guildId);
     if (!giveaway) return res.status(404).json({ error: "Giveaway not found." });
-    if (giveaway.status !== "draft") return res.status(400).json({ error: "Only draft giveaways can be started." });
+    if (!["draft", "scheduled"].includes(giveaway.status)) return res.status(400).json({ error: "Only draft or scheduled giveaways can be started." });
+    const publishedGiveaway = {
+      ...giveaway,
+      status: "active" as const,
+      startsAt: giveaway.startsAt ?? new Date().toISOString()
+    };
     const sent = await sendDiscordMessage(
       res.locals.guildId,
       giveaway.channelId,
-      giveawayPayload(giveaway),
+      giveawayPayload(publishedGiveaway),
       [],
       "Could not post the giveaway."
     ) as { id?: string };
-    const updated = await updateGiveaway(id, res.locals.guildId, { status: "active", messageId: sent.id ?? null });
+    const updated = await updateGiveaway(id, res.locals.guildId, {
+      status: "active",
+      messageId: sent.id ?? null,
+      startsAt: publishedGiveaway.startsAt
+    });
     return res.json(updated);
   } catch (error) {
     next(error);
@@ -3375,6 +4113,120 @@ router.post("/giveaways/:id/cancel", async (req, res) => {
     }).catch((error) => logDiscordError("Could not update cancelled giveaway message", error));
   }
   res.json(updated);
+});
+
+function pollResultPayload(poll: Poll, votes: PollVote[]) {
+  return {
+    pollId: poll.id,
+    ...tallyPollVotes(poll, votes),
+    voters: poll.anonymous
+      ? []
+      : votes.map((vote) => ({ userId: vote.userId, optionIds: vote.optionIds, updatedAt: vote.updatedAt }))
+  };
+}
+
+async function finishPollFromDashboard(guildId: string, id: number, cancelled = false) {
+  const poll = await getPoll(id, guildId);
+  if (!poll) throw publicRequestError("Poll not found.", 404);
+  const votes = await listPollVotes(id, guildId);
+  const updated = await updatePoll(id, guildId, { status: cancelled ? "cancelled" : "ended" });
+  if (!updated) throw publicRequestError("Poll not found.", 404);
+  if (poll.messageId) {
+    await rest.patch(Routes.channelMessage(poll.channelId, poll.messageId), {
+      body: pollPayload(updated, votes, true)
+    }).catch((error) => logDiscordError("Could not update poll message", error));
+  }
+  return { poll: updated, results: pollResultPayload(updated, votes) };
+}
+
+router.get("/polls", async (_req, res) => {
+  const polls = await listPolls(res.locals.guildId);
+  const results = await Promise.all(polls.map(async (poll) => {
+    const votes = await listPollVotes(poll.id, res.locals.guildId);
+    return pollResultPayload(poll, votes);
+  }));
+  res.json({ polls, results });
+});
+
+router.post("/polls", async (req, res) => {
+  const input = pollSchema.parse(req.body);
+  const poll = await createPoll({
+    guildId: res.locals.guildId,
+    channelId: input.channelId,
+    title: input.title,
+    question: input.question,
+    options: pollOptionsFrom(input.options),
+    startsAt: input.startsAt,
+    endsAt: input.endsAt,
+    anonymous: input.anonymous,
+    multipleChoice: input.multipleChoice,
+    requiredRoleId: input.requiredRoleId,
+    showLiveResults: input.showLiveResults,
+    resultsVisibility: input.resultsVisibility,
+    status: input.status,
+    messageId: null,
+    createdBy: "dashboard"
+  });
+  res.status(201).json(poll);
+});
+
+router.post("/polls/:id/start", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    const poll = await getPoll(id, res.locals.guildId);
+    if (!poll) return res.status(404).json({ error: "Poll not found." });
+    if (!["draft", "scheduled"].includes(poll.status)) return res.status(400).json({ error: "Only draft or scheduled polls can be started." });
+    const publishedPoll = {
+      ...poll,
+      status: "active" as const,
+      startsAt: poll.startsAt ?? new Date().toISOString()
+    };
+    const sent = await sendDiscordMessage(
+      res.locals.guildId,
+      poll.channelId,
+      pollPayload(publishedPoll),
+      [],
+      "Could not post the poll."
+    ) as { id?: string };
+    const updated = await updatePoll(id, res.locals.guildId, {
+      status: "active",
+      messageId: sent.id ?? null,
+      startsAt: publishedPoll.startsAt
+    });
+    return res.json(updated);
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/polls/:id/end", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    res.json(await finishPollFromDashboard(res.locals.guildId, id));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/polls/:id/cancel", async (req, res, next) => {
+  try {
+    const id = parseId(req.params.id);
+    if (!id) return res.status(400).json({ error: "Invalid ID." });
+    res.json(await finishPollFromDashboard(res.locals.guildId, id, true));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get("/polls/:id/results", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) return res.status(400).json({ error: "Invalid ID." });
+  const poll = await getPoll(id, res.locals.guildId);
+  if (!poll) return res.status(404).json({ error: "Poll not found." });
+  const votes = await listPollVotes(id, res.locals.guildId);
+  res.json({ poll, results: pollResultPayload(poll, votes) });
 });
 
 router.get("/ticket-transcripts", async (_req, res) => {

@@ -6,6 +6,14 @@ const togglePassword = document.querySelector("#toggle-password");
 fetch("/api/session")
   .then((response) => response.json())
   .then((session) => {
+    if (session.dashboardName) {
+      document.title = `${session.dashboardName} Login`;
+      const heading = document.querySelector("h1");
+      const mark = document.querySelector(".brand-mark");
+      if (heading) heading.textContent = session.dashboardName;
+      if (mark) mark.textContent = session.dashboardName.slice(0, 1).toUpperCase();
+    }
+    if (session.setupRequired) window.location.replace(session.next || "/setup");
     if (session.authenticated) window.location.replace(session.next || "/servers");
   });
 

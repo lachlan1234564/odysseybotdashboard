@@ -1,6 +1,6 @@
 # Cloudflare Tunnel verification setup
 
-This guide explains how to run Odyssey Bot behind a Cloudflare Tunnel with separate public/private hostnames so the admin dashboard stays protected and the verification page is accessible to your members.
+This guide explains how to run CorePanel behind a Cloudflare Tunnel with separate public/private hostnames so the admin dashboard stays protected and the verification page is accessible to your members.
 
 ---
 
@@ -44,7 +44,7 @@ cloudflared tunnel login
 Create the tunnel:
 
 ```bash
-cloudflared tunnel create odyssey-bot
+cloudflared tunnel create corepanel-bot
 ```
 
 This outputs a tunnel UUID. Save it.
@@ -70,7 +70,7 @@ The verification hostname (`verify.YOUR_DOMAIN.com`) must remain **public** with
 
 1. Go to Cloudflare Zero Trust → Access → Applications.
 2. Click **Add an application** → **Self-hosted**.
-3. Application name: `Odyssey Bot Admin`
+3. Application name: `CorePanel Admin`
 4. Subdomain: `admin`
 5. Domain: `YOUR_DOMAIN.com`
 6. Under **Identity providers**, choose One-time PIN (simplest) or add Google/GitHub.
@@ -99,7 +99,7 @@ ingress:
 Start the tunnel:
 
 ```bash
-cloudflared tunnel run odyssey-bot
+cloudflared tunnel run corepanel-bot
 ```
 
 ---
@@ -165,10 +165,10 @@ These must match exactly. If they don't, Discord returns "Invalid OAuth2 redirec
 
 ## Verification flow
 
-1. Start Odyssey Bot and open the protected admin dashboard.
+1. Start CorePanel and open the protected admin dashboard.
 2. Select the Discord server.
 3. Open **Security → Verification**.
-4. Choose a verified/community role and make sure the Odyssey Bot role is above it.
+4. Choose a verified/community role and make sure the CorePanel role is above it.
 5. Choose public categories/channels that unverified users may see.
 6. Save the form.
 7. Run **Dry run / preview changes**.
@@ -220,7 +220,7 @@ For local dev without a tunnel (no OAuth testing), leave `DISCORD_CLIENT_SECRET`
 | Exposing dashboard publicly without Access | Anyone at `admin.DOMAIN.com` can brute-force the dashboard password | Always protect with Cloudflare Access |
 | Tunnel not running | Both sites return 502 | Keep `cloudflared tunnel run` running |
 | CSP blocks Cloudflare scripts | Dashboard layout broken | The CSP is set to `'self'` only; if you use Turnstile or Cloudflare widgets, you will need to allow their domains |
-| Bot role below verified role | OAuth passes but role assignment fails | Move Odyssey Bot above the verified/community role |
+| Bot role below verified role | OAuth passes but role assignment fails | Move CorePanel above the verified/community role |
 | Members can still see normal channels | Gate permissions have not been applied | Save, run the dry preview, then apply setup |
 
 ---
@@ -231,8 +231,8 @@ The verification flow is intentionally narrow:
 
 1. The member opens the public verification link.
 2. Discord OAuth confirms their Discord user ID and basic membership information.
-3. Odyssey Bot checks whether the user is in the selected server.
-4. If configured, Odyssey Bot can run an optional VPN/proxy provider check.
+3. CorePanel checks whether the user is in the selected server.
+4. If configured, CorePanel can run an optional VPN/proxy provider check.
 5. The bot records only the minimum verification result needed for dashboard history and support.
 
-Odyssey Bot does not secretly fingerprint browsers, does not claim to detect alts, and should not store raw IP data longer than needed for the verification decision.
+CorePanel does not secretly fingerprint browsers, does not claim to detect alts, and should not store raw IP data longer than needed for the verification decision.

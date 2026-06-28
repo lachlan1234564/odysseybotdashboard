@@ -1,16 +1,20 @@
 import {
   ChatInputCommandInteraction,
+  Client,
   EmbedBuilder,
+  GuildMember,
   PermissionFlagsBits,
   REST
 } from "discord.js";
 import {
+  createVerificationRecord,
   getGuildSettings,
+  getRuntimeAppConfig,
   getVerificationSettings
 } from "../database/index.js";
-import { loadDiscordConfig } from "../shared/config.js";
 import { safeErrorSummary } from "../shared/logging.js";
-import { runVerificationSetup } from "../shared/verification-gate.js";
+import { shouldAutoKickUnverified } from "../shared/verification-plan.js";
+import { runVerificationSetup, sendVerificationEventLog } from "../shared/verification-gate.js";
 import { asColor } from "./utils.js";
 import {
   deferCommandReply,
@@ -18,13 +22,97 @@ import {
   replyToCommand
 } from "./interactions.js";
 
-const config = loadDiscordConfig();
-
 function hasSetupPermission(interaction: ChatInputCommandInteraction): boolean {
   return Boolean(
     interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
     || interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)
   );
+}
+
+function memberHasTrustedAccess(member: GuildMember): boolean {
+  return member.permissions.has(PermissionFlagsBits.Administrator)
+    || member.permissions.has(PermissionFlagsBits.ManageGuild);
+}
+
+export async function processVerificationAutoKicks(client: Client): Promise<void> {
+  for (const guild of client.guilds.cache.values()) {
+    const [settings, guildSettings] = await Promise.all([
+      getVerificationSettings(guild.id),
+      getGuildSettings(guild.id)
+    ]);
+    if (!settings.enabled || !settings.autoKickUnverified || !settings.verifiedRoleId) continue;
+
+    const botMember = await guild.members.fetchMe().catch(() => null);
+    if (!botMember?.permissions.has(PermissionFlagsBits.KickMembers)) {
+      await sendVerificationEventLog(
+        client.rest as unknown as REST,
+        settings,
+        "Verification auto-kick skipped",
+        "Auto-kick is enabled, but CorePanel is missing Kick Members."
+      );
+      continue;
+    }
+
+    const members = await guild.members.fetch().catch((error) => {
+      console.warn(`[verification] Could not fetch members for auto-kick in guild ${guild.id}: ${safeErrorSummary(error)}`);
+      return null;
+    });
+    if (!members) continue;
+
+    const trustedRoleIds = [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds];
+    for (const member of members.values()) {
+      const decision = shouldAutoKickUnverified({
+        enabled: settings.enabled,
+        autoKickUnverified: settings.autoKickUnverified,
+        autoKickAfterHours: settings.autoKickAfterHours,
+        verifiedRoleId: settings.verifiedRoleId,
+        joinedAt: member.joinedAt?.toISOString() ?? null,
+        memberRoleIds: member.roles.cache.map((role) => role.id),
+        trustedRoleIds,
+        isBot: member.user.bot,
+        hasAdminPermission: memberHasTrustedAccess(member)
+      });
+      if (!decision.kick) continue;
+
+      const expiresAt = new Date(Date.now() + settings.recordRetentionHours * 3_600_000).toISOString();
+      await createVerificationRecord({
+        guildId: guild.id,
+        userId: member.id,
+        status: "denied",
+        reasonCodes: ["auto_kick_unverified"],
+        riskScore: 100,
+        accountCreatedAt: member.user.createdAt.toISOString(),
+        serverJoinedAt: member.joinedAt?.toISOString() ?? null,
+        vpnDetected: null,
+        expiresAt,
+        reviewedBy: "auto-kick",
+        reviewedAt: new Date().toISOString(),
+        staffNote: `Auto-kicked after ${Math.round(decision.pendingHours)} hours without verification.`
+      });
+      try {
+        await member.kick(`Verification auto-kick: not verified within ${settings.autoKickAfterHours} hour(s).`);
+        await sendVerificationEventLog(
+          client.rest as unknown as REST,
+          settings,
+          "Verification auto-kick triggered",
+          `<@${member.id}> was removed after ${Math.round(decision.pendingHours)} hours without verification.`,
+          [
+            { name: "Configured window", value: `${settings.autoKickAfterHours} hour(s)`, inline: true },
+            { name: "User ID", value: member.id, inline: true }
+          ]
+        );
+      } catch (error) {
+        console.warn(`[verification] Auto-kick failed in guild ${guild.id} for user ${member.id}: ${safeErrorSummary(error)}`);
+        await sendVerificationEventLog(
+          client.rest as unknown as REST,
+          settings,
+          "Verification auto-kick failed",
+          `<@${member.id}> should have been removed, but Discord rejected the kick.`,
+          [{ name: "Action required", value: "Check Kick Members and bot role hierarchy." }]
+        );
+      }
+    }
+  }
 }
 
 export async function handleVerificationCommand(
@@ -87,10 +175,11 @@ export async function handleVerificationCommand(
     return;
   }
 
-  if (!config.VERIFY_PUBLIC_BASE_URL) {
+  const runtimeConfig = await getRuntimeAppConfig();
+  if (!runtimeConfig.verifyPublicBaseUrl) {
     await replyToCommand(
       interaction,
-      "Verification setup needs VERIFY_PUBLIC_BASE_URL. Configure the public Cloudflare verification hostname first."
+      "Verification setup needs a public verification URL. Configure it in the dashboard setup flow or Railway variables first."
     );
     return;
   }
@@ -103,7 +192,7 @@ export async function handleVerificationCommand(
       botUserId: interaction.client.user.id,
       settings,
       trustedRoleIds: [...guildSettings.adminRoleIds, ...guildSettings.staffRoleIds],
-      publicBaseUrl: config.VERIFY_PUBLIC_BASE_URL,
+      publicBaseUrl: runtimeConfig.verifyPublicBaseUrl,
       updatedBy: interaction.user.id
     });
     const embed = new EmbedBuilder()
